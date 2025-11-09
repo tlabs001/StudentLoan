@@ -335,6 +335,10 @@ class FloorState {
     this.ceo = config.ceo;
     this.items = config.items;
     this.servers = config.servers;
+    this.spotlights = config.spotlights || [];
+    this.alarmSwitch = config.alarmSwitch || null;
+    this.alarmActive = config.alarmActive;
+    this.spotlightAlertCooldown = 0;
     this.vents = config.vents;
     this.exit = config.exit;
     this.smoke = false;
@@ -355,6 +359,7 @@ class FloorState {
     if (this.ceo) {
       this.updateCeo(delta);
     }
+    this.animateSpotlights(delta);
   }
 
   scheduleDrop() {
@@ -362,15 +367,46 @@ class FloorState {
   }
 
   updateGuards(delta) {
+    const chasingEnabled = this.type === "server";
     for (const guard of this.guards) {
-      guard.position.x += guard.direction * guard.speed * delta;
-      if (guard.position.x < guard.patrol.min) {
-        guard.position.x = guard.patrol.min;
-        guard.direction = 1;
-      }
-      if (guard.position.x > guard.patrol.max) {
-        guard.position.x = guard.patrol.max;
-        guard.direction = -1;
+      const player = this.game.player;
+      if (guard.alive) {
+        guard.chaseTimer = Math.max(0, (guard.chaseTimer || 0) - delta);
+        if (player.hidden) {
+          guard.chasing = false;
+          guard.chaseTimer = 0;
+        }
+        if (guard.aggressive && !player.hidden) {
+          guard.chasing = true;
+          guard.chaseTimer = Math.max(guard.chaseTimer, 1.5);
+        }
+
+        if (guard.chasing && chasingEnabled) {
+          const targetX = player.hidden ? (guard.lastKnownPlayerX ?? guard.position.x) : player.position.x;
+          if (!player.hidden) {
+            guard.lastKnownPlayerX = targetX;
+          }
+          const direction = targetX >= guard.position.x ? 1 : -1;
+          guard.direction = direction;
+          const speedMultiplier = 1.35;
+          guard.position.x += guard.direction * guard.speed * speedMultiplier * delta;
+          guard.position.x = Math.max(0, Math.min(CANVAS_WIDTH - guard.width, guard.position.x));
+          if (guard.chaseTimer <= 0 && Math.abs((guard.lastKnownPlayerX ?? targetX) - guard.position.x) < 12) {
+            guard.chasing = false;
+          }
+        } else {
+          guard.chasing = chasingEnabled ? guard.chasing : false;
+          guard.chaseTimer = chasingEnabled ? guard.chaseTimer : 0;
+          guard.position.x += guard.direction * guard.speed * delta;
+          if (guard.position.x < guard.patrol.min) {
+            guard.position.x = guard.patrol.min;
+            guard.direction = 1;
+          }
+          if (guard.position.x > guard.patrol.max) {
+            guard.position.x = guard.patrol.max;
+            guard.direction = -1;
+          }
+        }
       }
 
       guard.flashlight = {
@@ -380,11 +416,16 @@ class FloorState {
         direction: guard.direction
       };
 
-      const player = this.game.player;
       const sameLayer = Math.abs((guard.position.y + guard.height) - (player.position.y + player.height)) < 40;
-      if (!this.game.completedServers() && sameLayer && !player.hidden) {
+      if (guard.alive && !this.game.completedServers() && sameLayer && !player.hidden) {
         const inCone = this.isPlayerInFlashlight(guard, player);
         if (inCone) {
+          if (chasingEnabled) {
+            guard.chasing = true;
+            guard.chaseTimer = Math.max(guard.chaseTimer || 0, 2.5);
+            guard.lastKnownPlayerX = player.position.x + player.width / 2;
+            guard.direction = player.position.x > guard.position.x ? 1 : -1;
+          }
           const now = this.game.now;
           if (guard.weapon !== "ninja") {
             if (!guard.lastAttackTime || now - guard.lastAttackTime >= guard.attackInterval) {
@@ -402,12 +443,16 @@ class FloorState {
       guard.projectiles.forEach((projectile) => projectile.update(delta));
       guard.projectiles = guard.projectiles.filter((projectile) => projectile.distance < projectile.range);
 
-      if (guard.alive && this.game.player.intersects({
+      if (guard.alive && !player.hidden && this.game.player.intersects({
         x: guard.position.x,
         y: guard.position.y,
         width: guard.width,
         height: guard.height
       })) {
+        const playerBottom = player.position.y + player.height;
+        if (this.game.player.velocity.y > 120 && playerBottom <= guard.position.y + guard.height * 0.6) {
+          continue;
+        }
         const now = this.game.now;
         if (!guard.lastTackle || now - guard.lastTackle >= guard.attackInterval) {
           guard.lastTackle = now;
@@ -503,6 +548,79 @@ class FloorState {
         }
         break;
     }
+  }
+
+  animateSpotlights(delta) {
+    if (!this.spotlights.length) {
+      this.spotlightAlertCooldown = Math.max(0, this.spotlightAlertCooldown - delta);
+      return;
+    }
+    for (const light of this.spotlights) {
+      if (!light.active) continue;
+      if (!this.alarmActive) continue;
+      if (!light.direction) light.direction = 1;
+      light.angle += light.sweepSpeed * light.direction * delta;
+      if (light.angle > light.maxAngle) {
+        light.angle = light.maxAngle;
+        light.direction *= -1;
+      }
+      if (light.angle < light.minAngle) {
+        light.angle = light.minAngle;
+        light.direction *= -1;
+      }
+    }
+    this.spotlightAlertCooldown = Math.max(0, this.spotlightAlertCooldown - delta);
+  }
+
+  evaluateSpotlights(player) {
+    if (!this.alarmActive || !this.spotlights.length) return;
+    if (player.hidden) return;
+    if (this.spotlightAlertCooldown > 0) return;
+    const center = {
+      x: player.position.x + player.width / 2,
+      y: player.position.y + player.height / 2
+    };
+    const triggered = this.spotlights.some((light) => this.isPlayerInSpotlight(light, center));
+    if (triggered) {
+      this.spotlightAlertCooldown = 1.5;
+      this.alertAllGuards(center.x);
+      this.game.log("Sweeping spotlights expose your position!");
+    }
+  }
+
+  isPlayerInSpotlight(light, point) {
+    if (!this.alarmActive || !light.active) return false;
+    const dx = point.x - light.origin.x;
+    const dy = point.y - light.origin.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance > light.radius) return false;
+    const angleToPlayer = Math.atan2(dy, dx);
+    const diff = Math.atan2(Math.sin(angleToPlayer - light.angle), Math.cos(angleToPlayer - light.angle));
+    return Math.abs(diff) <= light.beamWidth / 2;
+  }
+
+  alertAllGuards(playerX) {
+    if (this.type !== "server") return;
+    for (const guard of this.guards) {
+      if (!guard.alive) continue;
+      guard.chasing = true;
+      guard.chaseTimer = Math.max(guard.chaseTimer || 0, 3.2);
+      guard.lastKnownPlayerX = playerX;
+      guard.direction = playerX >= guard.position.x ? 1 : -1;
+    }
+  }
+
+  disableAlarm() {
+    if (!this.alarmActive) return;
+    this.alarmActive = false;
+    if (this.alarmSwitch) {
+      this.alarmSwitch.disabled = true;
+      this.alarmSwitch.progress = 1;
+    }
+    this.spotlights.forEach((light) => {
+      light.active = false;
+    });
+    this.game.log("Alarm switch flipped. Spotlights offline.");
   }
 
   fireGuardProjectile(guard) {
@@ -856,6 +974,53 @@ class Game {
     }
   }
 
+  handleAlarmSwitch(delta) {
+    const alarmSwitch = this.floorState.alarmSwitch;
+    if (!alarmSwitch || alarmSwitch.disabled || !this.floorState.alarmActive) {
+      if (alarmSwitch && alarmSwitch.progress) {
+        alarmSwitch.progress = Math.max(0, alarmSwitch.progress - delta * 0.5);
+      }
+      return;
+    }
+    const interacting = this.player.intersects({
+      x: alarmSwitch.x,
+      y: alarmSwitch.y,
+      width: alarmSwitch.width,
+      height: alarmSwitch.height
+    }) && (this.input.attack || this.input.crouch);
+    if (interacting) {
+      alarmSwitch.progress = (alarmSwitch.progress || 0) + delta;
+      if (alarmSwitch.progress >= 0.75) {
+        this.floorState.disableAlarm();
+      }
+    } else {
+      alarmSwitch.progress = Math.max(0, (alarmSwitch.progress || 0) - delta * 0.6);
+    }
+  }
+
+  handlePlayerStomps() {
+    if (this.player.velocity.y <= 180) return;
+    const playerBottom = this.player.position.y + this.player.height;
+    for (const guard of this.floorState.guards) {
+      if (!guard.alive) continue;
+      if (!this.player.intersects({
+        x: guard.position.x,
+        y: guard.position.y,
+        width: guard.width,
+        height: guard.height
+      })) {
+        continue;
+      }
+      const guardTop = guard.position.y;
+      if (playerBottom >= guardTop && playerBottom <= guardTop + guard.height * 0.5) {
+        this.defeatEntity(guard);
+        this.player.velocity.y = -this.player.jumpStrength * 0.55;
+        this.player.grounded = false;
+        this.player.jumpCount = 1;
+      }
+    }
+  }
+
   handleItems(delta) {
     for (const item of this.floorState.items) {
       if (!item.available) {
@@ -1024,9 +1189,11 @@ class Game {
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
     this.drawDecor();
+    this.drawSpotlights();
     this.drawServers();
     this.drawItems();
     this.drawVents();
+    this.drawAlarmSwitch();
     this.drawGuards();
     this.drawWorkers();
     this.drawManagers();
@@ -1052,6 +1219,28 @@ class Game {
       ctx.fillStyle = decor.color;
       ctx.fillRect(decor.x, decor.y, decor.width, decor.height);
     }
+  }
+
+  drawSpotlights() {
+    const ctx = this.ctx;
+    const { spotlights, alarmActive } = this.floorState;
+    if (!spotlights || !spotlights.length) return;
+    ctx.save();
+    for (const light of spotlights) {
+      const active = alarmActive && light.active;
+      const fill = active ? "rgba(255, 255, 190, 0.16)" : "rgba(120, 130, 150, 0.08)";
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.moveTo(light.origin.x, light.origin.y);
+      ctx.arc(light.origin.x, light.origin.y, light.radius, light.angle - light.beamWidth / 2, light.angle + light.beamWidth / 2, false);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = active ? "rgba(255, 230, 120, 0.4)" : "rgba(120, 140, 160, 0.25)";
+      ctx.beginPath();
+      ctx.arc(light.origin.x, light.origin.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   drawServers() {
@@ -1097,14 +1286,39 @@ class Game {
     }
   }
 
+  drawAlarmSwitch() {
+    const alarmSwitch = this.floorState.alarmSwitch;
+    if (!alarmSwitch) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = alarmSwitch.disabled ? "#3a6b4a" : "#ff9f45";
+    ctx.fillRect(alarmSwitch.x, alarmSwitch.y, alarmSwitch.width, alarmSwitch.height);
+    if (!alarmSwitch.disabled) {
+      const progress = Math.min(1, (alarmSwitch.progress || 0) / 0.75);
+      ctx.fillStyle = "#ff5533";
+      ctx.fillRect(
+        alarmSwitch.x + 6,
+        alarmSwitch.y + alarmSwitch.height * (1 - progress),
+        alarmSwitch.width - 12,
+        alarmSwitch.height * progress
+      );
+    }
+    ctx.restore();
+  }
+
   drawGuards() {
     const ctx = this.ctx;
     ctx.fillStyle = "#ff6767";
     for (const guard of this.floorState.guards) {
       if (!guard.alive) continue;
       ctx.fillRect(guard.position.x, guard.position.y, guard.width, guard.height);
+      if (guard.chasing) {
+        ctx.strokeStyle = "rgba(255, 120, 120, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(guard.position.x - 2, guard.position.y - 2, guard.width + 4, guard.height + 4);
+        ctx.lineWidth = 1;
+      }
       ctx.fillStyle = "rgba(255, 255, 200, 0.15)";
-      const beamWidth = 120;
       ctx.beginPath();
       const startX = guard.position.x + guard.width / 2;
       const startY = guard.position.y + guard.height / 2;
@@ -1259,6 +1473,9 @@ class Game {
       objectives.push("Collect intel files for bonuses.");
       objectives.push("Plant explosives on all servers (3-5).");
       objectives.push("Reach the elevator once smoke fills the floor.");
+      if (this.floorState.spotlights.length) {
+        objectives.push("Disable the alarm switch to power down sweeping spotlights.");
+      }
     } else if (this.floorState.type === "boss" && this.floorState.ceo) {
       objectives.push("Survive the dual board ambush.");
       objectives.push("Bait the CEO's rampage and strike his back three times.");
@@ -1277,7 +1494,7 @@ class Game {
 
   generateFloor(floorNumber) {
     const type = this.determineFloorType(floorNumber);
-    const basePlatforms = this.generatePlatforms();
+    const basePlatforms = this.generatePlatforms(floorNumber, type);
     const desks = this.generateDesks(basePlatforms);
     const decor = this.generateDecor(basePlatforms);
     const vents = this.generateVents(basePlatforms);
@@ -1296,6 +1513,9 @@ class Game {
       ceo: null,
       items: [],
       servers: [],
+      spotlights: [],
+      alarmSwitch: null,
+      alarmActive: false,
       vents,
       exit,
       spawnArea
@@ -1307,6 +1527,9 @@ class Game {
       config.officeWorkers = this.generateWorkers(basePlatforms);
       config.managers = this.generateManagers(basePlatforms, floorNumber);
       config.items = this.generateItems(basePlatforms);
+      config.spotlights = this.generateSpotlights(basePlatforms, floorNumber);
+      config.alarmSwitch = this.generateAlarmSwitch(basePlatforms, config.spotlights, floorNumber);
+      config.alarmActive = config.spotlights.length > 0;
     } else if (type === "boss" && floorNumber === FLOOR_COUNT) {
       config.boardMembers = this.generateBoardMembers(floorNumber, 2);
       config.ceo = this.generateCeo();
@@ -1333,7 +1556,96 @@ class Game {
     return "server";
   }
 
-  generatePlatforms() {
+  seededRandom(seed, offset = 0) {
+    const value = Math.sin(seed * 9301 + offset * 49297) * 43758.5453;
+    return value - Math.floor(value);
+  }
+
+  generatePlatforms(floorNumber, type) {
+    if (type === "server") {
+      return this.generateServerPlatforms(floorNumber);
+    }
+    return this.generateBossPlatforms();
+  }
+
+  generateServerPlatforms(floorNumber) {
+    const layouts = [
+      () => {
+        const levelGap = 90;
+        const baseY = CANVAS_HEIGHT - 140;
+        const platforms = [];
+        for (let i = 0; i < 4; i += 1) {
+          const y = baseY - i * levelGap;
+          const width = 180 - i * 12;
+          const x = i % 2 === 0 ? 60 : CANVAS_WIDTH - width - 120;
+          platforms.push({ x, y, width, height: 12, color: "rgba(32, 48, 86, 0.9)", solid: false });
+        }
+        platforms.push({ x: CANVAS_WIDTH / 2 - 70, y: baseY - levelGap / 2, width: 140, height: 12, color: "rgba(36, 58, 94, 0.9)", solid: false });
+        return platforms;
+      },
+      () => {
+        const platforms = [];
+        const midY = CANVAS_HEIGHT - 160;
+        platforms.push({ x: CANVAS_WIDTH / 2 - 120, y: midY, width: 240, height: 12, color: "rgba(38, 60, 96, 0.9)", solid: false });
+        platforms.push({ x: 80, y: midY - 90, width: 160, height: 12, color: "rgba(34, 52, 90, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH - 240, y: midY - 90, width: 160, height: 12, color: "rgba(34, 52, 90, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH / 2 - 60, y: midY - 180, width: 120, height: 12, color: "rgba(44, 68, 104, 0.9)", solid: false });
+        return platforms;
+      },
+      () => {
+        const platforms = [];
+        const bandHeights = [CANVAS_HEIGHT - 130, CANVAS_HEIGHT - 210, CANVAS_HEIGHT - 290];
+        bandHeights.forEach((y, index) => {
+          const segmentCount = index === 0 ? 3 : 4;
+          const gap = CANVAS_WIDTH / segmentCount;
+          for (let i = 0; i < segmentCount; i += 1) {
+            const width = gap * 0.55;
+            const x = i * gap + ((i + index) % 2 === 0 ? gap * 0.15 : gap * 0.25);
+            platforms.push({ x, y: y - index * 6, width, height: 12, color: "rgba(30, 46, 82, 0.9)", solid: false });
+          }
+        });
+        return platforms;
+      },
+      () => {
+        const platforms = [];
+        const ladderX = CANVAS_WIDTH / 2 - 50;
+        for (let i = 0; i < 5; i += 1) {
+          const y = CANVAS_HEIGHT - 120 - i * 70;
+          platforms.push({ x: ladderX - 80 + (i % 2 === 0 ? -40 : 40), y, width: 160, height: 12, color: "rgba(40, 62, 104, 0.9)", solid: false });
+        }
+        platforms.push({ x: ladderX - 30, y: CANVAS_HEIGHT - 470, width: 60, height: 12, color: "rgba(48, 74, 118, 0.9)", solid: false });
+        return platforms;
+      },
+      () => {
+        const platforms = [];
+        const ringY = CANVAS_HEIGHT - 200;
+        platforms.push({ x: 60, y: ringY, width: 180, height: 12, color: "rgba(36, 54, 92, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH - 240, y: ringY, width: 180, height: 12, color: "rgba(36, 54, 92, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH / 2 - 70, y: ringY - 90, width: 140, height: 12, color: "rgba(46, 70, 112, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH / 2 - 180, y: ringY + 60, width: 120, height: 12, color: "rgba(44, 68, 110, 0.9)", solid: false });
+        platforms.push({ x: CANVAS_WIDTH / 2 + 60, y: ringY + 60, width: 120, height: 12, color: "rgba(44, 68, 110, 0.9)", solid: false });
+        return platforms;
+      }
+    ];
+
+    const layoutIndex = (floorNumber - 1) % layouts.length;
+    const platforms = layouts[layoutIndex]();
+    const randomPods = 2 + Math.floor(this.seededRandom(floorNumber, 1) * 3);
+    for (let i = 0; i < randomPods; i += 1) {
+      const rand = this.seededRandom(floorNumber, 20 + i * 7);
+      const x = 40 + rand * (CANVAS_WIDTH - 160);
+      const y = CANVAS_HEIGHT - 140 - this.seededRandom(floorNumber, 40 + i * 11) * 240;
+      let width = 80 + this.seededRandom(floorNumber, 60 + i * 13) * 90;
+      width = Math.min(width, CANVAS_WIDTH - 40 - x);
+      width = Math.max(60, width);
+      platforms.push({ x, y, width, height: 12, color: "rgba(28, 44, 78, 0.85)", solid: false });
+    }
+
+    platforms.push({ x: 0, y: CANVAS_HEIGHT - 20, width: CANVAS_WIDTH, height: 20, color: "#121a2d", solid: true });
+    return platforms;
+  }
+
+  generateBossPlatforms() {
     const layers = 3 + Math.floor(Math.random() * 2);
     const platforms = [];
     const layerHeight = CANVAS_HEIGHT / (layers + 1);
@@ -1443,6 +1755,56 @@ class Game {
     return servers;
   }
 
+  generateSpotlights(platforms, floorNumber) {
+    const spotlights = [];
+    const candidates = platforms.filter((platform) => !platform.solid && platform.y < CANVAS_HEIGHT - 60);
+    if (!candidates.length) return spotlights;
+    const count = Math.min(3, 2 + Math.floor(floorNumber / 10));
+    for (let i = 0; i < count; i += 1) {
+      const platform = candidates[i % candidates.length];
+      const rand = this.seededRandom(floorNumber, 320 + i * 37);
+      const horizontalSpan = Math.max(60, platform.width - 20);
+      const baseX = platform.x + platform.width / 2 - horizontalSpan / 2;
+      const originX = Math.max(40, Math.min(CANVAS_WIDTH - 40, baseX + rand * horizontalSpan));
+      const originY = Math.max(48, platform.y - 220 - this.seededRandom(floorNumber, 360 + i * 17) * 40);
+      const baseAngle = Math.PI / 2 + (this.seededRandom(floorNumber, 400 + i * 19) - 0.5) * 0.8;
+      const sweepRange = 0.35 + this.seededRandom(floorNumber, 440 + i * 23) * 0.45;
+      const beamWidth = Math.PI / 6 + this.seededRandom(floorNumber, 480 + i * 29) * 0.25;
+      const radius = 420;
+      const minAngle = baseAngle - sweepRange;
+      const maxAngle = baseAngle + sweepRange;
+      spotlights.push({
+        origin: { x: originX, y: originY },
+        angle: baseAngle,
+        minAngle,
+        maxAngle,
+        beamWidth,
+        radius,
+        sweepSpeed: 0.45 + this.seededRandom(floorNumber, 520 + i * 31) * 0.85,
+        direction: i % 2 === 0 ? 1 : -1,
+        active: true
+      });
+    }
+    return spotlights;
+  }
+
+  generateAlarmSwitch(platforms, spotlights, floorNumber) {
+    if (!spotlights || !spotlights.length) return null;
+    const candidates = platforms.filter((platform) => !platform.solid && platform.width >= 80);
+    if (!candidates.length) return null;
+    const index = Math.floor(this.seededRandom(floorNumber, 560) * candidates.length);
+    const platform = candidates[index];
+    const x = platform.x + platform.width - 48;
+    return {
+      x,
+      y: platform.y - 42,
+      width: 32,
+      height: 42,
+      progress: 0,
+      disabled: false
+    };
+  }
+
   generateItems(platforms, bossFloor = false) {
     const items = [];
     if (!platforms.length) return items;
@@ -1535,21 +1897,27 @@ class Game {
     }
     guard.flashlight = { x: guard.position.x, y: guard.position.y, length: FLASHLIGHT_RANGE, direction: guard.direction };
     guard.projectiles = [];
+    guard.chasing = false;
+    guard.chaseTimer = 0;
+    guard.lastKnownPlayerX = guard.position.x;
     return guard;
   }
 
   generateWorkers(platforms) {
     const workers = [];
     const suitable = platforms.filter((p) => p.y < CANVAS_HEIGHT - 60);
-    for (let i = 0; i < 4; i += 1) {
+    if (!suitable.length) return workers;
+    const count = Math.min(6, Math.max(2, suitable.length * 2));
+    for (let i = 0; i < count; i += 1) {
       const platform = suitable[i % suitable.length];
+      const startX = platform.x + Math.random() * Math.max(40, platform.width - 24);
       workers.push({
         type: "worker",
-        position: { x: platform.x + Math.random() * platform.width, y: platform.y - 44 },
+        position: { x: startX, y: platform.y - 44 },
         width: 24,
         height: 44,
         direction: Math.random() > 0.5 ? 1 : -1,
-        speed: 25,
+        speed: 28 + (i % 3) * 4,
         patrol: { min: platform.x, max: platform.x + platform.width - 24 },
         alive: true
       });
@@ -1641,6 +2009,9 @@ class Game {
     this.floorState.update(delta);
     this.manageVents();
     this.player.update(delta);
+    this.floorState.evaluateSpotlights(this.player);
+    this.handleAlarmSwitch(delta);
+    this.handlePlayerStomps();
 
     this.handleProjectiles(delta);
     this.handleItems(delta);
