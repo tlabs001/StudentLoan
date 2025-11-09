@@ -6,7 +6,12 @@ const SERVER_MAX = 5;
 const FLASHLIGHT_RANGE = 180;
 const PLAYER_BASE_HEALTH = 1200;
 const DAMAGE_AMOUNT = 10;
-const DAMAGE_COOLDOWN_MS = 43000;
+const GUARD_WEAPON_PROFILES = {
+  pistol: { shotInterval: 700, attackInterval: 900, speedBonus: 0 },
+  auto: { shotInterval: 220, attackInterval: 600, speedBonus: 10 },
+  launcher: { shotInterval: 1600, attackInterval: 1500, speedBonus: -5 },
+  ninja: { shotInterval: 0, attackInterval: 800, speedBonus: 25 }
+};
 const COLORS_BY_FLOOR = [
   "#162035",
   "#1f1a33",
@@ -157,7 +162,6 @@ class Player {
     };
     this.projectileSpeedModifier = 1;
     this.canHeal = true;
-    this.lastDamageTime = 0;
     this.featherTimer = 0;
     this.inVent = false;
     this.currentVent = null;
@@ -191,11 +195,6 @@ class Player {
   }
 
   damage(amount, source) {
-    const now = this.game.now;
-    if (now - this.lastDamageTime < DAMAGE_COOLDOWN_MS) {
-      return;
-    }
-    this.lastDamageTime = now;
     this.health = Math.max(0, this.health - amount);
     if (source) {
       this.game.log(`Lost $${amount} to ${source}.`);
@@ -386,11 +385,15 @@ class FloorState {
       if (!this.game.completedServers() && sameLayer && !player.hidden) {
         const inCone = this.isPlayerInFlashlight(guard, player);
         if (inCone) {
-          this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "guard fire");
+          const now = this.game.now;
           if (guard.weapon !== "ninja") {
+            if (!guard.lastAttackTime || now - guard.lastAttackTime >= guard.attackInterval) {
+              guard.lastAttackTime = now;
+              this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "guard fire");
+            }
             this.fireGuardProjectile(guard);
           } else {
-            this.performNinjaStrike(guard);
+            this.performNinjaStrike(guard, now);
           }
         }
       }
@@ -405,7 +408,11 @@ class FloorState {
         width: guard.width,
         height: guard.height
       })) {
-        this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "guard tackle");
+        const now = this.game.now;
+        if (!guard.lastTackle || now - guard.lastTackle >= guard.attackInterval) {
+          guard.lastTackle = now;
+          this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "guard tackle");
+        }
       }
     }
   }
@@ -500,6 +507,13 @@ class FloorState {
 
   fireGuardProjectile(guard) {
     guard.projectiles = guard.projectiles || [];
+    const now = this.game.now;
+    if (guard.shotInterval > 0) {
+      if (guard.lastShot && now - guard.lastShot < guard.shotInterval) {
+        return;
+      }
+      guard.lastShot = now;
+    }
     if (guard.weapon === "launcher") {
       guard.projectiles.push(new Projectile({
         x: guard.position.x + guard.width / 2,
@@ -526,11 +540,15 @@ class FloorState {
     }
   }
 
-  performNinjaStrike(guard) {
+  performNinjaStrike(guard, now) {
     const player = this.game.player;
     const dx = player.position.x - guard.position.x;
-    if (Math.abs(dx) < 140) {
-      this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "ninja strike");
+    const dy = Math.abs((player.position.y + player.height / 2) - (guard.position.y + guard.height / 2));
+    if (Math.abs(dx) < 140 && dy < 60) {
+      if (!guard.lastStrike || now - guard.lastStrike >= guard.attackInterval) {
+        guard.lastStrike = now;
+        this.game.attemptDamagePlayer(DAMAGE_AMOUNT, "ninja strike");
+      }
     }
   }
 
@@ -561,16 +579,8 @@ class FloorState {
   spawnGuard(overrides = {}) {
     if (this.exitVisible) return;
     const base = this.game.generateGuard(this.floor, overrides, this.platforms);
-    const spawnX = this.spawnArea.x + Math.random() * this.spawnArea.width;
-    base.position.x = spawnX;
-    const distanceFromPlayer = Math.abs(base.position.x - this.game.player.position.x);
-    if (distanceFromPlayer < FLASHLIGHT_RANGE * 2) {
-      base.position.x = Math.min(CANVAS_WIDTH - 60, Math.max(60, this.game.player.position.x + FLASHLIGHT_RANGE * 2));
-    }
-    if (Math.abs(base.position.x - 80) < FLASHLIGHT_RANGE * 2) {
-      base.position.x = 80 + FLASHLIGHT_RANGE * 2;
-    }
-    base.position.x = Math.min(base.patrol.max, Math.max(base.patrol.min, base.position.x));
+    const avoidX = this.game.player ? this.game.player.position.x : null;
+    base.position.x = this.game.pickSafeGuardSpawn(this.spawnArea, this.exit, base, avoidX);
     this.guards.push(base);
   }
 }
@@ -904,10 +914,13 @@ class Game {
       this.player.score += 5;
       this.log("Collected intel file.");
     } else if (item.type === "ammo") {
-      this.log("Ammo pickup restocks your weapons.");
+      const bonus = 10 + Math.floor(Math.random() * 10);
+      this.player.score += 4;
+      this.log(`Ammo pickup restocks your weapons (+${bonus} rounds).`);
     } else if (item.type === "money") {
-      this.player.score += 20;
-      this.player.modifyBalance(15, "Found forgotten reimbursement.");
+      const payout = 15 + Math.floor(Math.random() * 20);
+      this.player.score += payout;
+      this.player.modifyBalance(20, `Found $${payout} in unclaimed reimbursements.`);
     } else if (item.type === "feather") {
       this.player.doubleFlight = true;
       this.player.maxJumps = 6;
@@ -945,6 +958,34 @@ class Game {
 
   completedServers() {
     return this.floorState.completedServers();
+  }
+
+  pickSafeGuardSpawn(spawnArea, exit, guard = null, avoidX = null) {
+    const exitCenter = exit ? exit.x + (exit.width || 0) / 2 : CANVAS_WIDTH - 80;
+    const clampWorld = (candidate) => Math.min(CANVAS_WIDTH - 60, Math.max(60, candidate));
+    const safeFromSpawn = (x) => Math.abs(x - 80) >= FLASHLIGHT_RANGE * 2;
+    const safeFromExit = (x) => Math.abs(x - exitCenter) >= FLASHLIGHT_RANGE * 1.5;
+    const safeFromPlayer = (x) => (avoidX === null || avoidX === undefined) ? true : Math.abs(x - avoidX) >= FLASHLIGHT_RANGE * 2;
+    const pickCandidate = () => {
+      const baseWidth = spawnArea.width || (CANVAS_WIDTH - 160);
+      const baseX = spawnArea.x || 0;
+      return clampWorld(baseX + Math.random() * baseWidth);
+    };
+    let candidate = pickCandidate();
+    let attempts = 0;
+    while (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate)) && attempts < 12) {
+      candidate = pickCandidate();
+      attempts += 1;
+    }
+    if (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate))) {
+      const direction = candidate < exitCenter ? 1 : -1;
+      candidate = direction > 0 ? 80 + FLASHLIGHT_RANGE * 2 : exitCenter - FLASHLIGHT_RANGE * 1.5;
+    }
+    candidate = clampWorld(candidate);
+    if (guard && guard.patrol) {
+      candidate = Math.min(guard.patrol.max, Math.max(guard.patrol.min, candidate));
+    }
+    return candidate;
   }
 
   advanceFloor() {
@@ -1293,7 +1334,7 @@ class Game {
   }
 
   generatePlatforms() {
-    const layers = 4;
+    const layers = 3 + Math.floor(Math.random() * 2);
     const platforms = [];
     const layerHeight = CANVAS_HEIGHT / (layers + 1);
     for (let i = 1; i <= layers; i += 1) {
@@ -1379,11 +1420,19 @@ class Game {
     const servers = [];
     const eligible = platforms.filter((platform) => platform.y < CANVAS_HEIGHT - 30);
     const count = SERVER_MIN + Math.floor(Math.random() * (SERVER_MAX - SERVER_MIN + 1));
+    if (!eligible.length) return servers;
+    const placed = [];
     for (let i = 0; i < count; i += 1) {
-      const platform = eligible[i % eligible.length];
-      const x = platform.x + (i / count) * (platform.width - 40);
+      const platform = eligible[Math.floor(Math.random() * eligible.length)];
+      let x = platform.x + 12 + Math.random() * Math.max(12, platform.width - 48);
+      let attempts = 0;
+      while (attempts < 6 && placed.some((prev) => Math.abs(prev - x) < 60)) {
+        x = platform.x + 12 + Math.random() * Math.max(12, platform.width - 48);
+        attempts += 1;
+      }
+      placed.push(x);
       servers.push({
-        x: x + Math.random() * 40,
+        x,
         y: platform.y - 48,
         width: 36,
         height: 48,
@@ -1396,22 +1445,35 @@ class Game {
 
   generateItems(platforms, bossFloor = false) {
     const items = [];
-    const types = ["file", "intel", "ammo", "money", "feather"];
-    const count = bossFloor ? 6 : 10;
-    for (let i = 0; i < count; i += 1) {
+    if (!platforms.length) return items;
+    const guaranteed = ["file", "intel", "ammo", "money", "feather"];
+    const pool = [...guaranteed];
+    const extraPool = ["file", "intel", "ammo", "ammo", "money", "money", "file", "intel", "feather"];
+    const count = bossFloor ? 12 : 18;
+    while (pool.length < count) {
+      pool.push(extraPool[Math.floor(Math.random() * extraPool.length)]);
+    }
+    const spawnCooldownByType = {
+      file: 14,
+      intel: 18,
+      ammo: 16,
+      money: 20,
+      feather: 26
+    };
+    pool.forEach((type) => {
       const platform = platforms[Math.floor(Math.random() * platforms.length)];
       items.push({
-        type: types[i % types.length],
-        x: platform.x + Math.random() * (platform.width - 16),
+        type,
+        x: platform.x + 8 + Math.random() * Math.max(4, platform.width - 24),
         y: platform.y - 24,
         width: 18,
         height: 18,
         available: true,
-        spawnCooldown: 12 + Math.random() * 6,
+        spawnCooldown: spawnCooldownByType[type] + Math.random() * 6,
         cooldown: 0,
         spawnRateModifier: 1
       });
-    }
+    });
     return items;
   }
 
@@ -1420,20 +1482,9 @@ class Game {
     const total = 4 + Math.floor(floorNumber / 3) + extra;
     for (let i = 0; i < total; i += 1) {
       const guard = this.generateGuard(floorNumber, {}, platforms);
-      const spawnX = Math.random() * (CANVAS_WIDTH - 160) + 80;
-      if (Math.abs(spawnX - 80) < FLASHLIGHT_RANGE * 2) {
-        guard.position.x = 80 + FLASHLIGHT_RANGE * 2 * Math.sign(spawnX - 80 || 1);
-      } else {
-        guard.position.x = spawnX;
-      }
+      const avoidX = this.player ? this.player.position.x : null;
+      guard.position.x = this.pickSafeGuardSpawn(spawnArea, exit, guard, avoidX);
       guard.position.y = guard.basePlatform ? guard.basePlatform.y - guard.height : CANVAS_HEIGHT - 140 - Math.random() * 120;
-      if (guard.position.x > exit.x - FLASHLIGHT_RANGE) {
-        guard.position.x = exit.x - FLASHLIGHT_RANGE - 40;
-      }
-      if (Math.abs(guard.position.x - 80) < FLASHLIGHT_RANGE * 2) {
-        guard.position.x = 80 + FLASHLIGHT_RANGE * 2;
-      }
-      guard.position.x = Math.min(guard.patrol.max, Math.max(guard.patrol.min, guard.position.x));
       guards.push(guard);
     }
     return guards;
@@ -1441,18 +1492,32 @@ class Game {
 
   generateGuard(floorNumber, overrides = {}, platforms = []) {
     const level = Math.ceil(floorNumber / 4);
-    const weaponTiers = ["pistol", "auto", "launcher", "ninja"];
-    let weapon = weaponTiers[Math.min(weaponTiers.length - 1, Math.floor((floorNumber - 1) / 8))];
+    const weaponProgression = [
+      ["pistol"],
+      ["pistol", "auto"],
+      ["pistol", "auto", "ninja"],
+      ["pistol", "auto", "ninja", "launcher"]
+    ];
+    const poolIndex = Math.min(weaponProgression.length - 1, Math.floor((floorNumber - 1) / 6));
+    const pool = weaponProgression[poolIndex];
+    let weapon = pool[Math.floor(Math.random() * pool.length)];
     if (overrides.weapon) weapon = overrides.weapon;
+    const profile = GUARD_WEAPON_PROFILES[weapon] || GUARD_WEAPON_PROFILES.pistol;
     const guard = {
       type: "guard",
       width: 28,
       height: 52,
       position: { x: 0, y: CANVAS_HEIGHT - 140 },
       direction: Math.random() > 0.5 ? 1 : -1,
-      speed: 40 + level * 10,
+      speed: Math.max(30, 40 + level * 10 + (profile.speedBonus || 0)),
       patrol: { min: 40, max: CANVAS_WIDTH - 200 },
       weapon,
+      shotInterval: profile.shotInterval,
+      attackInterval: profile.attackInterval,
+      lastShot: 0,
+      lastAttackTime: 0,
+      lastStrike: 0,
+      lastTackle: 0,
       alive: true,
       aggressive: overrides.aggressive || false
     };
