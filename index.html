@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Midnight Balance</title>
+    <link rel="stylesheet" href="src/style.css" />
+  </head>
+  <body>
+    <main class="wrapper">
+      <header class="hud">
+        <section class="hud-group">
+          <div class="hud-row"><span class="label">Floor:</span><span id="floor-display">1</span></div>
+          <div class="hud-row"><span class="label">Checking:</span><span id="health-display">$1200</span></div>
+          <div class="hud-row"><span class="label">Score:</span><span id="score-display">0</span></div>
+          <div class="hud-row"><span class="label">Servers:</span><span id="server-display">0 / 0</span></div>
+          <div class="hud-row"><span class="label">Intel:</span><span id="intel-display">0</span></div>
+        </section>
+        <section class="hud-group">
+          <div class="hud-row"><span class="label">Mode:</span>
+            <label class="toggle">
+              <input type="checkbox" id="test-mode-toggle" />
+              <span class="toggle-label">Test Revives</span>
+            </label>
+          </div>
+          <div class="hud-row weapon-row">
+            <span class="label">Weapons:</span>
+            <label class="chip"><input type="radio" name="weapon" value="pistol" checked />Pistol</label>
+            <label class="chip"><input type="radio" name="weapon" value="melee" />Melee</label>
+            <label class="chip"><input type="radio" name="weapon" value="flamethrower" />Flamethrower</label>
+          </div>
+          <div class="hud-row"><span class="label">Time to Midnight:</span><span id="clock-display">--:--:--</span></div>
+        </section>
+      </header>
+      <section class="playfield">
+        <canvas id="game-canvas" width="960" height="540"></canvas>
+        <aside class="objective-panel">
+          <h2>Objectives</h2>
+          <ul id="objective-list"></ul>
+          <h2>Controls</h2>
+          <ul class="controls">
+            <li>Arrow Keys to move / jump / crouch</li>
+            <li>Down + Jump to drop to a lower platform</li>
+            <li>Space to attack</li>
+            <li>Enter vents with Up arrow</li>
+          </ul>
+        </aside>
+      </section>
+      <footer class="log" id="event-log"></footer>
+    </main>
+    <script src="src/game.js" type="module"></script>
+  </body>
+</html>
