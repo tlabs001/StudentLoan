@@ -74,27 +74,6 @@ const DEFAULT_LOOT = {
   featherOnFloor: true
 };
 
-function cloneSpawnsDefaults(){
-  return {
-    guards: { ...DEFAULT_SPAWNS.guards },
-    workers: { ...DEFAULT_SPAWNS.workers },
-    guardCap: DEFAULT_SPAWNS.guardCap,
-    spawnSpreadMin: DEFAULT_SPAWNS.spawnSpreadMin,
-    neverSpawnLeftOfPlayer: DEFAULT_SPAWNS.neverSpawnLeftOfPlayer
-  };
-}
-
-function cloneLootDefaults(){
-  return {
-    cashMult: DEFAULT_LOOT.cashMult,
-    ammoMult: DEFAULT_LOOT.ammoMult,
-    intelChance: DEFAULT_LOOT.intelChance,
-    fileChance: DEFAULT_LOOT.fileChance,
-    specialFileChance: DEFAULT_LOOT.specialFileChance,
-    featherOnFloor: DEFAULT_LOOT.featherOnFloor
-  };
-}
-
 const HAZARDS = {
   cables:   { kind:'cable',  dmg:10, arcMs:1400 },
   steam:    { kind:'steam',  dmg:0,  blindMs:2000 },
@@ -206,8 +185,8 @@ export function getFloorDef(floor, runSeed=1337) {
     ui:   hsl(hue + 180, 40, 60)
   };
 
-  const spawns = cloneSpawnsDefaults();
-  const loot   = cloneLootDefaults();
+  const spawns = structuredClone(DEFAULT_SPAWNS);
+  const loot   = structuredClone(DEFAULT_LOOT);
   const hazards = [];
   const events  = [];
 
