@@ -397,12 +397,12 @@ let camX=0, seenDoor=false;
 
 // Player
 const player = {
-  x:initialSpawnX, y: 0, w:22, h:46,
+  x:initialSpawnX, y: 0, w:2, h:46,
   vx:0, vy:0, onGround:false, facing:1, crouch:false, crouchOffset:0,
   sprint:false, climbing:false, inVent:false, hidden:false, spotted:false,
   checking:100, savings:1200,
   hasScrew:false, hasCharges:true,
-  hasFeather:false, featherEnergy:0, featherMax:100, featherRecharge:12, lastFlap:0, flapCooldown:120,
+  hasFeather:false, featherEnergy:0, featherMax:100, featherRecharge:1, lastFlap:10, flapCooldown:120,
   files:0, intel:0, specialFiles:0,
   codexUnlocked:false,
   weapon:'pistol',
