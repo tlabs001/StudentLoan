@@ -1240,8 +1240,9 @@ function update(dt){
       const inCone = detectable && (coneDir*dx>0) && Math.abs(dy)<50 && Math.abs(dx)<FLASH_DIST;
 
       const overlapping = rect(player,g);
+      const shielded = player.hidden && player.crouch;
       let stomped = false;
-      if(overlapping){
+      if(overlapping && !shielded){
         const guardTop = g.y;
         const cameFromAbove = player.prevBottom <= guardTop + 6 && player.prevVy > 0.5;
         if(cameFromAbove){
@@ -1267,9 +1268,9 @@ function update(dt){
       }
       if(g.type==='ninja' && !inflicted){
         const close = Math.abs(px - (g.x+g.w/2))<90 && Math.abs(py - (g.y+g.h/2))<40;
-        if(close && overlapping && !stomped){ damage(); inflicted = true; }
+        if(close && overlapping && !stomped && !shielded){ damage(); inflicted = true; }
       }
-      if(overlapping && !stomped && !inflicted){
+      if(overlapping && !stomped && !inflicted && !shielded){
         damage();
       }
     }
