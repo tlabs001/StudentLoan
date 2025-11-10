@@ -21,7 +21,7 @@ const GAME_PARAMS = {
   // -- Player Defaults --
   player: {
     spawnX: 120,
-    width: 2,
+    width: 20,
     height: 46,
     gravity: 0.7,
     friction: 0.86,
@@ -79,6 +79,10 @@ const RUN = GAME_PARAMS.player.runSpeed;
 const JUMP = GAME_PARAMS.player.jumpStrength;
 const SPRINT = GAME_PARAMS.player.sprintMultiplier;
 const FLASH_DIST = GAME_PARAMS.player.flashlightRange;
+const LEVEL_WIDTH = 3 * W;
+const GUARD_SAFE_DISTANCE = LEVEL_WIDTH * 0.25;
+const GUARD_SEPARATION = 160;
+const GUARD_SPAWN_MARGIN = 80;
 const PLAYER_BULLET_DAMAGE = GAME_PARAMS.player.damages.bullet;
 const PLAYER_FLAME_DAMAGE = GAME_PARAMS.player.damages.flame;
 const PLAYER_MELEE_DAMAGE = GAME_PARAMS.player.damages.melee;
@@ -300,6 +304,8 @@ const player = {
   flame:{fuel:GAME_PARAMS.player.flame.fuel, cooldown:GAME_PARAMS.player.flame.cooldownMs, last:0}, // "ammo" for flamethrower
   melee:{cooldown:GAME_PARAMS.player.meleeCooldownMs, last:0},
   hurtUntil:0,
+  prevBottom: GAME_PARAMS.player.height,
+  prevVy: 0
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -505,6 +511,8 @@ function resetPlayerState(){
   player.melee.last=0;
   player.hurtUntil=0;
   player.score=0;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
   updateSpecialFileUI();
 }
 
@@ -530,6 +538,8 @@ function startNewRun(name){
   toggleCodex(false);
   makeLevel(currentFloor);
   player.y = floorSlab.y - player.h;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
   notify("Evening infiltration. New intel & loot on each floor.");
   centerNote("Infiltration begins.", 1600);
   floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
@@ -573,6 +583,8 @@ function handleDeath(){
       player.checking=GAME_PARAMS.player.checkingStart;
       player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
       player.y = floorSlab.y - player.h;
+      player.prevBottom = player.y + player.h;
+      player.prevVy = 0;
       notify("Revived on same floor.");
     }, 700);
   } else {
@@ -649,7 +661,22 @@ function makeGuard(x,y,i){
     direction
   });
   if(type==='ninja'){ guard.shoot = false; }
+  guard.spawnOrigin = x;
   return guard;
+}
+
+function pickGuardSpawn(existing = []){
+  const margin = GUARD_SPAWN_MARGIN;
+  const avoidDoorRadius = 260;
+  for(let attempt=0; attempt<80; attempt++){
+    const spawnX = margin + Math.random() * (LEVEL_WIDTH - 2 * margin);
+    if(Math.abs(spawnX - player.x) < GUARD_SAFE_DISTANCE) continue;
+    if(Math.abs(spawnX - initialSpawnX) < GUARD_SAFE_DISTANCE) continue;
+    if(door && Math.abs((spawnX + 10) - (door.x + door.w/2)) < avoidDoorRadius) continue;
+    if(existing.some(pos => Math.abs(pos - spawnX) < GUARD_SEPARATION)) continue;
+    return spawnX;
+  }
+  return player.x < LEVEL_WIDTH / 2 ? LEVEL_WIDTH - margin : margin;
 }
 
 function makeLevel(i){
@@ -760,11 +787,10 @@ function makeLevel(i){
 
   // Initial guards
   const gcount = 7 + Math.min(6, Math.floor(i/3));
+  const initialSpawns = [];
   for(let g=0; g<gcount; g++){
-    let gx = Math.random()<0.5? 80 : (3*W-200);
-    if(Math.abs(gx - player.x) < 2*FLASH_DIST) gx = (gx< W ? 3*W-200 : 80);
-    if(Math.abs(gx - initialSpawnX) < 2*FLASH_DIST) gx = (gx< W ? 3*W-200 : 80);
-    if(Math.abs(gx - door.x) < 320) gx = (gx< W ? 3*W-200 : 80);
+    const gx = pickGuardSpawn([...initialSpawns]);
+    initialSpawns.push(gx);
     guards.push(makeGuard(gx, yBase-42, i));
   }
 
@@ -834,6 +860,8 @@ function makeSubLevel(fromVent){
   sub.guards.push({x: 520, y:H-162, w:20, h:42, vx:-0.6, hp:30, maxHp:30, lastShot:0, type:'ninja', hitFlashUntil:0});
 
   player.x = 120; player.y = sub.floor.y - player.h; player.vx=player.vy=0;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
   centerNote(`Vent ${fromVent.id}: server vault`, 900);
   notify(twoBosses ? "Two bosses detected in vents." : "Boss detected in vents.");
 }
@@ -904,6 +932,8 @@ function interact(){
             player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
             makeLevel(currentFloor);
             player.y = floorSlab.y - player.h;
+            player.prevBottom = player.y + player.h;
+            player.prevVy = 0;
           }, 700);
         }
       }
@@ -918,6 +948,8 @@ function interact(){
         const targetY = (entryVentWorld? entryVentWorld.y : floorSlab.y-160);
         player.x = targetX; player.y = targetY - player.h;
         camX = clamp(player.x - W*0.45, 0, 3*W - W);
+        player.prevBottom = player.y + player.h;
+        player.prevVy = 0;
         sub=null; entryVentWorld=null;
         centerNote("Exited vents", 700); chime(); notify("Returned from vents.");
       }
@@ -1060,15 +1092,20 @@ function update(dt){
     }
   }
 
+  const previousBottom = player.y + player.h;
+
   // Movement
   player.vx += ax*0.8;
   player.vx *= player.onGround?FRICTION:0.99;
   player.vx = clamp(player.vx, -maxRun, maxRun);
   if(!player.climbing) player.vy += GRAV*(player.hasFeather?0.92:1);
+  const vyBeforeMove = player.vy;
 
   // Apply
   player.x += player.vx; player.y += player.vy;
   player.onGround=false;
+  player.prevBottom = previousBottom;
+  player.prevVy = vyBeforeMove;
 
   if(!inSub){
     // Bounds
@@ -1127,10 +1164,8 @@ function update(dt){
     const blockReinforce = (destroyedOnFloor===totalServersOnFloor) && seenDoor;
     if(alarm && guards.length<16 && !blockReinforce){
       if(Math.random()<0.05){
-        let spawnX = Math.random()<0.5? 40 : (3*W-60);
-        if(Math.abs(spawnX - player.x) < 2*FLASH_DIST) spawnX = (spawnX< W ? 3*W-60 : 40);
-        if(Math.abs(spawnX - initialSpawnX) < 2*FLASH_DIST) spawnX = (spawnX< W ? 3*W-60 : 40);
-        if(Math.abs(spawnX - door.x) < 320) spawnX = (spawnX< W ? 3*W-60 : 40);
+        const existingSpawns = guards.filter(g=>g && g.hp>0).map(g=>g.spawnOrigin ?? g.x);
+        const spawnX = pickGuardSpawn(existingSpawns);
         guards.push(makeGuard(spawnX, yGround-42, currentFloor));
       }
     }
@@ -1150,10 +1185,9 @@ function update(dt){
       const overlapping = rect(player,g);
       let stomped = false;
       if(overlapping){
-        const playerBottom = player.y + player.h;
         const guardTop = g.y;
-        const verticalOverlap = playerBottom - guardTop;
-        if(player.vy > 2 && verticalOverlap < g.h * 0.5){
+        const cameFromAbove = player.prevBottom <= guardTop + 6 && player.prevVy > 0.5;
+        if(cameFromAbove){
           const landed = g.takeDamage(STOMP_DAMAGE);
           if(landed){ g.hp = 0; }
           g.hitFlashUntil = now() + 180;
@@ -1218,7 +1252,22 @@ function update(dt){
       m.x += (m.vx||0);
       if(m.x<120 || m.x>W-200) m.vx*=-1;
       if(Math.random()<0.02){ guardFire(m); }
-      if(rect(player,m)) damage();
+      if(rect(player,m)){
+        const cameFromAbove = player.prevBottom <= m.y + 6 && player.prevVy > 0.5;
+        if(cameFromAbove){
+          if(typeof m.takeDamage === 'function'){
+            const fell = m.takeDamage(STOMP_DAMAGE);
+            if(fell){ m.hp = 0; }
+          } else if(typeof m.hp === 'number'){
+            m.hp = Math.max(0, m.hp - STOMP_DAMAGE);
+          }
+          if('hitFlashUntil' in m){ m.hitFlashUntil = now() + 180; }
+          player.vy = -Math.max(JUMP*0.55, 7);
+          player.onGround = false;
+        } else {
+          damage();
+        }
+      }
     }
     // removals
     for(let i=sub.guards.length-1;i>=0;i--){
