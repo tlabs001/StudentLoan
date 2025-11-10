@@ -23,18 +23,117 @@
   .btn { padding:2px 6px; border:1px solid rgba(255,255,255,0.25); border-radius:6px; background:rgba(255,255,255,0.08); cursor:pointer; }
   .btn.active { background:rgba(120,255,160,0.25); border-color:rgba(120,255,160,0.6); }
   .btnGroup { display:flex; gap:6px; flex-wrap:wrap; }
-  .pill { padding:1px 6px; border-radius:999px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2); }
+.pill { padding:1px 6px; border-radius:999px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2); }
+
+  .hidden { display:none !important; }
+
+  .game-shell { position:relative; }
+
+  .menu {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 20%, rgba(80,120,180,0.35), rgba(6,8,12,0.92));
+    color:#f5f7ff; font-family:'Press Start 2P', monospace;
+    z-index:30; padding:24px;
+  }
+  .menu-card {
+    width: min(560px, 100%);
+    background:rgba(12,18,28,0.92);
+    border:2px solid rgba(120,200,255,0.35);
+    border-radius:16px;
+    padding:32px 28px;
+    box-shadow:0 12px 50px rgba(0,0,0,0.6);
+    text-align:center;
+  }
+  .menu-card h1 {
+    font-size:32px; letter-spacing:4px; margin:0 0 18px; text-transform:uppercase;
+  }
+  .menu-card p { font-size:13px; line-height:1.6; color:#d9ecff; margin:0 auto 20px; max-width:420px; font-family:monospace; }
+  .skyscraper-8bit {
+    width:100%; height:120px; margin:0 auto 18px;
+    background:linear-gradient(180deg,#101a2b 0%,#16283f 40%,#0b0f18 100%);
+    position:relative;
+    border:2px solid rgba(120,200,255,0.25);
+  }
+  .skyscraper-8bit::before,
+  .skyscraper-8bit::after {
+    content:""; position:absolute; bottom:0; width:24%; height:80%;
+    background:linear-gradient(180deg,#1a2f4a 0%,#0d1522 100%);
+  }
+  .skyscraper-8bit::before { left:10%; }
+  .skyscraper-8bit::after { right:10%; }
+  .menu label.nick { display:block; font-size:12px; margin-bottom:6px; text-transform:uppercase; letter-spacing:2px; }
+  .menu input[type="text"] {
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(150,200,255,0.35);
+    background:rgba(10,18,26,0.8); color:#e8f6ff; font-size:14px; font-family:monospace;
+  }
+  .menu input[type="checkbox"] { margin-right:6px; }
+  .remember-line { display:flex; align-items:center; justify-content:center; font-size:12px; gap:6px; margin-top:10px; }
+  .menu-buttons { display:flex; gap:16px; justify-content:center; margin-top:18px; flex-wrap:wrap; }
+  .menu button {
+    padding:10px 20px; border-radius:999px; border:2px solid rgba(140,210,255,0.45);
+    background:rgba(40,80,130,0.6); color:#f5f7ff; cursor:pointer; font-size:13px; font-family:monospace;
+    text-transform:uppercase; letter-spacing:1px;
+  }
+  .menu button:disabled { opacity:0.4; cursor:not-allowed; }
+  #nameWarn { color:#ff9ba8; min-height:18px; font-size:12px; margin-top:6px; }
+
+  .panel {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:min(620px, 92%); max-height:80vh; overflow:auto;
+    background:rgba(10,18,28,0.94); border:2px solid rgba(160,220,255,0.45);
+    border-radius:14px; padding:24px; color:#e5f2ff; font-family:monospace;
+    z-index:40;
+  }
+  .panel h2 { margin-top:0; text-align:center; letter-spacing:2px; }
+  .panel table { width:100%; border-collapse:collapse; font-size:12px; }
+  .panel thead th { position:sticky; top:0; background:rgba(20,36,52,0.95); padding:6px; }
+  .panel tbody td { padding:6px 4px; border-bottom:1px solid rgba(120,160,200,0.25); text-align:center; }
+  .panel tbody td.nm { text-align:left; }
+  .panel button { margin-top:12px; padding:6px 16px; border-radius:999px; border:1px solid rgba(160,220,255,0.45); background:rgba(20,48,76,0.65); color:#e5f2ff; cursor:pointer; }
+  .panel .empty { text-align:center; padding:16px 0; color:#a9c6e8; font-style:italic; }
 </style>
 </head>
 <body>
+
+<div id="menu" class="menu">
+  <div class="menu-card">
+    <h1>Loan Tower</h1>
+    <div class="skyscraper-8bit" aria-hidden="true"></div>
+    <p>"Your student loan auto debit payment strikes at midnight. You have exactly 5 hours to destroy the servers and defeat the CEO. Avoid late fees."</p>
+    <label class="nick" for="playerName">Nickname</label>
+    <input id="playerName" type="text" maxlength="18" placeholder="Enter nickname…" autocomplete="off" />
+    <div id="nameWarn"></div>
+    <label class="remember-line"><input id="rememberName" type="checkbox" checked />Remember me</label>
+    <div class="menu-buttons">
+      <button id="btnStart" disabled>Start (Enter)</button>
+      <button id="btnBoard">Leaderboard (L)</button>
+    </div>
+  </div>
+</div>
+
+<div id="boardPanel" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="boardTitle">
+  <h2 id="boardTitle">Leaderboard</h2>
+  <div id="boardEmpty" class="empty">No runs yet. Beat the tower to record a score.</div>
+  <table class="board">
+    <thead>
+      <tr>
+        <th>#</th><th>Name</th><th>Time</th><th>Balance</th><th>Kills</th><th>Deaths</th><th>Refi</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <button type="button" id="btnBoardClose">Close</button>
+</div>
+
+<div id="gameShell" class="game-shell hidden">
 <canvas id="game" width="1180" height="660" tabindex="0"></canvas>
 
 <div class="hudBox">
   <div class="row">
     <div class="btnGroup" id="modeGroup">
       <span class="small">Mode:</span>
-      <button class="btn active" data-mode="test" id="btnTest">Test</button>
-      <button class="btn" data-mode="normal" id="btnNormal">Normal</button>
+      <button class="btn" data-mode="test" id="btnTest">Test</button>
+      <button class="btn active" data-mode="normal" id="btnNormal">Normal</button>
     </div>
     <div class="btnGroup" id="weaponGroup">
       <span class="small">Weapon:</span>
@@ -65,6 +164,7 @@
 </div>
 
 <div class="center" id="msg"></div>
+</div>
 
 <script>
 
@@ -120,9 +220,16 @@ const FLOORS=36;
 const GRAV=0.7, FRICTION=0.86, RUN=4.1, JUMP=13, SPRINT=1.35;
 const FLASH_DIST = 240;
 let currentFloor=1;
-let pause=false;
-let testMode=true; // default TEST
+let pause=true;
+let testMode=false;
 const initialSpawnX = 120;
+let loopStarted=false;
+let runActive=false;
+let currentPlayerName='Player';
+let lastResult=null;
+const RUN_LOAN_START = 120000;
+function makeRunStats(){ return { kills:0, deaths:0, refinances:0, start:0 }; }
+let runStats = makeRunStats();
 
 // Camera
 let camX=0, seenDoor=false;
@@ -146,8 +253,11 @@ const player = {
 
 // Time: 7PM → 12AM ≈ 12 minutes
 const TOTAL_TIME_MS = 12*60*1000;
-let startClock = performance.now();
-function timeLeftMs(){ return Math.max(0, TOTAL_TIME_MS - (performance.now() - startClock)); }
+let startClock = 0;
+function timeLeftMs(){
+  if(!runActive || !startClock) return TOTAL_TIME_MS;
+  return Math.max(0, TOTAL_TIME_MS - (performance.now() - startClock));
+}
 function fmtClock(ms){
   const frac = 1 - (ms / TOTAL_TIME_MS);
   const minutesFromStart = Math.floor(frac * 5 * 60);
@@ -222,7 +332,77 @@ function rect(a,b){ return !(a.x+a.w<b.x || a.x>b.x+b.w || a.y+a.h<b.y || a.y>b.
 function rect2(x,y,w,h,b){ return !(x+w<b.x || x>b.x+b.w || y+h<b.y || y>b.y+b.h); }
 function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
 function notify(text){ noteEl.textContent = text; }
+
+function resetPlayerState(){
+  player.x=initialSpawnX; player.y=0; player.vx=0; player.vy=0;
+  player.onGround=false; player.facing=1; player.crouch=false; player.crouchOffset=0;
+  player.sprint=false; player.climbing=false; player.hidden=false; player.spotted=false;
+  player.inVent=false;
+  player.checking=100; player.savings=1200; player.hasScrew=false; player.hasCharges=true;
+  player.hasFeather=false; player.featherEnergy=0; player.featherMax=100; player.featherRecharge=12; player.lastFlap=0; player.flapCooldown=120;
+  player.files=0; player.intel=0; player.weapon='pistol';
+  player.pistol.ammo=9; player.pistol.reserve=60; player.pistol.cooldown=140; player.pistol.last=0; player.pistol.muzzleUntil=0;
+  player.flame.fuel=90; player.flame.cooldown=60; player.flame.last=0;
+  player.melee.last=0;
+  player.hurtUntil=0; player.dmgGateUntil=0;
+  player.score=0;
+}
+
+function ensureLoop(){ if(!loopStarted){ loopStarted=true; requestAnimationFrame(loop); } }
+
+function startNewRun(name){
+  if(runActive) return;
+  currentPlayerName = name || 'Player';
+  currentFloor = 1;
+  runStats = makeRunStats();
+  runStats.start = performance.now();
+  runStats.kills = 0; runStats.deaths = 0; runStats.refinances = 0;
+  runActive = true;
+  pause = false;
+  startClock = performance.now();
+  last = performance.now();
+  mouseDown = false;
+  camX = 0; seenDoor=false;
+  resetPlayerState();
+  bullets.length = 0;
+  setMode(testMode? 'test' : 'normal');
+  setWeapon('pistol');
+  makeLevel(currentFloor);
+  player.y = floorSlab.y - player.h;
+  notify("Evening infiltration. New intel & loot on each floor.");
+  centerNote("Infiltration begins.", 1600);
+  floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
+  timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ 12:00 AM`;
+  ensureLoop();
+  canvas.focus();
+}
+
+function finishRun(outcome, { message=null, note=null }={}){
+  if(!runActive) return;
+  runActive=false;
+  pause=true;
+  if(outcome==='death') runStats.deaths = (runStats.deaths||0) + 1;
+  const endTime = performance.now();
+  const elapsed = runStats.start ? Math.max(0, endTime - runStats.start) : 0;
+  const loanRemaining = Math.round(RUN_LOAN_START - player.score * 25);
+  const detail = {
+    outcome,
+    name: currentPlayerName,
+    timeMs: Math.round(elapsed),
+    loanRemaining,
+    kills: runStats.kills || 0,
+    deaths: runStats.deaths || 0,
+    refinances: runStats.refinances || 0,
+    score: player.score || 0,
+    floor: currentFloor
+  };
+  lastResult = detail;
+  if(note) notify(note);
+  if(message) centerNote(message, 2400);
+  window.dispatchEvent(new CustomEvent('loanTower:end', { detail }));
+}
 function handleDeath(){
+  if(!runActive && !testMode) return;
   pause=true;
   if(testMode){
     centerNote("Revived (TEST mode).");
@@ -235,22 +415,8 @@ function handleDeath(){
       notify("Revived on same floor.");
     }, 700);
   } else {
-    centerNote("You ran out of Checking. Restarting at Floor 1...");
-    setTimeout(()=>{
-      // hard reset
-      currentFloor=1;
-      player.checking=100; player.savings=1200;
-      player.hasScrew=false; player.hasFeather=false; player.featherEnergy=0;
-      player.files=0; player.intel=0;
-      player.pistol={ammo:9,reserve:60,cooldown:140,last:0,muzzleUntil:0};
-      player.flame.fuel=90; player.melee.last=0;
-      startClock = performance.now();
-      makeLevel(currentFloor);
-      player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
-      player.y=floorSlab.y - player.h;
-      pause=false;
-      notify("Restarted at Floor 1.");
-    }, 1200);
+    notify("Checking drained. Run failed.");
+    finishRun('death', { message:"You ran out of Checking." });
   }
 }
 function damage(){
@@ -492,6 +658,10 @@ function interact(){
           door.open=true;
           doorOpenSFX();
           setTimeout(()=>{
+            if(currentFloor >= FLOORS){
+              finishRun('escape', { message:"You cleared the tower before midnight!", note:"Tower secured." });
+              return;
+            }
             currentFloor = Math.min(FLOORS, currentFloor+1);
             centerNote(`Floor ${currentFloor}`);
             notify(`Entered floor ${currentFloor}.`);
@@ -600,11 +770,15 @@ function guardFire(g){
 
 // ========= Update =========
 function update(dt){
+  if(!runActive) return;
   // Track "seen door"
   if(!seenDoor && (inViewport(door.x) || Math.abs(player.x - door.x) < W*0.4)){ seenDoor=true; }
 
   if(timeLeftMs()<=0){
-    pause=true; player.savings=0; centerNote("Midnight hit — Savings auto-debited.", 2200); notify("Savings drained at midnight.");
+    player.savings=0;
+    notify("Savings drained at midnight.");
+    finishRun('timeout', { message:"Midnight hit — Savings auto-debited." });
+    return;
   }
 
   // Inputs
@@ -737,7 +911,7 @@ function update(dt){
     }
     // kills + reward
     for(let i=guards.length-1;i>=0;i--){
-      if(guards[i].hp<=0){ guards.splice(i,1); addChecking(10); notify("+$10 (guard)"); }
+      if(guards[i].hp<=0){ guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (guard)"); }
     }
 
     // Servers armed -> destroyed
@@ -774,10 +948,10 @@ function update(dt){
     }
     // removals
     for(let i=sub.guards.length-1;i>=0;i--){
-      if(sub.guards[i].hp<=0){ sub.guards.splice(i,1); addChecking(10); notify("+$10 (vent guard)"); }
+      if(sub.guards[i].hp<=0){ sub.guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (vent guard)"); }
     }
     for(let i=sub.bosses.length-1;i>=0;i--){
-      if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); addChecking(10); notify("+$10 (boss)"); }
+      if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (boss)"); }
     }
   }
 
@@ -1084,18 +1258,17 @@ function loop(ts){
   requestAnimationFrame(loop);
 }
 
-// Init
-function init(){
-  setMode('test');
-  setWeapon('pistol');
-  notify("Evening infiltration. New intel & loot on each floor.");
-  makeLevel(currentFloor);
-  player.y = floorSlab.y - player.h;
-  requestAnimationFrame(loop);
-}
-init();
+window.LoanTowerBridge = {
+  startRun: startNewRun,
+  isRunning: () => runActive,
+  getLastResult: () => lastResult
+};
+pause = true;
+runActive = false;
+window.dispatchEvent(new Event('loanTowerReady'));
 })();
 
 </script>
+<script src="src/menu.js"></script>
 </body>
 </html>
