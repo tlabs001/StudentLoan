@@ -698,6 +698,7 @@ function update(state, dt){
       toast('Feather expired');
     }
   }
+  p.x = clamp(p.x, 40, 1040);
 
   handleCombat(state, dt);
   updateBullets(state, dtSec);
