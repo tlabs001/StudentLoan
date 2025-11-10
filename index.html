@@ -160,11 +160,11 @@
       <button class="btn" data-weapon="melee" id="btnMelee">Melee (3)</button>
     </div>
   </div>
-  <div class="row"><div id="floor">Floor 1 / 36</div><div id="time">7:00 PM ➜ 12:00 AM</div></div>
-  <div class="row"><div>Checking</div><div id="checkVal">$100</div></div>
-  <div class="meter"><div id="checkFill" class="fill" style="width:40%"></div></div>
-  <div class="row" style="margin-top:6px;"><div>Savings</div><div id="saveVal">$1200</div></div>
-  <div class="meter"><div id="saveFill" class="fill red" style="width:100%"></div></div>
+  <div class="row"><div id="floor">Floor —</div><div id="time">--:-- ➜ --:--</div></div>
+  <div class="row"><div>Checking</div><div id="checkVal">$0</div></div>
+  <div class="meter"><div id="checkFill" class="fill" style="width:0%"></div></div>
+  <div class="row" style="margin-top:6px;"><div>Savings</div><div id="saveVal">$0</div></div>
+  <div class="meter"><div id="saveFill" class="fill red" style="width:0%"></div></div>
   <div class="row small" style="margin-top:8px;">
     <div id="servers">Servers: 0/0</div>
     <div id="alarms">Alarms: OK</div>
@@ -187,8 +187,95 @@
 
 <script>
 
-// --- Game time scale ---
-var TIME_SCALE = 2; // 2× faster: 2 in-game hours per real hour
+// === Editable Parameter Sections ==========================================
+// -- Canvas & Display --
+const GAME_PARAMS = {
+  canvas: {
+    width: 1180,
+    height: 660
+  },
+  // -- Timing & Run Length --
+  timing: {
+    detectionTimeScale: 2,        // Guards advance patterns faster at higher values
+    totalRunMinutes: 12,          // Real-time minutes allotted for the full tower run
+    startHour24: 19,              // In-game clock start hour (24h format)
+    endHour24: 24                 // In-game clock end hour (wraps past midnight if <= start)
+  },
+  // -- Tower Structure --
+  tower: {
+    totalFloors: 36
+  },
+  // -- Player Defaults --
+  player: {
+    spawnX: 120,
+    width: 2,
+    height: 46,
+    gravity: 0.7,
+    friction: 0.86,
+    runSpeed: 4.1,
+    jumpStrength: 13,
+    sprintMultiplier: 1.35,
+    flashlightRange: 240,
+    checkingStart: 100,
+    savingsStart: 1200,
+    checkingHudMax: 200,
+    savingsHudMax: 2000,
+    pistol: {
+      magazine: 9,
+      reserve: 60,
+      cooldownMs: 140
+    },
+    flame: {
+      fuel: 90,
+      cooldownMs: 60
+    },
+    meleeCooldownMs: 240,
+    damages: {
+      bullet: 10,
+      flame: 6,
+      melee: 20,
+      stomp: 10
+    }
+  },
+  // -- Economy & Difficulty --
+  economy: {
+    startingLoanBalance: 120000
+  },
+  // -- Enemy Defaults --
+  enemies: {
+    guardBaseDamage: 10
+  }
+};
+
+// Expose parameters for live tweaking via the browser console
+window.GAME_PARAMS = GAME_PARAMS;
+
+// --- Derived constants (auto-updated when parameters above change) ---
+const TIME_SCALE = GAME_PARAMS.timing.detectionTimeScale;
+const TOTAL_TIME_MS = GAME_PARAMS.timing.totalRunMinutes * 60 * 1000;
+const RUN_START_HOUR = GAME_PARAMS.timing.startHour24;
+const RUN_END_HOUR = GAME_PARAMS.timing.endHour24;
+const _durationHours = (RUN_END_HOUR + (RUN_END_HOUR <= RUN_START_HOUR ? 24 : 0)) - RUN_START_HOUR;
+const RUN_DURATION_HOURS = _durationHours > 0 ? _durationHours : 1;
+const W = GAME_PARAMS.canvas.width;
+const H = GAME_PARAMS.canvas.height;
+const FLOORS = GAME_PARAMS.tower.totalFloors;
+const GRAV = GAME_PARAMS.player.gravity;
+const FRICTION = GAME_PARAMS.player.friction;
+const RUN = GAME_PARAMS.player.runSpeed;
+const JUMP = GAME_PARAMS.player.jumpStrength;
+const SPRINT = GAME_PARAMS.player.sprintMultiplier;
+const FLASH_DIST = GAME_PARAMS.player.flashlightRange;
+const PLAYER_BULLET_DAMAGE = GAME_PARAMS.player.damages.bullet;
+const PLAYER_FLAME_DAMAGE = GAME_PARAMS.player.damages.flame;
+const PLAYER_MELEE_DAMAGE = GAME_PARAMS.player.damages.melee;
+const STOMP_DAMAGE = GAME_PARAMS.player.damages.stomp;
+const initialSpawnX = GAME_PARAMS.player.spawnX;
+const RUN_LOAN_START = GAME_PARAMS.economy.startingLoanBalance;
+const GUARD_BASE_DAMAGE = GAME_PARAMS.enemies.guardBaseDamage;
+const CHECKING_HUD_MAX = Math.max(1, GAME_PARAMS.player.checkingHudMax);
+const SAVINGS_HUD_MAX = Math.max(1, GAME_PARAMS.player.savingsHudMax);
+
 (()=>{
 // ===== Audio =====
 let ac;
@@ -368,26 +455,16 @@ const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d');
 window.addEventListener('click', ()=>{ canvas.focus(); getAC(); });
 
 // ===== Canvas & Timing =====
-const W=1180, H=660;
 let last=performance.now();
 
 // ===== Game State =====
-const FLOORS=36;
-const GRAV=0.7, FRICTION=0.86, RUN=4.1, JUMP=13, SPRINT=1.35;
-const FLASH_DIST = 240;
-const PLAYER_BULLET_DAMAGE = 10;
-const PLAYER_FLAME_DAMAGE = 6;
-const PLAYER_MELEE_DAMAGE = 20;
-const STOMP_DAMAGE = 10;
 let currentFloor=1;
 let pause=true;
 let testMode=false;
-const initialSpawnX = 120;
 let loopStarted=false;
 let runActive=false;
 let currentPlayerName='Player';
 let lastResult=null;
-const RUN_LOAN_START = 120000;
 function makeRunStats(){ return { kills:0, deaths:0, refinances:0, start:0 }; }
 let runStats = makeRunStats();
 const codexState = { open:false };
@@ -397,34 +474,34 @@ let camX=0, seenDoor=false;
 
 // Player
 const player = {
-  x:initialSpawnX, y: 0, w:2, h:46,
+  x:initialSpawnX, y: 0, w:GAME_PARAMS.player.width, h:GAME_PARAMS.player.height,
   vx:0, vy:0, onGround:false, facing:1, crouch:false, crouchOffset:0,
   sprint:false, climbing:false, inVent:false, hidden:false, spotted:false,
-  checking:100, savings:1200,
+  checking:GAME_PARAMS.player.checkingStart, savings:GAME_PARAMS.player.savingsStart,
   hasScrew:false, hasCharges:true,
-  hasFeather:false, featherEnergy:0, featherMax:100, featherRecharge:1, lastFlap:10, flapCooldown:120,
+  hasFeather:false, featherEnergy:0, featherMax:100, featherRecharge:12, lastFlap:10, flapCooldown:120,
   files:0, intel:0, specialFiles:0,
   codexUnlocked:false,
   weapon:'pistol',
-  pistol:{ammo:9, reserve:60, cooldown:140, last:0, muzzleUntil:0},
-  flame:{fuel:90, cooldown:60, last:0}, // "ammo" for flamethrower
-  melee:{cooldown:240, last:0},
+  pistol:{ammo:GAME_PARAMS.player.pistol.magazine, reserve:GAME_PARAMS.player.pistol.reserve, cooldown:GAME_PARAMS.player.pistol.cooldownMs, last:0, muzzleUntil:0},
+  flame:{fuel:GAME_PARAMS.player.flame.fuel, cooldown:GAME_PARAMS.player.flame.cooldownMs, last:0}, // "ammo" for flamethrower
+  melee:{cooldown:GAME_PARAMS.player.meleeCooldownMs, last:0},
   hurtUntil:0,
 };
 
-// Time: 7PM → 12AM ≈ 12 minutes
-const TOTAL_TIME_MS = 12*60*1000;
+// Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
 function timeLeftMs(){
   if(!runActive || !startClock) return TOTAL_TIME_MS;
   return Math.max(0, TOTAL_TIME_MS - (performance.now() - startClock));
 }
 function fmtClock(ms){
-  const frac = 1 - (ms / TOTAL_TIME_MS);
-  const minutesFromStart = Math.floor(frac * 5 * 60);
-  let hour = 19 + Math.floor(minutesFromStart/60);
+  const clamped = Math.max(0, Math.min(TOTAL_TIME_MS, ms));
+  const frac = 1 - (clamped / TOTAL_TIME_MS);
+  const minutesFromStart = Math.floor(frac * RUN_DURATION_HOURS * 60);
+  let hour = RUN_START_HOUR + Math.floor(minutesFromStart/60);
   let mins = minutesFromStart % 60;
-  if (hour >= 24) hour -= 24;
+  while (hour >= 24) hour -= 24;
   const ampm = hour >= 12 ? 'PM' : 'AM';
   let dispH = hour % 12; if (dispH === 0) dispH = 12;
   return `${dispH}:${mins.toString().padStart(2,'0')} ${ampm}`;
@@ -599,11 +676,19 @@ function resetPlayerState(){
   player.onGround=false; player.facing=1; player.crouch=false; player.crouchOffset=0;
   player.sprint=false; player.climbing=false; player.hidden=false; player.spotted=false;
   player.inVent=false;
-  player.checking=100; player.savings=1200; player.hasScrew=false; player.hasCharges=true;
+  player.checking=GAME_PARAMS.player.checkingStart;
+  player.savings=GAME_PARAMS.player.savingsStart;
+  player.hasScrew=false; player.hasCharges=true;
   player.hasFeather=false; player.featherEnergy=0; player.featherMax=100; player.featherRecharge=12; player.lastFlap=0; player.flapCooldown=120;
   player.files=0; player.intel=0; player.specialFiles=0; player.codexUnlocked=false; player.weapon='pistol';
-  player.pistol.ammo=9; player.pistol.reserve=60; player.pistol.cooldown=140; player.pistol.last=0; player.pistol.muzzleUntil=0;
-  player.flame.fuel=90; player.flame.cooldown=60; player.flame.last=0;
+  player.pistol.ammo=GAME_PARAMS.player.pistol.magazine;
+  player.pistol.reserve=GAME_PARAMS.player.pistol.reserve;
+  player.pistol.cooldown=GAME_PARAMS.player.pistol.cooldownMs;
+  player.pistol.last=0; player.pistol.muzzleUntil=0;
+  player.flame.fuel=GAME_PARAMS.player.flame.fuel;
+  player.flame.cooldown=GAME_PARAMS.player.flame.cooldownMs;
+  player.flame.last=0;
+  player.melee.cooldown=GAME_PARAMS.player.meleeCooldownMs;
   player.melee.last=0;
   player.hurtUntil=0;
   player.score=0;
@@ -635,7 +720,7 @@ function startNewRun(name){
   notify("Evening infiltration. New intel & loot on each floor.");
   centerNote("Infiltration begins.", 1600);
   floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
-  timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ 12:00 AM`;
+  timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ ${fmtClock(0)}`;
   ensureLoop();
   canvas.focus();
 }
@@ -672,7 +757,7 @@ function handleDeath(){
     centerNote("Revived (TEST mode).");
     setTimeout(()=>{
       pause=false;
-      player.checking=100;
+      player.checking=GAME_PARAMS.player.checkingStart;
       player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
       player.y = floorSlab.y - player.h;
       notify("Revived on same floor.");
@@ -684,7 +769,7 @@ function handleDeath(){
 }
 function damage(){
   const t=now();
-  player.checking = Math.max(0, player.checking - 10);
+  player.checking = Math.max(0, player.checking - GUARD_BASE_DAMAGE);
   player.hurtUntil = t+120;
   if(player.checking===0){ handleDeath(); }
 }
@@ -732,7 +817,7 @@ function guardArchetypeForFloor(i){
 function makeGuard(x,y,i){
   const type = guardArchetypeForFloor(i);
   const baseHp = type==='launcher' ? 40 : type==='ninja' ? 30 : 20;
-  let base = {x, y, w:20, h:42, vx:(x< W? 0.9 : -0.9), hp: baseHp, maxHp: baseHp, dmg:10, t:0, suit:false, lastShot:0, type, hitFlashUntil:0};
+  let base = {x, y, w:20, h:42, vx:(x< W? 0.9 : -0.9), hp: baseHp, maxHp: baseHp, dmg:GUARD_BASE_DAMAGE, t:0, suit:false, lastShot:0, type, hitFlashUntil:0};
   if(type==='auto'){ base.vx*=1.0; }
   if(type==='ninja'){ base.vx*=1.6; base.shoot=false; }
   if(type==='launcher'){ base.vx*=0.8; }
@@ -1390,7 +1475,7 @@ function update(dt){
 
   // HUD update
   floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
-  timeEl.textContent= `${fmtClock(timeLeftMs())} ➜ 12:00 AM`;
+  timeEl.textContent= `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
   serversEl.textContent=`Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
   alarmsEl.textContent= alarm? 'Alarms: ACTIVE' : 'Alarms: OK';
   let ammoText = '';
@@ -1403,8 +1488,8 @@ function update(dt){
   invEl.textContent=`Inv: ${inv.join(', ')||'—'}`;
   checkVal.textContent = `$${player.checking}`;
   saveVal.textContent = `$${player.savings}`;
-  checkFill.style.width = `${Math.min(100, player.checking/200*100)}%`;
-  saveFill.style.width = `${Math.min(100, player.savings/2000*100)}%`;
+  checkFill.style.width = `${Math.min(100, (player.checking / CHECKING_HUD_MAX) * 100)}%`;
+  saveFill.style.width = `${Math.min(100, (player.savings / SAVINGS_HUD_MAX) * 100)}%`;
   filesPill.textContent = `Files: ${player.files}`;
   intelPill.textContent = `Intel: ${player.intel}`;
   featherPill.textContent = player.hasFeather ? `Feather: ${Math.round(player.featherEnergy)}` : "Feather: —";

@@ -1971,8 +1971,8 @@ class Game {
     const desks = this.generateDesks(basePlatforms);
     const decor = this.generateDecor(basePlatforms);
     const vents = this.generateVents(basePlatforms);
-    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, MIN_GUARD_SPAWN_X);
-    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+    const guardSpawnBase = Math.max(MIN_GUARD_SPAWN_X, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, guardSpawnBase);
     const guardSpawnWidth = Math.max(120, CANVAS_WIDTH - guardSpawnMinX - 60);
     const spawnArea = { x: guardSpawnMinX, y: CANVAS_HEIGHT - 140, width: guardSpawnWidth, height: 0 };
     const exit = { x: CANVAS_WIDTH - 80, y: CANVAS_HEIGHT - 140, width: 60, height: 120 };
