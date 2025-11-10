@@ -408,6 +408,136 @@ const CEO_PROFILE = {
   ]
 };
 
+const PLAYER_PROFILE = {
+  card:'Field Dossier',
+  name:'Tower Operative',
+  title:'Infiltration Specialist',
+  bio:'Student debtor turned saboteur. Every sprint is paid for with borrowed time, restless nights, and a stubborn refusal to default.',
+  power:'Multi-Tool Loadout – Swap between pistol, flamethrower, and baton to answer any threat.',
+  hp:'Checking balance (functions as health)',
+  specials:[
+    'Sidearm: 9-round magazine, 10 damage per shot.',
+    'Flamethrower: Cone stream with ember ticks that deal 6 damage.',
+    'Shock Baton: 20 damage melee arc that pairs with stomp knockdowns.',
+    'Feather Harness: Grants midair flaps when recovered from special pickups.'
+  ],
+  debtEffects:[
+    { id:'CHK', desc:'Checking drains when hurt; at $0 the run immediately fails.' },
+    { id:'SAV', desc:'Savings record your success and vanish at midnight if the tower stands.' }
+  ],
+  effectsLabel:'Field Notes'
+};
+
+const GUARD_PROFILES = [
+  {
+    card:'Guard: Pistol',
+    name:'Security Officer',
+    title:'Baseline Patrol',
+    bio:'Standard corporate security assigned to roam the open-plan floors. Predictable routes, but relentless once they radio an alarm.',
+    power:'Service Pistol – Fires 10 damage rounds roughly every 0.7 s once you cross their cone.',
+    hp:20,
+    specials:[
+      'Detection Cone: raises the floor alarm and flags reinforcements.',
+      'Contact Hit: 10 damage on collision if you stay grounded.'
+    ],
+    debtEffects:[
+      { id:'ALERT', desc:'Feeds the Collections alert meter when line-of-sight is maintained.' }
+    ],
+    effectsLabel:'Intel'
+  },
+  {
+    card:'Guard: Auto',
+    name:'Suppressor',
+    title:'Auto Rifle Specialist',
+    bio:'Carries a modified carbine and sweeps hallways with suppressing fire to pin debtors in place.',
+    power:'Auto Carbine – Streams bursts of bullets with slight spread when locked in.',
+    hp:20,
+    specials:[
+      'Burst Fire: sustained volleys chew through broken cover.',
+      'Alarm Booster: escalates reinforcement chances while alarms are active.'
+    ],
+    debtEffects:[
+      { id:'SUP', desc:'Suppressive bursts push you out of cover and punish long standoffs.' }
+    ],
+    effectsLabel:'Intel'
+  },
+  {
+    card:'Guard: Ninja',
+    name:'Shadow Contractor',
+    title:'Close Quarters',
+    bio:'Black-suited specialists hired for silent takedowns. No firearms—only ruthless momentum.',
+    power:'Shadow Dash – Closes gaps quickly, then slashes for heavy damage.',
+    hp:30,
+    specials:[
+      'Acrobatic Pursuit: leaps between platforms without ladders.',
+      'Blade Rush: combos stack 10 damage strikes if you stay on the floor.'
+    ],
+    debtEffects:[
+      { id:'MELEE', desc:'Forces you airborne—staying grounded lets them chain contact damage.' }
+    ],
+    effectsLabel:'Intel'
+  },
+  {
+    card:'Guard: Launcher',
+    name:'Siege Specialist',
+    title:'Explosive Ordnance',
+    bio:'Lugs a slow-moving launcher that watches vault doors and server wings.',
+    power:'Grenade Launcher – Fires rockets every 1.4 s that explode in a 60 px blast.',
+    hp:40,
+    specials:[
+      'Splash Damage: rockets detonate even when they miss directly.',
+      'Knockback: blasts shove you from ladders or ledges toward patrol routes.'
+    ],
+    debtEffects:[
+      { id:'BLAST', desc:'Treat every rocket as 10 damage plus knockback even through partial cover.' }
+    ],
+    effectsLabel:'Intel'
+  }
+];
+
+const VENT_BOSS_PROFILES = [
+  {
+    card:'Vault Boss: Auto',
+    name:'Vault Enforcer',
+    title:'Sub-Level Sentry',
+    bio:'Guarding the server vault vents with belt-fed rifles and corporate zeal.',
+    power:'Cycling Auto Turret – Marches forward while spraying suppressive fire.',
+    hp:30,
+    specials:[
+      'Bullet Storm: repeated volleys saturate the cramped vent corridors.',
+      'Support Calls: pairs with pistol guards who reinforce the vault.'
+    ],
+    debtEffects:[
+      { id:'VENT', desc:'Defeating them opens safer routes through the vault network.' }
+    ],
+    effectsLabel:'Intel'
+  },
+  {
+    card:'Vault Boss: Launcher',
+    name:'Vault Artillery',
+    title:'Explosive Overseer',
+    bio:'Heavier ordnance reserved for sub-level breaches in the finance wing.',
+    power:'Cluster Launcher – Arcing rockets with punishing splash damage.',
+    hp:40,
+    specials:[
+      'Arcing Rockets: shots bounce around cover and explode on impact.',
+      'Area Denial: blast radius makes safe footing scarce in the vents.'
+    ],
+    debtEffects:[
+      { id:'BLAST', desc:'Staying mobile mid-air is the safest way to survive the blast radius.' }
+    ],
+    effectsLabel:'Intel'
+  }
+];
+
+const CODEX_SECTIONS = [
+  { title:'Main Player', entries:[PLAYER_PROFILE] },
+  { title:'Tower Guards', entries:GUARD_PROFILES },
+  { title:'Vent Bosses', entries:VENT_BOSS_PROFILES },
+  { title:'Board Members', entries:PROFILE_DECK },
+  { title:'CEO', entries:[CEO_PROFILE] }
+];
+
 const EFFECTS = {
   NJ:   { name:'Night Job',            color:'#5F66FF', icon:'NJ', kind:'pulse',   tick_ms:6000, params:{sleep_ms:1000} },
   SJ:   { name:'Second Job',           color:'#8A9FBF', icon:'SJ', kind:'continuous', params:{move_mult:0.75, jump_mult:0.80} },
@@ -564,7 +694,7 @@ btnM.onclick=()=>setWeapon('melee');
 if(specialFilesPill){
   specialFilesPill.addEventListener('click', ()=>{
     if(!player.codexUnlocked){
-      notify('Collect 10 Special Files to unlock board profiles.');
+      notify('Collect 10 Special Files to unlock the tower dossiers.');
       return;
     }
     toggleCodex();
@@ -605,9 +735,9 @@ function updateSpecialFileUI(){
   player.codexUnlocked = unlocked;
   specialFilesPill.classList.toggle('locked', !unlocked);
   if(unlocked){
-    specialFilesPill.title = 'Press 9 to view board & CEO profiles';
+    specialFilesPill.title = 'Press 9 to view tower dossiers';
   } else {
-    specialFilesPill.title = 'Collect more violet files to unlock profiles';
+    specialFilesPill.title = 'Collect more violet files to unlock dossiers';
   }
   if(codexProgress){
     codexProgress.textContent = `Special Files: ${current}/${required}`;
@@ -622,33 +752,46 @@ function renderCodex(){
   const required = specialFilesRequired();
   const unlocked = (player.specialFiles||0) >= required;
   codexGrid.textContent = '';
-  const list = [...PROFILE_DECK, CEO_PROFILE];
-  list.forEach((profile) => {
-    const card = document.createElement('div');
-    card.className = 'codex-card';
-    if(!unlocked){
-      card.classList.add('locked');
-      card.innerHTML = `
-        <h3>${profile.card}</h3>
-        <div class="title">CONFIDENTIAL</div>
-        <div class="bio">Access denied. Collect more Special Files.</div>
-      `;
-    } else {
-      const specials = profile.specials.map((sp) => `<li>${sp}</li>`).join('');
-      const effects = profile.debtEffects.map((eff) => `<li><strong>${eff.id}</strong>: ${eff.desc}</li>`).join('');
-      card.innerHTML = `
-        <h3>${profile.card}</h3>
-        <div class="title">${profile.name} — ${profile.title}</div>
-        <div class="bio">${profile.bio}</div>
-        <div><strong>Power:</strong> ${profile.power}</div>
-        <div><strong>HP:</strong> ${profile.hp}</div>
-        <div><strong>Specials:</strong></div>
-        <ul>${specials}</ul>
-        <div class="effects"><strong>Debt Effects:</strong></div>
-        <ul>${effects}</ul>
-      `;
-    }
-    codexGrid.appendChild(card);
+  CODEX_SECTIONS.forEach((section) => {
+    if(!section || !section.entries || section.entries.length===0) return;
+    const heading = document.createElement('div');
+    heading.className = 'codex-heading';
+    heading.textContent = section.title;
+    codexGrid.appendChild(heading);
+    section.entries.forEach((profile) => {
+      const card = document.createElement('div');
+      card.className = 'codex-card';
+      if(!unlocked){
+        card.classList.add('locked');
+        card.innerHTML = `
+          <h3>${profile.card}</h3>
+          <div class="title">CONFIDENTIAL</div>
+          <div class="bio">Access denied. Collect more Special Files.</div>
+        `;
+      } else {
+        const name = profile.name || profile.card;
+        const subtitle = profile.title ? `${name} — ${profile.title}` : name;
+        const powerLine = profile.power ? `<div><strong>Power:</strong> ${profile.power}</div>` : '';
+        const hpLine = profile.hp !== undefined ? `<div><strong>HP:</strong> ${profile.hp}</div>` : '';
+        const specialsList = Array.isArray(profile.specials) && profile.specials.length
+          ? `<div><strong>Specials:</strong></div><ul>${profile.specials.map((sp) => `<li>${sp}</li>`).join('')}</ul>`
+          : '';
+        const effectsList = Array.isArray(profile.debtEffects) && profile.debtEffects.length
+          ? `<div class="effects"><strong>${profile.effectsLabel || 'Debt Effects'}:</strong></div><ul>${profile.debtEffects.map((eff) => `<li><strong>${eff.id}</strong>: ${eff.desc}</li>`).join('')}</ul>`
+          : '';
+        const bio = profile.bio ? `<div class="bio">${profile.bio}</div>` : '';
+        card.innerHTML = `
+          <h3>${profile.card}</h3>
+          <div class="title">${subtitle}</div>
+          ${bio}
+          ${powerLine}
+          ${hpLine}
+          ${specialsList}
+          ${effectsList}
+        `;
+      }
+      codexGrid.appendChild(card);
+    });
   });
 }
 
@@ -777,6 +920,30 @@ function damage(){
 function addChecking(n){ player.checking = clamp(player.checking+n,0,9999); }
 function addAmmo(n){ player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999); }
 function addFuel(n){ player.flame.fuel = clamp(player.flame.fuel+n, 0, 200); }
+
+function rewardWorker(worker){
+  if(!worker || worker.rewardClaimed) return;
+  worker.rewardClaimed = true;
+  addChecking(10);
+  notify('+10 health (worker)');
+}
+
+function damageWorker(worker, amount){
+  if(!worker || !worker.alive) return false;
+  const dmg = Number.isFinite(amount) ? amount : 0;
+  if(dmg <= 0) return false;
+  const maxHp = Number.isFinite(worker.maxHp) ? worker.maxHp : 10;
+  const prevHp = Number.isFinite(worker.hp) ? worker.hp : maxHp;
+  const nextHp = Math.max(0, Math.min(maxHp, prevHp - dmg));
+  if(nextHp === prevHp) return false;
+  worker.hp = nextHp;
+  worker.hitFlashUntil = now() + 160;
+  if(worker.hp === 0){
+    worker.alive = false;
+    rewardWorker(worker);
+  }
+  return true;
+}
 
 // Input
 const keys={};
@@ -1005,6 +1172,10 @@ function makeLevel(i){
       maxX:max,
       bob: Math.random() * Math.PI * 2,
       alive:true,
+      hp:10,
+      maxHp:10,
+      rewardClaimed:false,
+      hitFlashUntil:0,
       facing: vx>=0?1:-1,
       appearance,
       showTie,
@@ -1194,6 +1365,16 @@ function attack(){
         if(defeated){ g.hp = 0; }
         g.hitFlashUntil = now() + 160;
         hits++;
+      }
+    }
+    if(!inSub){
+      for(const worker of workers){
+        if(!worker.alive) continue;
+        if(rect(hitBox, worker)){
+          if(damageWorker(worker, PLAYER_MELEE_DAMAGE)){
+            hits++;
+          }
+        }
       }
     }
     if(hits>0) beep({freq:520}); else beep({freq:380});
@@ -1389,6 +1570,15 @@ function update(dt){
       if(worker.x >= worker.maxX){ worker.x = worker.maxX; worker.vx = -Math.abs(worker.vx); }
       worker.facing = worker.vx >= 0 ? 1 : -1;
       worker.bob = (worker.bob || 0) + dt * (2.2 + Math.abs(worker.vx)*3.2);
+      if(rect(player, worker)){
+        const cameFromAbove = player.prevBottom <= worker.y + 6 && player.prevVy > 0.5;
+        if(cameFromAbove){
+          if(damageWorker(worker, STOMP_DAMAGE)){
+            player.vy = -Math.max(JUMP*0.45, 6);
+            player.onGround = false;
+          }
+        }
+      }
     }
 
     // Spotlights add alarm if touched
@@ -1555,6 +1745,17 @@ function update(dt){
             break;
           }
         }
+        if(b.life>0){
+          for(const worker of workers){
+            if(!worker.alive) continue;
+            const box={x:worker.x,y:worker.y,w:worker.w,h:worker.h};
+            if(rect2(b.x-3,b.y-3,6,6,box)){
+              damageWorker(worker, b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE);
+              b.life=0;
+              break;
+            }
+          }
+        }
         for(const s of servers){
           const box={x:s.x,y:s.y,w:s.w,h:s.h};
           if(rect2(b.x-3,b.y-3,6,6,box)){ s.hp-= (b.type==='flame'? 3 : 2); if(s.hp<=0){ s.destroyed=true; } b.life=0; break; }
@@ -1702,6 +1903,14 @@ function draw(){
       const torsoY = bodyY + headHeight;
       const legY = torsoY + torsoHeight;
       const armSwing = walkSwing * 1.6;
+      const flashing = worker.hitFlashUntil && worker.hitFlashUntil > now();
+      if(flashing){
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = 'rgba(255,150,150,0.35)';
+        ctx.fillRect(bodyX-2, bodyY - hairHeight - 4, width+4, worker.h + hairHeight + 6);
+        ctx.restore();
+      }
 
       const legWidth = Math.floor((width-6)/2);
       const stepLift = Math.sin((worker.bob || 0) * 0.9);
