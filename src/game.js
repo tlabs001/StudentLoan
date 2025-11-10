@@ -125,43 +125,75 @@ function formatCountdown(ms) {
 class Input {
   constructor() {
     this.keys = new Map();
+    this.downTimestamps = new Map();
     window.addEventListener("keydown", (event) => {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) {
+      const key = this.normalizeKey(event.key);
+      if (["arrowup", "arrowdown", "arrowleft", "arrowright", "space"].includes(key)) {
         event.preventDefault();
       }
-      this.keys.set(event.key, true);
+      if (!this.keys.get(key)) {
+        this.downTimestamps.set(key, performance.now());
+      }
+      this.keys.set(key, true);
     });
     window.addEventListener("keyup", (event) => {
-      this.keys.set(event.key, false);
+      const key = this.normalizeKey(event.key);
+      this.keys.set(key, false);
+      this.downTimestamps.delete(key);
     });
+  }
+
+  normalizeKey(raw) {
+    if (!raw) return "";
+    if (raw === " ") return "space";
+    return raw.toLowerCase();
+  }
+
+  isPressed(...candidates) {
+    return candidates.some((key) => this.keys.get(this.normalizeKey(key)));
+  }
+
+  heldDuration(key) {
+    const normalized = this.normalizeKey(key);
+    if (!this.keys.get(normalized)) return 0;
+    const start = this.downTimestamps.get(normalized);
+    if (!start) return 0;
+    return performance.now() - start;
+  }
+
+  comboHeld(groups, durationMs) {
+    return groups.every((group) => group.some((key) => {
+      const normalized = this.normalizeKey(key);
+      return this.keys.get(normalized) && this.heldDuration(normalized) >= durationMs;
+    }));
   }
 
   get left() {
-    return this.keys.get("ArrowLeft");
+    return this.isPressed("ArrowLeft", "a");
   }
 
   get right() {
-    return this.keys.get("ArrowRight");
+    return this.isPressed("ArrowRight", "d");
   }
 
   get up() {
-    return this.keys.get("ArrowUp");
+    return this.isPressed("ArrowUp", "w");
   }
 
   get down() {
-    return this.keys.get("ArrowDown");
+    return this.isPressed("ArrowDown", "s", "x");
   }
 
   get jump() {
-    return this.keys.get("ArrowUp");
+    return this.isPressed("space", "ArrowUp", "w");
   }
 
   get crouch() {
-    return this.keys.get("ArrowDown");
+    return this.down;
   }
 
   get attack() {
-    return this.keys.get(" ");
+    return this.isPressed("space", "j", "e");
   }
 }
 
@@ -200,6 +232,8 @@ class Player {
     this.currentVent = null;
     this.originalVentPosition = { x: 0, y: 0 };
     this.lastVentToggle = 0;
+    this.dropComboActive = false;
+    this.lastDropComboTime = 0;
   }
 
   respawn() {
@@ -214,6 +248,7 @@ class Player {
     this.doubleFlight = false;
     this.featherTimer = 0;
     this.maxJumps = 2;
+    this.dropComboActive = false;
   }
 
   modifyBalance(amount, reason) {
@@ -272,8 +307,17 @@ class Player {
       this.jumpHeld = false;
     }
 
-    if (this.crouching && input.jump && this.grounded) {
-      this.game.floorState.scheduleDrop(this);
+    const dropComboReady = input.comboHeld([
+      ["ArrowUp", "w"],
+      ["ArrowDown", "s", "x"]
+    ], 120);
+    if (this.grounded && dropComboReady && !this.dropComboActive) {
+      this.game.floorState.scheduleDrop();
+      this.dropComboActive = true;
+      this.lastDropComboTime = this.game.now;
+    }
+    if (!dropComboReady || (this.game.now - this.lastDropComboTime) > 400) {
+      this.dropComboActive = false;
     }
 
     this.velocity.y += this.gravity * delta;
@@ -788,7 +832,6 @@ class Game {
     this.updateHud();
     this.loop = this.loop.bind(this);
     requestAnimationFrame(this.loop);
-    setInterval(() => this.updateClock(), 1000);
     this.updateClock();
   }
 
@@ -799,6 +842,7 @@ class Game {
     this.now = performance.now();
 
     this.update(this.delta);
+    this.updateClock();
     this.render();
 
     requestAnimationFrame(this.loop);
