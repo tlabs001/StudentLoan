@@ -1,5 +1,6 @@
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 540;
+const GAME_DURATION_REAL_MS = 2 * 60 * 60 * 1000;
 const FLOOR_COUNT = 36;
 const SERVER_MIN = 3;
 const SERVER_MAX = 5;
@@ -88,6 +89,38 @@ const BOSS_ORDER = BOARD_ABILITIES.map((ability, idx) => ({
   floor: (idx + 1) * 4,
   ability
 }));
+
+function findElementByIds(...ids) {
+  for (const id of ids) {
+    if (!id) continue;
+    const el = document.getElementById(id);
+    if (el) return el;
+  }
+  return null;
+}
+
+function ensureHiddenFallback(id, tag = "div") {
+  const existing = id ? document.getElementById(id) : null;
+  if (existing) return existing;
+  const el = document.createElement(tag);
+  if (id) el.id = id;
+  el.style.display = "none";
+  if (document.body) {
+    document.body.appendChild(el);
+  } else {
+    document.addEventListener("DOMContentLoaded", () => document.body.appendChild(el), { once: true });
+  }
+  return el;
+}
+
+function formatCountdown(ms) {
+  const clamped = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(clamped / 3600);
+  const minutes = Math.floor((clamped % 3600) / 60);
+  const seconds = clamped % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
 
 class Input {
   constructor() {
@@ -705,16 +738,22 @@ class FloorState {
 
 class Game {
   constructor(canvas) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+    this.canvas = canvas || findElementByIds("game-canvas", "game");
+    if (!this.canvas) {
+      throw new Error("Game canvas element not found");
+    }
+    this.ctx = this.canvas.getContext("2d");
     this.input = new Input();
     this.player = new Player(this);
     this.projectiles = [];
     this.items = [];
-    this.modeToggle = document.getElementById("test-mode-toggle");
-    this.modeToggle.addEventListener("change", () => {
-      this.player.modeTestRevive = this.modeToggle.checked;
-    });
+    this.modeToggle = findElementByIds("test-mode-toggle");
+    if (this.modeToggle) {
+      this.player.modeTestRevive = !!this.modeToggle.checked;
+      this.modeToggle.addEventListener("change", () => {
+        this.player.modeTestRevive = this.modeToggle.checked;
+      });
+    }
     document.querySelectorAll('input[name="weapon"]').forEach((input) => {
       input.addEventListener("change", (event) => {
         this.player.weapon = event.target.value;
@@ -726,8 +765,25 @@ class Game {
     this.delta = 0;
     this.lastTime = 0;
     this.disableHealUntil = 0;
-    this.logElement = document.getElementById("event-log");
-    this.objectiveList = document.getElementById("objective-list");
+    this.logElement = findElementByIds("event-log", "log");
+    if (!this.logElement) {
+      this.logElement = ensureHiddenFallback("event-log", "div");
+    }
+    this.objectiveList = findElementByIds("objective-list");
+    if (!this.objectiveList) {
+      this.objectiveList = ensureHiddenFallback("objective-list", "ul");
+    }
+    this.hud = {
+      floor: findElementByIds("floor-display", "floor"),
+      health: findElementByIds("health-display", "checkVal"),
+      score: findElementByIds("score-display"),
+      intel: findElementByIds("intel-display", "intelPill"),
+      servers: findElementByIds("server-display", "servers"),
+      clock: findElementByIds("clock-display", "time"),
+    };
+    this.runStartMs = performance.now();
+    this.pausedMs = 0;
+    this.pauseStarted = null;
     this.setupObjectiveList();
     this.updateHud();
     this.loop = this.loop.bind(this);
@@ -1434,30 +1490,46 @@ class Game {
   }
 
   updateHud() {
-    document.getElementById("floor-display").textContent = this.floor;
-    document.getElementById("health-display").textContent = `$${Math.round(this.player.health)}`;
-    document.getElementById("score-display").textContent = this.player.score;
-    document.getElementById("intel-display").textContent = this.player.intel;
-    document.getElementById("server-display").textContent = `${this.floorState.servers.filter((s) => s.destroyed).length} / ${this.floorState.servers.length}`;
+    const destroyed = this.floorState ? this.floorState.servers.filter((s) => s.destroyed).length : 0;
+    const total = this.floorState ? this.floorState.servers.length : 0;
+    if (this.hud.floor) {
+      this.hud.floor.textContent = `Floor ${this.floor} / ${FLOOR_COUNT}`;
+    }
+    if (this.hud.health) {
+      const value = Math.round(this.player.health);
+      this.hud.health.textContent = this.hud.health.id === "checkVal" ? `$${value}` : `${value}`;
+    }
+    if (this.hud.score) {
+      this.hud.score.textContent = this.player.score;
+    }
+    if (this.hud.intel) {
+      const text = this.hud.intel.id === "intelPill" ? `Intel: ${this.player.intel}` : `${this.player.intel}`;
+      this.hud.intel.textContent = text;
+    }
+    if (this.hud.servers) {
+      const value = `${destroyed} / ${total}`;
+      this.hud.servers.textContent = this.hud.servers.id === "servers" ? `Servers: ${value}` : value;
+    }
   }
 
   updateClock() {
-    const now = new Date();
-    const midnight = new Date(now);
-    midnight.setHours(24, 0, 0, 0);
-    const diff = midnight - now;
-    if (diff <= 0) {
-      document.getElementById("clock-display").textContent = "00:00:00";
-      return;
+    if (!this.hud.clock) return;
+    const nowMs = performance.now();
+    const pausedDuration = this.pausedMs + (this.pauseStarted ? nowMs - this.pauseStarted : 0);
+    const remaining = GAME_DURATION_REAL_MS - (nowMs - this.runStartMs - pausedDuration);
+    const formatted = formatCountdown(remaining);
+    if (this.hud.clock.id === "time") {
+      this.hud.clock.textContent = `${formatted} ➜ 12:00 AM`;
+    } else {
+      this.hud.clock.textContent = formatted;
     }
-    const hours = Math.floor(diff / 3600000);
-    const minutes = Math.floor((diff % 3600000) / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
-    const pad = (n) => String(n).padStart(2, "0");
-    document.getElementById("clock-display").textContent = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }
 
   log(message) {
+    if (!this.logElement) {
+      console.log(message);
+      return;
+    }
     const tag = document.createElement("span");
     tag.textContent = message;
     this.logElement.prepend(tag);
@@ -1467,6 +1539,7 @@ class Game {
   }
 
   setupObjectiveList() {
+    if (!this.objectiveList) return;
     this.objectiveList.innerHTML = "";
     const objectives = [];
     if (this.floorState.type === "server") {
@@ -1995,7 +2068,13 @@ class Game {
   }
 
   updateServerProgress() {
-    document.getElementById("server-display").textContent = `${this.floorState.servers.filter((s) => s.destroyed).length} / ${this.floorState.servers.length}`;
+    if (!this.floorState) return;
+    const destroyed = this.floorState.servers.filter((s) => s.destroyed).length;
+    const total = this.floorState.servers.length;
+    if (this.hud.servers) {
+      const value = `${destroyed} / ${total}`;
+      this.hud.servers.textContent = this.hud.servers.id === "servers" ? `Servers: ${value}` : value;
+    }
   }
 
   update(delta) {
@@ -2024,5 +2103,10 @@ class Game {
   }
 }
 
-const game = new Game(document.getElementById("game-canvas"));
-window.gameInstance = game;
+const canvasElement = document.getElementById("game-canvas") || document.getElementById("game");
+if (canvasElement) {
+  const game = new Game(canvasElement);
+  window.gameInstance = game;
+} else {
+  console.error("Unable to initialise game: canvas element missing");
+}
