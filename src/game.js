@@ -11,6 +11,7 @@ const PLAYER_SAVINGS_MAX = 1200;
 const PLAYER_START_SAVINGS = 1200;
 const PLAYER_SPAWN_X = 80;
 const PLAYER_SPAWN_Y = CANVAS_HEIGHT - 120;
+const MIN_GUARD_SPAWN_X = PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
 const DAMAGE_AMOUNT = 10;
 const MELEE_HOTKEY_COOLDOWN = 250;
 const ATTACK_KEYS = ["e", "j"];
@@ -1515,17 +1516,22 @@ class Game {
     const exitCenter = exit ? exit.x + (exit.width || 0) / 2 : CANVAS_WIDTH - 80;
     const spawnBaseX = spawnArea?.x ?? 0;
     const spawnBaseWidth = spawnArea?.width ?? (CANVAS_WIDTH - 160);
-    let spawnMin = Math.max(PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2, spawnBaseX);
+    let spawnMin = Math.max(MIN_GUARD_SPAWN_X, spawnBaseX);
     let spawnMax = Math.min(CANVAS_WIDTH - 60, spawnBaseX + spawnBaseWidth);
     if (spawnMax < spawnMin) {
       spawnMax = spawnMin;
     }
     const clampWorld = (candidate) => Math.min(spawnMax, Math.max(spawnMin, candidate));
+    const safeFromSpawn = (x) => x >= MIN_GUARD_SPAWN_X;
     const safeFromSpawn = (x) => x >= PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
     const exitBuffer = FLASHLIGHT_RANGE * 1.5;
     const safeFromExit = (x) => Math.abs(x - exitCenter) >= exitBuffer;
     const playerMin = (() => {
       if (avoidX === null || avoidX === undefined) {
+        return MIN_GUARD_SPAWN_X;
+      }
+      const desired = avoidX + FLASHLIGHT_RANGE * 2;
+      return Math.min(spawnMax, Math.max(MIN_GUARD_SPAWN_X, desired));
         return PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
       }
       const desired = avoidX + FLASHLIGHT_RANGE * 2;
@@ -1540,6 +1546,7 @@ class Game {
       attempts += 1;
     }
     if (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate))) {
+      const fallbackBase = Math.max(playerMin, MIN_GUARD_SPAWN_X);
       const fallbackBase = Math.max(playerMin, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
       let fallback = clampWorld(fallbackBase);
       if (!safeFromExit(fallback)) {
@@ -1964,6 +1971,7 @@ class Game {
     const desks = this.generateDesks(basePlatforms);
     const decor = this.generateDecor(basePlatforms);
     const vents = this.generateVents(basePlatforms);
+    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, MIN_GUARD_SPAWN_X);
     const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
     const guardSpawnWidth = Math.max(120, CANVAS_WIDTH - guardSpawnMinX - 60);
     const spawnArea = { x: guardSpawnMinX, y: CANVAS_HEIGHT - 140, width: guardSpawnWidth, height: 0 };
@@ -2334,6 +2342,7 @@ class Game {
     if (overrides.weapon) weapon = overrides.weapon;
     const profile = GUARD_WEAPON_PROFILES[weapon] || GUARD_WEAPON_PROFILES.pistol;
     const baseHealth = overrides.maxHealth ?? overrides.health ?? DAMAGE_AMOUNT * 2;
+    const defaultPatrolMin = Math.min(CANVAS_WIDTH - 200, Math.max(40, MIN_GUARD_SPAWN_X));
     const guard = {
       type: "guard",
       width: 28,
@@ -2341,7 +2350,7 @@ class Game {
       position: { x: 0, y: CANVAS_HEIGHT - 140 },
       direction: Math.random() > 0.5 ? 1 : -1,
       speed: Math.max(30, 40 + level * 10 + (profile.speedBonus || 0)),
-      patrol: { min: 40, max: CANVAS_WIDTH - 200 },
+      patrol: { min: defaultPatrolMin, max: Math.max(defaultPatrolMin, CANVAS_WIDTH - 200) },
       weapon,
       shotInterval: profile.shotInterval,
       attackInterval: profile.attackInterval,
@@ -2356,15 +2365,26 @@ class Game {
       aggressive: overrides.aggressive || false
     };
     const availablePlatforms = platforms.filter((platform) => platform.y < CANVAS_HEIGHT - 20);
-    const basePlatform = overrides.basePlatform || (availablePlatforms.length ? availablePlatforms[Math.floor(Math.random() * availablePlatforms.length)] : null);
+    const safePlatforms = availablePlatforms.filter((platform) => {
+      const reach = platform.x + platform.width - guard.width - 12;
+      return reach >= MIN_GUARD_SPAWN_X;
+    });
+    const platformPool = safePlatforms.length ? safePlatforms : availablePlatforms;
+    const basePlatform = overrides.basePlatform || (platformPool.length ? platformPool[Math.floor(Math.random() * platformPool.length)] : null);
     if (basePlatform) {
       guard.basePlatform = basePlatform;
       guard.position.y = basePlatform.y - guard.height;
       const min = basePlatform.x + 12;
       const max = basePlatform.x + basePlatform.width - guard.width - 12;
+      let patrolMin = Math.max(12, min);
+      let patrolMax = Math.max(patrolMin + 40, max);
+      if (patrolMax >= MIN_GUARD_SPAWN_X) {
+        patrolMin = Math.max(patrolMin, MIN_GUARD_SPAWN_X);
+        patrolMax = Math.max(patrolMin, max);
+      }
       guard.patrol = {
-        min: Math.max(12, min),
-        max: Math.max(min + 40, max)
+        min: patrolMin,
+        max: Math.max(patrolMin, patrolMax)
       };
     }
     guard.flashlight = { x: guard.position.x, y: guard.position.y, length: FLASHLIGHT_RANGE, direction: guard.direction };
