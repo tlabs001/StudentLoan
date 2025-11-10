@@ -94,6 +94,178 @@ const CHECKING_HUD_MAX = Math.max(1, GAME_PARAMS.player.checkingHudMax);
 const SAVINGS_HUD_MAX = Math.max(1, GAME_PARAMS.player.savingsHudMax);
 
 (()=>{
+// ===== Color utilities & palettes =====
+function clamp01(v){ return Math.min(1, Math.max(0, v)); }
+function hexToRgb(hex){
+  if(!hex) return {r:0,g:0,b:0};
+  let n = hex.replace('#','');
+  if(n.length===3){ n = n.split('').map(ch=>ch+ch).join(''); }
+  const int = parseInt(n,16);
+  return { r:(int>>16)&255, g:(int>>8)&255, b:int&255 };
+}
+function rgbToHex(r,g,b){
+  const toHex = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2,'0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+function rgbToHsl(r,g,b){
+  r/=255; g/=255; b/=255;
+  const max=Math.max(r,g,b), min=Math.min(r,g,b);
+  let h=0, s=0;
+  const l=(max+min)/2;
+  if(max!==min){
+    const d=max-min;
+    s = l>0.5 ? d/(2-max-min) : d/(max+min);
+    switch(max){
+      case r: h = (g-b)/d + (g<b?6:0); break;
+      case g: h = (b-r)/d + 2; break;
+      default: h = (r-g)/d + 4; break;
+    }
+    h *= 60;
+  }
+  return {h, s, l};
+}
+function hslToRgb(h,s,l){
+  const C = (1 - Math.abs(2*l - 1)) * s;
+  const hh = (h % 360) / 60;
+  const X = C * (1 - Math.abs((hh % 2) - 1));
+  let r1=0,g1=0,b1=0;
+  if(hh>=0 && hh<1){ r1=C; g1=X; }
+  else if(hh<2){ r1=X; g1=C; }
+  else if(hh<3){ g1=C; b1=X; }
+  else if(hh<4){ g1=X; b1=C; }
+  else if(hh<5){ r1=X; b1=C; }
+  else { r1=C; b1=X; }
+  const m = l - C/2;
+  return { r:(r1+m)*255, g:(g1+m)*255, b:(b1+m)*255 };
+}
+function shiftHue(hex, shiftDeg){
+  if(!hex) return hex;
+  const {r,g,b}=hexToRgb(hex);
+  let {h,s,l}=rgbToHsl(r,g,b);
+  h = (h + shiftDeg) % 360; if(h<0) h+=360;
+  s = clamp01(s + 0.08);
+  if(l < 0.18) l = clamp01(l + 0.05);
+  const rgb = hslToRgb(h,s,l);
+  return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+function adjustLightness(hex, delta){
+  if(!hex) return hex;
+  const {r,g,b}=hexToRgb(hex);
+  let {h,s,l}=rgbToHsl(r,g,b);
+  l = clamp01(l + delta);
+  const rgb = hslToRgb(h,s,l);
+  return rgbToHex(rgb.r, rgb.g, rgb.b);
+}
+function toRgba(hex, alpha){
+  const {r,g,b}=hexToRgb(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+const BASE_ENV_COLORS = {
+  background:'#0e0f13',
+  wall:'#14161b',
+  platform:'#2b2e36',
+  desk:'#5a4634',
+  deskEdge:'#3e2f23',
+  deskLeg:'#3a2a1f',
+  plantLeaf:'#2f7a3a',
+  plantPot:'#6b4e31',
+  waterCooler:'#9ec7ff',
+  waterGlass:'#cfe3ff',
+  ladder:'#6c6c6c',
+  movingPlatform:'#444444',
+  movingPlatformHighlight:'#777777',
+  ventOpen:'#6c6c6c',
+  ventClosed:'#4b4b4b',
+  windowBase:'#78a0dc',
+  windowHighlight:'#c8dcff',
+  alarmDisabled:'#2b4b2b',
+  alarmActive:'#6b2222',
+  doorFrame:'#2a2a2a',
+  doorPanel:'#4a2a2a',
+  serverActive:'#3e6cff',
+  serverDestroyed:'#333333'
+};
+const WORKER_STYLES = [
+  { suit:'#2f3f6a', shirt:'#e1e6f0', tie:'#d13c3c', accent:'#1f2a44' },
+  { suit:'#3a2f6b', shirt:'#f3f2f7', tie:'#3c8bd1', accent:'#221b3a' },
+  { suit:'#2f5a46', shirt:'#f1f7f0', tie:'#d1863c', accent:'#1e3428' },
+  { suit:'#5a2f3f', shirt:'#f7f1f0', tie:'#3c6bd1', accent:'#2b1a26' }
+];
+const WORKER_SKIN_TONES = ['#f7cfa3','#f0b887','#e0a36b'];
+const WORKER_HAIR_TONES = ['#2f2a1d','#46311f','#1f1f1f','#6b4222'];
+const PALETTE_HUE_STEP = 18;
+
+function computePaletteForFloor(floor){
+  const hueShift = ((floor-1) * PALETTE_HUE_STEP) % 360;
+  const shift = hex => shiftHue(hex, hueShift);
+  return {
+    hueShift,
+    background: shift(BASE_ENV_COLORS.background),
+    wall: shift(BASE_ENV_COLORS.wall),
+    platform: shift(BASE_ENV_COLORS.platform),
+    desk: shift(BASE_ENV_COLORS.desk),
+    deskEdge: shift(BASE_ENV_COLORS.deskEdge),
+    deskLeg: shift(BASE_ENV_COLORS.deskLeg),
+    plantLeaf: shift(BASE_ENV_COLORS.plantLeaf),
+    plantPot: shift(BASE_ENV_COLORS.plantPot),
+    waterCooler: shift(BASE_ENV_COLORS.waterCooler),
+    waterGlass: shift(BASE_ENV_COLORS.waterGlass),
+    ladder: shift(BASE_ENV_COLORS.ladder),
+    movingPlatform: shift(BASE_ENV_COLORS.movingPlatform),
+    movingPlatformHighlight: shift(BASE_ENV_COLORS.movingPlatformHighlight),
+    ventOpen: shift(BASE_ENV_COLORS.ventOpen),
+    ventClosed: shift(BASE_ENV_COLORS.ventClosed),
+    windowBase: toRgba(shift(BASE_ENV_COLORS.windowBase), 0.22),
+    windowHighlight: toRgba(shift(BASE_ENV_COLORS.windowHighlight), 0.07),
+    alarmDisabled: shift(BASE_ENV_COLORS.alarmDisabled),
+    alarmActive: shift(BASE_ENV_COLORS.alarmActive),
+    doorFrame: shift(BASE_ENV_COLORS.doorFrame),
+    doorPanel: shift(BASE_ENV_COLORS.doorPanel),
+    doorGlow: toRgba(shift('#78ffb0'), 0.22),
+    flashlightCone: toRgba(shift('#fff19a'), 0.10),
+    serverActive: shift(BASE_ENV_COLORS.serverActive),
+    serverDestroyed: shift(BASE_ENV_COLORS.serverDestroyed)
+  };
+}
+
+let activePalette = computePaletteForFloor(1);
+
+function createWorkerAppearance(){
+  const hueShift = activePalette ? activePalette.hueShift : 0;
+  const shift = hex => shiftHue(hex, hueShift);
+  const style = WORKER_STYLES[Math.floor(Math.random()*WORKER_STYLES.length)];
+  const skinBase = WORKER_SKIN_TONES[Math.floor(Math.random()*WORKER_SKIN_TONES.length)];
+  const hairBase = WORKER_HAIR_TONES[Math.floor(Math.random()*WORKER_HAIR_TONES.length)];
+  const suit = shift(style.suit);
+  const shirt = shift(style.shirt);
+  const tie = style.tie ? shift(style.tie) : null;
+  const accent = style.accent ? shift(style.accent) : adjustLightness(suit, -0.12);
+  const hair = shift(hairBase);
+  const skin = shift(skinBase);
+  const pants = adjustLightness(suit, -0.06);
+  return {
+    suit,
+    suitShadow: adjustLightness(suit, -0.12),
+    shirt,
+    tie,
+    tieKnot: tie ? adjustLightness(tie, -0.1) : null,
+    accent,
+    hair,
+    hairShadow: adjustLightness(hair, -0.12),
+    skin,
+    skinShadow: adjustLightness(skin, -0.07),
+    pants,
+    shoes: adjustLightness(pants, -0.18),
+    badge: adjustLightness(shirt, -0.35),
+    cuffs: adjustLightness(shirt, -0.1),
+    clipboard: shift('#c8c1a7'),
+    clipboardPaper: shift('#f9f6e8'),
+    glasses: shift('#dbe3f0'),
+    mouth: adjustLightness(skin, -0.2)
+  };
+}
+
 // ===== Audio =====
 let ac;
 function getAC(){ if(!ac){ ac=new (window.AudioContext||window.webkitAudioContext)(); } return ac; }
@@ -690,6 +862,8 @@ function makeLevel(i){
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
 
+  activePalette = computePaletteForFloor(i);
+
   const yBase = H-50;
   // Back wall & windows
   walls.push({x:0,y:0,w:3*W,h:H});
@@ -818,16 +992,26 @@ function makeLevel(i){
     if(max <= min) continue;
     const startX = min + Math.random() * (max - min);
     const speed = 0.45 + Math.random() * 0.35;
+    const vx = (Math.random()<0.5 ? -speed : speed);
+    const appearance = createWorkerAppearance();
+    const showTie = !!appearance.tie && Math.random()<0.85;
     workers.push({
       x:startX,
       y:zone.y,
       w:18,
       h:38,
-      vx: (Math.random()<0.5 ? -speed : speed),
+      vx,
       minX:min,
       maxX:max,
       bob: Math.random() * Math.PI * 2,
-      alive:true
+      alive:true,
+      facing: vx>=0?1:-1,
+      appearance,
+      showTie,
+      hasBadge: Math.random()<0.6,
+      hasClipboard: Math.random()<0.28,
+      clipboardSide: Math.random()<0.5 ? -1 : 1,
+      glasses: Math.random()<0.24
     });
   }
 
@@ -1203,7 +1387,8 @@ function update(dt){
       worker.x += worker.vx;
       if(worker.x <= worker.minX){ worker.x = worker.minX; worker.vx = Math.abs(worker.vx); }
       if(worker.x >= worker.maxX){ worker.x = worker.maxX; worker.vx = -Math.abs(worker.vx); }
-      worker.bob = (worker.bob || 0) + dt * 2.5;
+      worker.facing = worker.vx >= 0 ? 1 : -1;
+      worker.bob = (worker.bob || 0) + dt * (2.2 + Math.abs(worker.vx)*3.2);
     }
 
     // Spotlights add alarm if touched
@@ -1437,60 +1622,60 @@ function update(dt){
 
 // ========= Draw =========
 function draw(){
-  ctx.fillStyle='#0e0f13'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = activePalette.background; ctx.fillRect(0,0,W,H);
 
   if(!inSub){
     const ox = -camX;
 
     // back wall
     for(const wall of walls){
-      ctx.fillStyle = wall.isPlatform? '#2b2e36' : '#14161b';
+      ctx.fillStyle = wall.isPlatform? activePalette.platform : activePalette.wall;
       ctx.fillRect(wall.x+ox, wall.y, wall.w, wall.h);
     }
     // windows
     for(const wdw of windowsArr){
-      ctx.fillStyle='rgba(120,160,220,0.22)';
+      ctx.fillStyle = activePalette.windowBase;
       ctx.fillRect(wdw.x+ox,wdw.y,wdw.w,wdw.h);
-      ctx.fillStyle='rgba(200,220,255,0.07)';
+      ctx.fillStyle = activePalette.windowHighlight;
       ctx.fillRect(wdw.x+3+ox,wdw.y+3,wdw.w-6,wdw.h-6);
     }
     // floor
-    ctx.fillStyle='#2b2e36'; ctx.fillRect(floorSlab.x+ox,floorSlab.y,floorSlab.w,floorSlab.h);
+    ctx.fillStyle = activePalette.platform; ctx.fillRect(floorSlab.x+ox,floorSlab.y,floorSlab.w,floorSlab.h);
 
     // desks
     for(const d of desks){
-      ctx.fillStyle='#5a4634'; ctx.fillRect(d.x+ox,d.y,d.w,d.h);
-      ctx.fillStyle='#3e2f23'; ctx.fillRect(d.x+6+ox,d.y+d.h-10,d.w-12,8);
-      ctx.fillStyle='#3a2a1f'; ctx.fillRect(d.x+4+ox,d.y+d.h,6,10); ctx.fillRect(d.x+d.w-10+ox,d.y+d.h,6,10);
+      ctx.fillStyle = activePalette.desk; ctx.fillRect(d.x+ox,d.y,d.w,d.h);
+      ctx.fillStyle = activePalette.deskEdge; ctx.fillRect(d.x+6+ox,d.y+d.h-10,d.w-12,8);
+      ctx.fillStyle = activePalette.deskLeg; ctx.fillRect(d.x+4+ox,d.y+d.h,6,10); ctx.fillRect(d.x+d.w-10+ox,d.y+d.h,6,10);
     }
     // plants
     for(const p of plants){
-      ctx.fillStyle='#2f7a3a'; ctx.fillRect(p.x+4+ox,p.y,16,22);
-      ctx.fillStyle='#6b4e31'; ctx.fillRect(p.x+ox,p.y+22,24,8);
+      ctx.fillStyle = activePalette.plantLeaf; ctx.fillRect(p.x+4+ox,p.y,16,22);
+      ctx.fillStyle = activePalette.plantPot; ctx.fillRect(p.x+ox,p.y+22,24,8);
     }
     // water cooler
     for(const wc of waterCoolers){
-      ctx.fillStyle='#9ec7ff'; ctx.fillRect(wc.x+ox,wc.y, wc.w, wc.h);
-      ctx.fillStyle='#cfe3ff'; ctx.fillRect(wc.x+4+ox,wc.y+6, wc.w-8, wc.h-12);
+      ctx.fillStyle = activePalette.waterCooler; ctx.fillRect(wc.x+ox,wc.y, wc.w, wc.h);
+      ctx.fillStyle = activePalette.waterGlass; ctx.fillRect(wc.x+4+ox,wc.y+6, wc.w-8, wc.h-12);
     }
 
     // ladders
     for(const l of ladders){
-      ctx.fillStyle='#6c6c6c'; ctx.fillRect(l.x+ox,l.y,l.w,l.h);
+      ctx.fillStyle = activePalette.ladder; ctx.fillRect(l.x+ox,l.y,l.w,l.h);
       ctx.strokeStyle='rgba(255,255,255,0.2)';
       for(let yy=0; yy<l.h; yy+=10){ ctx.beginPath(); ctx.moveTo(l.x+2+ox, l.y+yy); ctx.lineTo(l.x+l.w-2+ox, l.y+yy); ctx.stroke(); }
     }
 
     // moving platforms
     for(const m of movingPlatforms){
-      ctx.fillStyle='#444';
+      ctx.fillStyle = activePalette.movingPlatform;
       ctx.fillRect(m.x+ox,m.y,m.w,m.h);
-      ctx.fillStyle='#777'; ctx.fillRect(m.x+4+ox,m.y+2,m.w-8,2);
+      ctx.fillStyle = activePalette.movingPlatformHighlight; ctx.fillRect(m.x+4+ox,m.y+2,m.w-8,2);
     }
 
     // vents
     for(const v of vents){
-      ctx.fillStyle=v.open? '#6c6c6c' : '#4b4b4b';
+      ctx.fillStyle = v.open? activePalette.ventOpen : activePalette.ventClosed;
       ctx.fillRect(v.x+ox,v.y,v.w,v.h);
       ctx.strokeStyle='rgba(255,255,255,0.15)';
       for(let i=2;i<v.w-2;i+=4){ ctx.beginPath(); ctx.moveTo(v.x+i+ox,v.y+2); ctx.lineTo(v.x+i+ox,v.y+v.h-2); ctx.stroke(); }
@@ -1499,16 +1684,110 @@ function draw(){
     // workers
     for(const worker of workers){
       if(!worker.alive) continue;
-      const wobble = Math.sin(worker.bob || 0) * 2;
-      ctx.fillStyle='#ffc36b';
-      ctx.fillRect(worker.x+ox, worker.y + wobble, worker.w, worker.h);
-      ctx.fillStyle='#2f2a1d';
-      ctx.fillRect(worker.x+3+ox, worker.y - 6 + wobble, worker.w-6, 6);
+      const appearance = worker.appearance || createWorkerAppearance();
+      const wobble = Math.sin(worker.bob || 0) * 1.2;
+      const walkSwing = Math.sin((worker.bob || 0) * 1.1);
+      const facing = worker.facing || 1;
+      const width = worker.w;
+      const bodyX = worker.x + ox;
+      const bodyY = worker.y + wobble;
+      const headHeight = 9;
+      const hairHeight = 3;
+      const torsoHeight = 16;
+      const legHeight = Math.max(8, worker.h - headHeight - torsoHeight);
+      const headWidth = width - 4;
+      const headX = bodyX + 2;
+      const hairY = bodyY - hairHeight;
+      const faceY = hairY + hairHeight;
+      const torsoY = bodyY + headHeight;
+      const legY = torsoY + torsoHeight;
+      const armSwing = walkSwing * 1.6;
+
+      const legWidth = Math.floor((width-6)/2);
+      const stepLift = Math.sin((worker.bob || 0) * 0.9);
+      const leftLift = Math.max(0, stepLift) * 2.4;
+      const rightLift = Math.max(0, -stepLift) * 2.4;
+      const leftLegX = bodyX + 2;
+      const rightLegX = bodyX + width - 2 - legWidth;
+      ctx.fillStyle = appearance.pants;
+      ctx.fillRect(leftLegX, legY, legWidth, legHeight - leftLift);
+      ctx.fillRect(rightLegX, legY, legWidth, legHeight - rightLift);
+      ctx.fillStyle = appearance.shoes;
+      ctx.fillRect(leftLegX, legY + legHeight - leftLift, legWidth, 2);
+      ctx.fillRect(rightLegX, legY + legHeight - rightLift, legWidth, 2);
+
+      ctx.fillStyle = appearance.shirt;
+      ctx.fillRect(bodyX+3, torsoY, width-6, 6);
+      ctx.fillStyle = appearance.suit;
+      ctx.fillRect(bodyX+1, torsoY+4, width-2, torsoHeight-4);
+      ctx.fillStyle = appearance.suitShadow;
+      ctx.fillRect(bodyX+1, torsoY+4, 3, torsoHeight-4);
+      ctx.fillRect(bodyX+width-4, torsoY+4, 3, torsoHeight-4);
+      ctx.fillStyle = appearance.accent;
+      ctx.fillRect(bodyX+2, torsoY+4, 2, torsoHeight-6);
+      ctx.fillRect(bodyX+width-4, torsoY+4, 2, torsoHeight-6);
+
+      const leftArmX = bodyX - 1 + (facing>0 ? -armSwing : armSwing);
+      const rightArmX = bodyX + width - 2 + (facing>0 ? armSwing : -armSwing);
+      ctx.fillStyle = appearance.suit;
+      ctx.fillRect(leftArmX, torsoY+4, 3, torsoHeight-4);
+      ctx.fillRect(rightArmX, torsoY+4, 3, torsoHeight-4);
+      ctx.fillStyle = appearance.cuffs;
+      ctx.fillRect(leftArmX, torsoY+torsoHeight-4, 3, 2);
+      ctx.fillRect(rightArmX, torsoY+torsoHeight-4, 3, 2);
+      ctx.fillStyle = appearance.skin;
+      ctx.fillRect(leftArmX, torsoY+torsoHeight-2, 3, 3);
+      ctx.fillRect(rightArmX, torsoY+torsoHeight-2, 3, 3);
+
+      if(worker.hasClipboard){
+        const useLeft = worker.clipboardSide === -1;
+        const handX = useLeft ? leftArmX : rightArmX;
+        const boardX = handX + (useLeft ? -5 : 3);
+        const boardY = torsoY + torsoHeight - 3;
+        ctx.fillStyle = appearance.clipboard;
+        ctx.fillRect(boardX, boardY-6, 5, 8);
+        ctx.fillStyle = appearance.clipboardPaper;
+        ctx.fillRect(boardX+1, boardY-5, 3, 4);
+      }
+
+      if(worker.showTie){
+        const tieX = Math.floor(bodyX + width/2) - 1;
+        if(appearance.tieKnot){ ctx.fillStyle = appearance.tieKnot; ctx.fillRect(tieX, torsoY+2, 2, 3); }
+        ctx.fillStyle = appearance.tie || appearance.accent;
+        ctx.fillRect(tieX, torsoY+5, 2, torsoHeight-6);
+        ctx.fillRect(tieX-1, torsoY+torsoHeight-3, 4, 3);
+      }
+      if(worker.hasBadge){
+        const badgeX = facing>0 ? bodyX+width-6 : bodyX+2;
+        ctx.fillStyle = appearance.badge;
+        ctx.fillRect(badgeX, torsoY+6, 3, 3);
+      }
+
+      ctx.fillStyle = appearance.hairShadow;
+      ctx.fillRect(headX, hairY-1, headWidth, 2);
+      ctx.fillStyle = appearance.hair;
+      ctx.fillRect(headX, hairY, headWidth, hairHeight);
+      ctx.fillStyle = appearance.skin;
+      ctx.fillRect(headX, faceY, headWidth, headHeight - hairHeight);
+      ctx.fillStyle = appearance.skinShadow;
+      ctx.fillRect(headX + Math.floor(headWidth/2)-1, faceY+3, 2, 2);
+      const eyeY = faceY + 3;
+      ctx.fillStyle = '#1b1b1b';
+      ctx.fillRect(headX+2, eyeY, 2, 1);
+      ctx.fillRect(headX+headWidth-4, eyeY, 2, 1);
+      if(worker.glasses){
+        ctx.fillStyle = appearance.glasses;
+        ctx.fillRect(headX+1, eyeY-1, headWidth-2, 2);
+        ctx.fillRect(headX+1, eyeY-1, 1, 3);
+        ctx.fillRect(headX+headWidth-2, eyeY-1, 1, 3);
+      }
+      ctx.fillStyle = appearance.mouth;
+      ctx.fillRect(headX+3, faceY + headHeight - 3, headWidth-6, 1);
     }
 
     // servers
     for(const s of servers){
-      ctx.fillStyle = s.destroyed? '#333' : '#3e6cff';
+      ctx.fillStyle = s.destroyed? activePalette.serverDestroyed : activePalette.serverActive;
       ctx.fillRect(s.x+ox,s.y,s.w,s.h);
       if(!s.destroyed){
         ctx.fillStyle = s.armed? '#ffd54d' : (Math.random()<0.5?'#ff4545':'#45ff59');
@@ -1518,13 +1797,13 @@ function draw(){
 
     // alarm panel
     for(const a of panels){
-      ctx.fillStyle = a.disabled ? '#2b4b2b' : '#6b2222';
+      ctx.fillStyle = a.disabled ? activePalette.alarmDisabled : activePalette.alarmActive;
       ctx.fillRect(a.x+ox,a.y,a.w,a.h);
     }
 
     // guards with flashlight cone
     for(const g of guards){
-      ctx.fillStyle='rgba(255,255,160,0.10)';
+      ctx.fillStyle = activePalette.flashlightCone;
       const coneDir = (g.vx>=0?1:-1);
       ctx.beginPath();
       ctx.moveTo(g.x + (coneDir>0?g.w:0)+ox, g.y+10);
@@ -1550,12 +1829,12 @@ function draw(){
     }
 
     // Elevator Door
-    ctx.fillStyle='#2a2a2a'; ctx.fillRect(door.x+ox, door.y, door.w, door.h);
+    ctx.fillStyle = activePalette.doorFrame; ctx.fillRect(door.x+ox, door.y, door.w, door.h);
     const panelH = door.h-20;
     const liftPx = door.lift * (panelH);
-    ctx.fillStyle='#4a2a2a'; ctx.fillRect(door.x+8+ox, door.y+door.h-panelH - liftPx, door.w-16, panelH);
+    ctx.fillStyle = activePalette.doorPanel; ctx.fillRect(door.x+8+ox, door.y+door.h-panelH - liftPx, door.w-16, panelH);
     if(now()<door.glowUntil){
-      ctx.fillStyle='rgba(120,255,160,0.22)';
+      ctx.fillStyle = activePalette.doorGlow;
       ctx.fillRect(door.x-6+ox, door.y-6, door.w+12, door.h+12);
     }
     if(nearDoor() && door.unlocked && !door.open){
