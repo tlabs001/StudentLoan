@@ -5,8 +5,12 @@ const FLOOR_COUNT = 36;
 const SERVER_MIN = 3;
 const SERVER_MAX = 5;
 const FLASHLIGHT_RANGE = 180;
-const PLAYER_BASE_HEALTH = 1200;
+const PLAYER_CHECKING_MAX = 250;
+const PLAYER_START_CHECKING = 100;
+const PLAYER_SAVINGS_MAX = 1200;
+const PLAYER_START_SAVINGS = 1200;
 const DAMAGE_AMOUNT = 10;
+const MELEE_HOTKEY_COOLDOWN = 250;
 const GUARD_WEAPON_PROFILES = {
   pistol: { shotInterval: 700, attackInterval: 900, speedBonus: 0 },
   auto: { shotInterval: 220, attackInterval: 600, speedBonus: 10 },
@@ -126,6 +130,8 @@ class Input {
   constructor() {
     this.keys = new Map();
     this.downTimestamps = new Map();
+    this.pendingPressed = new Set();
+    this.framePressed = new Set();
     window.addEventListener("keydown", (event) => {
       const key = this.normalizeKey(event.key);
       if (["arrowup", "arrowdown", "arrowleft", "arrowright", "space"].includes(key)) {
@@ -133,6 +139,7 @@ class Input {
       }
       if (!this.keys.get(key)) {
         this.downTimestamps.set(key, performance.now());
+        this.pendingPressed.add(key);
       }
       this.keys.set(key, true);
     });
@@ -149,8 +156,18 @@ class Input {
     return raw.toLowerCase();
   }
 
+  beginFrame() {
+    this.framePressed.clear();
+    this.pendingPressed.forEach((key) => this.framePressed.add(key));
+    this.pendingPressed.clear();
+  }
+
   isPressed(...candidates) {
     return candidates.some((key) => this.keys.get(this.normalizeKey(key)));
+  }
+
+  pressedThisFrame(...candidates) {
+    return candidates.some((key) => this.framePressed.has(this.normalizeKey(key)));
   }
 
   heldDuration(key) {
@@ -185,7 +202,7 @@ class Input {
   }
 
   get jump() {
-    return this.isPressed("space", "ArrowUp", "w");
+    return this.isPressed("space");
   }
 
   get crouch() {
@@ -193,7 +210,7 @@ class Input {
   }
 
   get attack() {
-    return this.isPressed("space", "j", "e");
+    return this.isPressed("j", "e");
   }
 }
 
@@ -214,7 +231,8 @@ class Player {
     this.grounded = false;
     this.crouching = false;
     this.hidden = false;
-    this.health = PLAYER_BASE_HEALTH;
+    this.health = PLAYER_START_CHECKING;
+    this.savings = PLAYER_START_SAVINGS;
     this.score = 0;
     this.intel = 0;
     this.modeTestRevive = false;
@@ -222,8 +240,12 @@ class Player {
     this.lastAttack = 0;
     this.attackCooldowns = {
       pistol: 250,
+      silenced: 250,
+      flamethrower: 150,
       melee: 400,
-      flamethrower: 150
+      grenade: 800,
+      saber: 320,
+      machine: 140
     };
     this.projectileSpeedModifier = 1;
     this.canHeal = true;
@@ -234,6 +256,8 @@ class Player {
     this.lastVentToggle = 0;
     this.dropComboActive = false;
     this.lastDropComboTime = 0;
+    this.lastDirectionalMelee = 0;
+    this.facing = 1;
   }
 
   respawn() {
@@ -249,35 +273,64 @@ class Player {
     this.featherTimer = 0;
     this.maxJumps = 2;
     this.dropComboActive = false;
+    this.facing = 1;
+    this.lastDirectionalMelee = 0;
   }
 
   modifyBalance(amount, reason) {
-    let delta = amount;
-    if (amount > 0 && !this.canHeal) {
-      delta = 0;
+    if (!amount) {
+      if (reason) {
+        this.game.log(reason);
+      }
+      return;
     }
-    this.health = Math.max(0, Math.min(PLAYER_BASE_HEALTH, this.health + delta));
+    if (amount > 0) {
+      let remaining = amount;
+      const savingsCapacity = PLAYER_SAVINGS_MAX - this.savings;
+      if (savingsCapacity > 0) {
+        const toSavings = Math.min(remaining, savingsCapacity);
+        this.savings += toSavings;
+        remaining -= toSavings;
+      }
+      if (remaining > 0 && this.canHeal && this.savings >= PLAYER_SAVINGS_MAX) {
+        const checkingCapacity = PLAYER_CHECKING_MAX - this.health;
+        if (checkingCapacity > 0) {
+          const toChecking = Math.min(remaining, checkingCapacity);
+          this.health += toChecking;
+          remaining -= toChecking;
+        }
+      }
+    } else {
+      const loss = Math.abs(amount);
+      const checkLoss = Math.min(this.health, loss);
+      this.health -= checkLoss;
+      const savingsLoss = Math.min(this.savings, loss);
+      this.savings -= savingsLoss;
+    }
+    this.health = Math.max(0, Math.min(this.health, PLAYER_CHECKING_MAX));
+    this.savings = Math.max(0, Math.min(this.savings, PLAYER_SAVINGS_MAX));
     if (reason) {
       this.game.log(reason);
     }
-  }
-
-  damage(amount, source) {
-    this.health = Math.max(0, this.health - amount);
-    if (source) {
-      this.game.log(`Lost $${amount} to ${source}.`);
-    }
-    if (this.health <= 0) {
+    if (amount < 0 && this.health <= 0) {
       this.handleDeath();
     }
   }
 
+  damage(amount, source) {
+    const reason = source ? `Lost $${amount} to ${source}.` : undefined;
+    this.modifyBalance(-amount, reason);
+  }
+
   handleDeath() {
     if (this.modeTestRevive) {
-      this.health = PLAYER_BASE_HEALTH;
+      this.health = PLAYER_CHECKING_MAX;
+      this.savings = PLAYER_SAVINGS_MAX;
       this.game.log("Auto payment reversed for testing. Respawning on current floor.");
       this.respawn();
     } else {
+      this.savings = 0;
+      this.game.log("Emergency payments drained your savings account!");
       this.game.resetToFloor(1, true);
     }
   }
@@ -293,6 +346,8 @@ class Player {
     this.velocity.x = 0;
     if (input.left) this.velocity.x = -accel;
     if (input.right) this.velocity.x = accel;
+    if (this.velocity.x < 0) this.facing = -1;
+    if (this.velocity.x > 0) this.facing = 1;
 
     this.crouching = !!input.crouch;
 
@@ -387,7 +442,13 @@ class Projectile {
     this.range = range;
     this.distance = 0;
     this.weapon = weapon;
-    this.radius = weapon === "flame" ? 14 : 6;
+    const radii = {
+      flame: 14,
+      grenade: 12,
+      machine: 5,
+      silenced: 5
+    };
+    this.radius = radii[weapon] ?? 6;
   }
 
   update(delta) {
@@ -791,6 +852,16 @@ class Game {
     this.player = new Player(this);
     this.projectiles = [];
     this.items = [];
+    this.lockedWeapons = new Set(["grenade", "saber", "machine"]);
+    this.weaponButtons = [];
+    this.map = {
+      button: findElementByIds("map-toggle", "btnMap", "mapButton"),
+      panel: findElementByIds("map-panel", "mapPanel", "minimap"),
+      visible: false
+    };
+    if (this.map.button) {
+      this.map.button.addEventListener("click", () => this.toggleMap());
+    }
     this.modeToggle = findElementByIds("test-mode-toggle");
     if (this.modeToggle) {
       this.player.modeTestRevive = !!this.modeToggle.checked;
@@ -800,9 +871,40 @@ class Game {
     }
     document.querySelectorAll('input[name="weapon"]').forEach((input) => {
       input.addEventListener("change", (event) => {
-        this.player.weapon = event.target.value;
+        this.setWeapon(this.normalizeWeaponKey(event.target.value));
       });
     });
+    this.weaponButtons = Array.from(document.querySelectorAll('[data-weapon]'));
+    this.weaponButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const weapon = this.normalizeWeaponKey(btn.getAttribute("data-weapon"));
+        this.setWeapon(weapon);
+      });
+    });
+    window.addEventListener("keydown", (event) => {
+      if (!event || event.repeat) return;
+      const activeElement = document.activeElement;
+      if (activeElement && ["input", "textarea"].includes(activeElement.tagName?.toLowerCase())) return;
+      const key = event.key ? event.key.toLowerCase() : "";
+      const weaponByKey = {
+        "1": "pistol",
+        "2": "silenced",
+        "3": "flamethrower",
+        "4": "melee",
+        "5": "grenade",
+        "6": "saber",
+        "7": "machine"
+      };
+      if (weaponByKey[key]) {
+        event.preventDefault();
+        this.setWeapon(weaponByKey[key]);
+      }
+      if (key === "0" || key === "numpad0") {
+        event.preventDefault();
+        this.toggleMap();
+      }
+    });
+    this.syncWeaponUi();
     this.floor = 1;
     this.floorState = this.generateFloor(this.floor);
     this.now = 0;
@@ -820,6 +922,9 @@ class Game {
     this.hud = {
       floor: findElementByIds("floor-display", "floor"),
       health: findElementByIds("health-display", "checkVal"),
+      savings: findElementByIds("savings-display", "saveVal"),
+      checkingFill: findElementByIds("checking-fill", "checkFill"),
+      savingsFill: findElementByIds("savings-fill", "saveFill"),
       score: findElementByIds("score-display"),
       intel: findElementByIds("intel-display", "intelPill"),
       servers: findElementByIds("server-display", "servers"),
@@ -828,6 +933,7 @@ class Game {
     this.runStartMs = performance.now();
     this.pausedMs = 0;
     this.pauseStarted = null;
+    this.midnightHandled = false;
     this.setupObjectiveList();
     this.updateHud();
     this.loop = this.loop.bind(this);
@@ -837,6 +943,9 @@ class Game {
 
   loop(timestamp) {
     if (!this.lastTime) this.lastTime = timestamp;
+    if (this.input && typeof this.input.beginFrame === "function") {
+      this.input.beginFrame();
+    }
     this.delta = (timestamp - this.lastTime) / 1000;
     this.lastTime = timestamp;
     this.now = performance.now();
@@ -852,6 +961,10 @@ class Game {
     this.projectiles.forEach((projectile) => projectile.update(delta));
     this.projectiles = this.projectiles.filter((projectile) => projectile.distance < projectile.range);
 
+    if (this.input.pressedThisFrame("d")) {
+      this.executeDirectionalMelee();
+    }
+
     // Player weapon usage
     if (this.player.weapon === "flamethrower") {
       if (this.input.attack) {
@@ -866,13 +979,59 @@ class Game {
 
   fireWeapon() {
     const now = this.now;
-    const cooldown = this.player.attackCooldowns[this.player.weapon];
+    const weapon = this.player.weapon;
+    const cooldown = this.player.attackCooldowns[weapon] ?? 300;
     if (now - this.player.lastAttack < cooldown) return;
     this.player.lastAttack = now;
     const direction = this.input.left ? -1 : this.input.right ? 1 : this.playerFacingDirection();
     if (direction === 0) return;
-    if (this.player.weapon === "pistol") {
+    if (weapon === "pistol" || weapon === "silenced") {
       const speed = 480 * this.player.projectileSpeedModifier;
+      this.projectiles.push(new Projectile({
+        x: this.player.position.x + this.player.width / 2,
+        y: this.player.position.y + this.player.height / 2,
+        vx: direction * speed,
+        vy: 0,
+        owner: this.player,
+        damage: DAMAGE_AMOUNT,
+        range: 420,
+        weapon: weapon === "silenced" ? "silenced" : "bullet"
+      }));
+    } else if (weapon === "machine") {
+      const speed = 520 * this.player.projectileSpeedModifier;
+      this.projectiles.push(new Projectile({
+        x: this.player.position.x + this.player.width / 2,
+        y: this.player.position.y + this.player.height / 2,
+        vx: direction * speed,
+        vy: 0,
+        owner: this.player,
+        damage: DAMAGE_AMOUNT,
+        range: 360,
+        weapon: "machine"
+      }));
+    } else if (weapon === "grenade") {
+      const speed = 320 * this.player.projectileSpeedModifier;
+      this.projectiles.push(new Projectile({
+        x: this.player.position.x + this.player.width / 2,
+        y: this.player.position.y + this.player.height / 2,
+        vx: direction * speed,
+        vy: 0,
+        owner: this.player,
+        damage: DAMAGE_AMOUNT * 2,
+        range: 520,
+        weapon: "grenade"
+      }));
+    } else if (weapon === "melee" || weapon === "saber") {
+      const reach = weapon === "saber" ? 56 : 40;
+      const hitbox = {
+        x: direction > 0 ? this.player.position.x + this.player.width : this.player.position.x - reach,
+        y: this.player.position.y + 4,
+        width: reach,
+        height: weapon === "saber" ? this.player.height - 4 : this.player.height - 8
+      };
+      this.resolveMelee(hitbox);
+    } else {
+      const speed = 460 * this.player.projectileSpeedModifier;
       this.projectiles.push(new Projectile({
         x: this.player.position.x + this.player.width / 2,
         y: this.player.position.y + this.player.height / 2,
@@ -883,14 +1042,6 @@ class Game {
         range: 420,
         weapon: "bullet"
       }));
-    } else if (this.player.weapon === "melee") {
-      const hitbox = {
-        x: direction > 0 ? this.player.position.x + this.player.width : this.player.position.x - 40,
-        y: this.player.position.y + 4,
-        width: 40,
-        height: this.player.height - 8
-      };
-      this.resolveMelee(hitbox);
     }
   }
 
@@ -913,10 +1064,111 @@ class Game {
     }));
   }
 
+  executeDirectionalMelee() {
+    const now = this.now;
+    if (now - this.player.lastDirectionalMelee < MELEE_HOTKEY_COOLDOWN) return;
+    this.player.lastDirectionalMelee = now;
+    const direction = this.playerFacingDirection() || 1;
+    const reach = 36;
+    const hitbox = {
+      x: direction > 0 ? this.player.position.x + this.player.width : this.player.position.x - reach,
+      y: this.player.position.y + 6,
+      width: reach,
+      height: this.player.height - 12
+    };
+    this.resolveMelee(hitbox);
+  }
+
   playerFacingDirection() {
     if (this.input.left) return -1;
     if (this.input.right) return 1;
-    return 1;
+    return this.player.facing || 1;
+  }
+
+  normalizeWeaponKey(raw) {
+    if (!raw) return null;
+    const normalized = String(raw).toLowerCase();
+    const aliases = {
+      flame: "flamethrower",
+      flamethrower: "flamethrower",
+      pistol: "pistol",
+      silenced: "silenced",
+      silent: "silenced",
+      melee: "melee",
+      saber: "saber",
+      sabre: "saber",
+      grenade: "grenade",
+      launcher: "grenade",
+      machine: "machine",
+      machinegun: "machine"
+    };
+    return aliases[normalized] || normalized;
+  }
+
+  isWeaponLocked(weapon) {
+    return this.lockedWeapons.has(weapon);
+  }
+
+  setWeapon(weapon) {
+    if (!weapon) return;
+    const normalized = this.normalizeWeaponKey(weapon);
+    if (!normalized) return;
+    if (this.isWeaponLocked(normalized)) {
+      this.log("Weapon locked. Earn unlocks to equip it.");
+      return;
+    }
+    if (this.player.weapon === normalized) {
+      this.syncWeaponUi();
+      return;
+    }
+    if (!this.player.attackCooldowns[normalized]) {
+      this.player.attackCooldowns[normalized] = 300;
+    }
+    this.player.weapon = normalized;
+    this.player.lastAttack = 0;
+    this.syncWeaponUi();
+  }
+
+  syncWeaponUi() {
+    if (!Array.isArray(this.weaponButtons)) return;
+    this.weaponButtons.forEach((btn) => {
+      const weapon = this.normalizeWeaponKey(btn.getAttribute("data-weapon"));
+      if (!weapon) return;
+      if (typeof btn.classList !== "undefined") {
+        if (weapon === this.player.weapon) {
+          btn.classList.add("active");
+        } else {
+          btn.classList.remove("active");
+        }
+        if (this.isWeaponLocked(weapon)) {
+          btn.classList.add("locked");
+          btn.setAttribute("aria-disabled", "true");
+        } else {
+          btn.classList.remove("locked");
+          btn.removeAttribute("aria-disabled");
+        }
+      }
+    });
+  }
+
+  toggleMap(force) {
+    if (!this.map) return;
+    const desired = typeof force === "boolean" ? force : !this.map.visible;
+    this.map.visible = desired;
+    if (this.map.panel && typeof this.map.panel.classList !== "undefined") {
+      this.map.panel.classList.toggle("hidden", !desired);
+      if (!desired && "style" in this.map.panel) {
+        this.map.panel.style.display = "none";
+      } else if (desired && "style" in this.map.panel) {
+        this.map.panel.style.display = "";
+      }
+    }
+    if (this.map.button && typeof this.map.button.classList !== "undefined") {
+      this.map.button.classList.toggle("active", desired);
+    }
+    if (!this.map.panel) {
+      this.log(`Minimap ${desired ? "shown" : "hidden"}.`);
+    }
   }
 
   resolveMelee(hitbox) {
@@ -1264,17 +1516,27 @@ class Game {
     this.player.respawn();
     this.setupObjectiveList();
     this.updateHud();
+    this.syncWeaponUi();
     this.log(`Elevator ascends to floor ${this.floor}.`);
   }
 
   resetToFloor(floorNumber, dueToDeath = false) {
     this.floor = floorNumber;
-    this.player.health = PLAYER_BASE_HEALTH;
+    this.player.health = Math.min(PLAYER_CHECKING_MAX, PLAYER_START_CHECKING);
+    this.player.savings = dueToDeath ? 0 : PLAYER_START_SAVINGS;
     this.disableHealUntil = 0;
+    this.runStartMs = performance.now();
+    this.pausedMs = 0;
+    this.pauseStarted = null;
+    this.midnightHandled = false;
     this.floorState = this.generateFloor(this.floor);
     this.player.respawn();
     this.setupObjectiveList();
     this.updateHud();
+    if (this.map && this.map.visible) {
+      this.toggleMap(false);
+    }
+    this.syncWeaponUi();
     if (dueToDeath) {
       this.log("Auto payment emptied your account. Starting over at floor 1.");
     }
@@ -1543,6 +1805,18 @@ class Game {
       const value = Math.round(this.player.health);
       this.hud.health.textContent = this.hud.health.id === "checkVal" ? `$${value}` : `${value}`;
     }
+    if (this.hud.savings) {
+      const savingsValue = Math.round(this.player.savings);
+      this.hud.savings.textContent = this.hud.savings.id === "saveVal" ? `$${savingsValue}` : `${savingsValue}`;
+    }
+    const checkingRatio = Math.min(1, this.player.health / PLAYER_CHECKING_MAX);
+    const savingsRatio = Math.min(1, this.player.savings / PLAYER_SAVINGS_MAX);
+    if (this.hud.checkingFill && this.hud.checkingFill.style) {
+      this.hud.checkingFill.style.width = `${Math.round(checkingRatio * 100)}%`;
+    }
+    if (this.hud.savingsFill && this.hud.savingsFill.style) {
+      this.hud.savingsFill.style.width = `${Math.round(savingsRatio * 100)}%`;
+    }
     if (this.hud.score) {
       this.hud.score.textContent = this.player.score;
     }
@@ -1561,12 +1835,29 @@ class Game {
     const nowMs = performance.now();
     const pausedDuration = this.pausedMs + (this.pauseStarted ? nowMs - this.pauseStarted : 0);
     const remaining = GAME_DURATION_REAL_MS - (nowMs - this.runStartMs - pausedDuration);
+    this.handleMidnightTrigger(remaining);
     const formatted = formatCountdown(remaining);
     if (this.hud.clock.id === "time") {
       this.hud.clock.textContent = `${formatted} ➜ 12:00 AM`;
     } else {
       this.hud.clock.textContent = formatted;
     }
+  }
+
+  handleMidnightTrigger(remainingMs) {
+    if (this.midnightHandled || remainingMs > 0) return;
+    this.midnightHandled = true;
+    const checkingFull = this.player.health >= PLAYER_CHECKING_MAX;
+    const savingsFull = this.player.savings >= PLAYER_SAVINGS_MAX;
+    if (!checkingFull || !savingsFull) {
+      this.log("Midnight hit with insufficient funds. Your run resets.");
+      this.resetToFloor(1, true);
+      return;
+    }
+    this.player.health = 0;
+    this.player.savings = 0;
+    this.log("Midnight auto debit drained all accounts! Rebuild savings before healing.");
+    this.updateHud();
   }
 
   log(message) {
