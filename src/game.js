@@ -9,6 +9,8 @@ const PLAYER_CHECKING_MAX = 250;
 const PLAYER_START_CHECKING = 100;
 const PLAYER_SAVINGS_MAX = 1200;
 const PLAYER_START_SAVINGS = 1200;
+const PLAYER_SPAWN_X = 80;
+const PLAYER_SPAWN_Y = CANVAS_HEIGHT - 120;
 const DAMAGE_AMOUNT = 10;
 const MELEE_HOTKEY_COOLDOWN = 250;
 const ATTACK_KEYS = ["e", "j"];
@@ -220,7 +222,7 @@ class Player {
     this.game = game;
     this.width = 32;
     this.height = 48;
-    this.position = { x: 80, y: CANVAS_HEIGHT - 120 };
+    this.position = { x: PLAYER_SPAWN_X, y: PLAYER_SPAWN_Y };
     this.velocity = { x: 0, y: 0 };
     this.speed = 160;
     this.gravity = 900;
@@ -262,7 +264,7 @@ class Player {
   }
 
   respawn() {
-    this.position = { x: 80, y: CANVAS_HEIGHT - 120 };
+    this.position = { x: PLAYER_SPAWN_X, y: PLAYER_SPAWN_Y };
     this.velocity = { x: 0, y: 0 };
     this.jumpCount = 0;
     this.grounded = false;
@@ -1511,15 +1513,26 @@ class Game {
 
   pickSafeGuardSpawn(spawnArea, exit, guard = null, avoidX = null) {
     const exitCenter = exit ? exit.x + (exit.width || 0) / 2 : CANVAS_WIDTH - 80;
-    const clampWorld = (candidate) => Math.min(CANVAS_WIDTH - 60, Math.max(60, candidate));
-    const safeFromSpawn = (x) => Math.abs(x - 80) >= FLASHLIGHT_RANGE * 2;
-    const safeFromExit = (x) => Math.abs(x - exitCenter) >= FLASHLIGHT_RANGE * 1.5;
-    const safeFromPlayer = (x) => (avoidX === null || avoidX === undefined) ? true : Math.abs(x - avoidX) >= FLASHLIGHT_RANGE * 2;
-    const pickCandidate = () => {
-      const baseWidth = spawnArea.width || (CANVAS_WIDTH - 160);
-      const baseX = spawnArea.x || 0;
-      return clampWorld(baseX + Math.random() * baseWidth);
-    };
+    const spawnBaseX = spawnArea?.x ?? 0;
+    const spawnBaseWidth = spawnArea?.width ?? (CANVAS_WIDTH - 160);
+    let spawnMin = Math.max(PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2, spawnBaseX);
+    let spawnMax = Math.min(CANVAS_WIDTH - 60, spawnBaseX + spawnBaseWidth);
+    if (spawnMax < spawnMin) {
+      spawnMax = spawnMin;
+    }
+    const clampWorld = (candidate) => Math.min(spawnMax, Math.max(spawnMin, candidate));
+    const safeFromSpawn = (x) => x >= PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
+    const exitBuffer = FLASHLIGHT_RANGE * 1.5;
+    const safeFromExit = (x) => Math.abs(x - exitCenter) >= exitBuffer;
+    const playerMin = (() => {
+      if (avoidX === null || avoidX === undefined) {
+        return PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
+      }
+      const desired = avoidX + FLASHLIGHT_RANGE * 2;
+      return Math.min(spawnMax, Math.max(PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2, desired));
+    })();
+    const safeFromPlayer = (x) => x >= playerMin;
+    const pickCandidate = () => clampWorld(spawnBaseX + Math.random() * spawnBaseWidth);
     let candidate = pickCandidate();
     let attempts = 0;
     while (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate)) && attempts < 12) {
@@ -1527,8 +1540,13 @@ class Game {
       attempts += 1;
     }
     if (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate))) {
-      const direction = candidate < exitCenter ? 1 : -1;
-      candidate = direction > 0 ? 80 + FLASHLIGHT_RANGE * 2 : exitCenter - FLASHLIGHT_RANGE * 1.5;
+      const fallbackBase = Math.max(playerMin, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+      let fallback = clampWorld(fallbackBase);
+      if (!safeFromExit(fallback)) {
+        const exitSafe = clampWorld(exitCenter - exitBuffer);
+        fallback = safeFromExit(exitSafe) ? exitSafe : fallback;
+      }
+      candidate = fallback;
     }
     candidate = clampWorld(candidate);
     if (guard && guard.patrol) {
@@ -1946,7 +1964,9 @@ class Game {
     const desks = this.generateDesks(basePlatforms);
     const decor = this.generateDecor(basePlatforms);
     const vents = this.generateVents(basePlatforms);
-    const spawnArea = { x: 40, y: CANVAS_HEIGHT - 140, width: CANVAS_WIDTH - 160, height: 0 };
+    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+    const guardSpawnWidth = Math.max(120, CANVAS_WIDTH - guardSpawnMinX - 60);
+    const spawnArea = { x: guardSpawnMinX, y: CANVAS_HEIGHT - 140, width: guardSpawnWidth, height: 0 };
     const exit = { x: CANVAS_WIDTH - 80, y: CANVAS_HEIGHT - 140, width: 60, height: 120 };
 
     const config = {
