@@ -9,8 +9,11 @@ const PLAYER_CHECKING_MAX = 250;
 const PLAYER_START_CHECKING = 100;
 const PLAYER_SAVINGS_MAX = 1200;
 const PLAYER_START_SAVINGS = 1200;
+const PLAYER_SPAWN_X = 80;
+const PLAYER_SPAWN_Y = CANVAS_HEIGHT - 120;
 const DAMAGE_AMOUNT = 10;
 const MELEE_HOTKEY_COOLDOWN = 250;
+const ATTACK_KEYS = ["e", "j"];
 const GUARD_WEAPON_PROFILES = {
   pistol: { shotInterval: 700, attackInterval: 900, speedBonus: 0 },
   auto: { shotInterval: 220, attackInterval: 600, speedBonus: 10 },
@@ -210,7 +213,7 @@ class Input {
   }
 
   get attack() {
-    return this.isPressed("j", "e");
+    return this.isPressed(...ATTACK_KEYS);
   }
 }
 
@@ -219,7 +222,7 @@ class Player {
     this.game = game;
     this.width = 32;
     this.height = 48;
-    this.position = { x: 80, y: CANVAS_HEIGHT - 120 };
+    this.position = { x: PLAYER_SPAWN_X, y: PLAYER_SPAWN_Y };
     this.velocity = { x: 0, y: 0 };
     this.speed = 160;
     this.gravity = 900;
@@ -261,7 +264,7 @@ class Player {
   }
 
   respawn() {
-    this.position = { x: 80, y: CANVAS_HEIGHT - 120 };
+    this.position = { x: PLAYER_SPAWN_X, y: PLAYER_SPAWN_Y };
     this.velocity = { x: 0, y: 0 };
     this.jumpCount = 0;
     this.grounded = false;
@@ -1029,7 +1032,8 @@ class Game {
         width: reach,
         height: weapon === "saber" ? this.player.height - 4 : this.player.height - 8
       };
-      this.resolveMelee(hitbox);
+      const meleeDamage = weapon === "saber" ? DAMAGE_AMOUNT * 2 : DAMAGE_AMOUNT;
+      this.resolveMelee(hitbox, meleeDamage, weapon);
     } else {
       const speed = 460 * this.player.projectileSpeedModifier;
       this.projectiles.push(new Projectile({
@@ -1076,7 +1080,7 @@ class Game {
       width: reach,
       height: this.player.height - 12
     };
-    this.resolveMelee(hitbox);
+    this.resolveMelee(hitbox, DAMAGE_AMOUNT, "directional");
   }
 
   playerFacingDirection() {
@@ -1171,7 +1175,7 @@ class Game {
     }
   }
 
-  resolveMelee(hitbox) {
+  resolveMelee(hitbox, damage = DAMAGE_AMOUNT, source = "melee") {
     const hit = (entity) => (
       hitbox.x < entity.position.x + entity.width &&
       hitbox.x + hitbox.width > entity.position.x &&
@@ -1187,7 +1191,7 @@ class Game {
     for (const target of targets) {
       if (!target.alive) continue;
       if (hit(target)) {
-        this.defeatEntity(target);
+        this.damageEntity(target, damage, source);
       }
     }
     if (this.floorState.ceo && this.floorState.ceo.vulnerable) {
@@ -1233,8 +1237,8 @@ class Game {
         if (!target.alive) continue;
         if (this.intersectsProjectileEntity(projectile, target)) {
           hit = true;
-          this.defeatEntity(target);
-          if (projectile.weapon === "flame") {
+          const defeated = this.damageEntity(target, projectile.damage, projectile.weapon);
+          if (projectile.weapon === "flame" && defeated) {
             this.player.score += 2;
           }
           break;
@@ -1296,9 +1300,38 @@ class Game {
     }, projectile);
   }
 
+  damageEntity(entity, amount, source = null) {
+    if (!entity || !entity.alive) return false;
+    const effectiveDamage = typeof amount === "number" ? amount : DAMAGE_AMOUNT;
+    if (effectiveDamage <= 0) return false;
+
+    if (entity.type === "guard") {
+      if (typeof entity.maxHealth !== "number") {
+        entity.maxHealth = DAMAGE_AMOUNT * 2;
+      }
+      if (typeof entity.health !== "number") {
+        entity.health = entity.maxHealth;
+      }
+      entity.health = Math.max(0, entity.health - effectiveDamage);
+      entity.lastDamagedAt = this.now;
+      if (entity.health <= 0) {
+        this.defeatEntity(entity);
+        return true;
+      }
+      const flashEnd = this.now + 180;
+      entity.hitFlashUntil = Math.max(entity.hitFlashUntil || 0, flashEnd);
+      return false;
+    }
+
+    this.defeatEntity(entity);
+    return true;
+  }
+
   defeatEntity(entity) {
     entity.alive = false;
     if (entity.type === "guard") {
+      entity.health = 0;
+      entity.hitFlashUntil = 0;
       this.player.score += 10;
       this.log("Guard defeated. +$10 confidence.");
       entity.projectiles = [];
@@ -1324,6 +1357,7 @@ class Game {
       this.player.score = Math.max(0, this.player.score - amount);
       this.log("Wage garnish removed some of your score.");
     }
+    this.updateHud();
   }
 
   handleAlarmSwitch(delta) {
@@ -1365,7 +1399,7 @@ class Game {
       }
       const guardTop = guard.position.y;
       if (playerBottom >= guardTop && playerBottom <= guardTop + guard.height * 0.5) {
-        this.defeatEntity(guard);
+        this.damageEntity(guard, DAMAGE_AMOUNT, "stomp");
         this.player.velocity.y = -this.player.jumpStrength * 0.55;
         this.player.grounded = false;
         this.player.jumpCount = 1;
@@ -1479,15 +1513,26 @@ class Game {
 
   pickSafeGuardSpawn(spawnArea, exit, guard = null, avoidX = null) {
     const exitCenter = exit ? exit.x + (exit.width || 0) / 2 : CANVAS_WIDTH - 80;
-    const clampWorld = (candidate) => Math.min(CANVAS_WIDTH - 60, Math.max(60, candidate));
-    const safeFromSpawn = (x) => Math.abs(x - 80) >= FLASHLIGHT_RANGE * 2;
-    const safeFromExit = (x) => Math.abs(x - exitCenter) >= FLASHLIGHT_RANGE * 1.5;
-    const safeFromPlayer = (x) => (avoidX === null || avoidX === undefined) ? true : Math.abs(x - avoidX) >= FLASHLIGHT_RANGE * 2;
-    const pickCandidate = () => {
-      const baseWidth = spawnArea.width || (CANVAS_WIDTH - 160);
-      const baseX = spawnArea.x || 0;
-      return clampWorld(baseX + Math.random() * baseWidth);
-    };
+    const spawnBaseX = spawnArea?.x ?? 0;
+    const spawnBaseWidth = spawnArea?.width ?? (CANVAS_WIDTH - 160);
+    let spawnMin = Math.max(PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2, spawnBaseX);
+    let spawnMax = Math.min(CANVAS_WIDTH - 60, spawnBaseX + spawnBaseWidth);
+    if (spawnMax < spawnMin) {
+      spawnMax = spawnMin;
+    }
+    const clampWorld = (candidate) => Math.min(spawnMax, Math.max(spawnMin, candidate));
+    const safeFromSpawn = (x) => x >= PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
+    const exitBuffer = FLASHLIGHT_RANGE * 1.5;
+    const safeFromExit = (x) => Math.abs(x - exitCenter) >= exitBuffer;
+    const playerMin = (() => {
+      if (avoidX === null || avoidX === undefined) {
+        return PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2;
+      }
+      const desired = avoidX + FLASHLIGHT_RANGE * 2;
+      return Math.min(spawnMax, Math.max(PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2, desired));
+    })();
+    const safeFromPlayer = (x) => x >= playerMin;
+    const pickCandidate = () => clampWorld(spawnBaseX + Math.random() * spawnBaseWidth);
     let candidate = pickCandidate();
     let attempts = 0;
     while (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate)) && attempts < 12) {
@@ -1495,8 +1540,13 @@ class Game {
       attempts += 1;
     }
     if (!(safeFromSpawn(candidate) && safeFromExit(candidate) && safeFromPlayer(candidate))) {
-      const direction = candidate < exitCenter ? 1 : -1;
-      candidate = direction > 0 ? 80 + FLASHLIGHT_RANGE * 2 : exitCenter - FLASHLIGHT_RANGE * 1.5;
+      const fallbackBase = Math.max(playerMin, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+      let fallback = clampWorld(fallbackBase);
+      if (!safeFromExit(fallback)) {
+        const exitSafe = clampWorld(exitCenter - exitBuffer);
+        fallback = safeFromExit(exitSafe) ? exitSafe : fallback;
+      }
+      candidate = fallback;
     }
     candidate = clampWorld(candidate);
     if (guard && guard.patrol) {
@@ -1670,10 +1720,18 @@ class Game {
 
   drawGuards() {
     const ctx = this.ctx;
-    ctx.fillStyle = "#ff6767";
     for (const guard of this.floorState.guards) {
       if (!guard.alive) continue;
+      const flashing = guard.hitFlashUntil && guard.hitFlashUntil > this.now;
+      ctx.fillStyle = flashing ? "#ffd1d1" : "#ff6767";
       ctx.fillRect(guard.position.x, guard.position.y, guard.width, guard.height);
+      if (typeof guard.health === "number" && typeof guard.maxHealth === "number" && guard.maxHealth > 0) {
+        const ratio = Math.max(0, Math.min(1, guard.health / guard.maxHealth));
+        ctx.fillStyle = "#1c1c1c";
+        ctx.fillRect(guard.position.x, guard.position.y - 5, guard.width, 3);
+        ctx.fillStyle = flashing ? "#ff7878" : "#ff4444";
+        ctx.fillRect(guard.position.x, guard.position.y - 5, guard.width * ratio, 3);
+      }
       if (guard.chasing) {
         ctx.strokeStyle = "rgba(255, 120, 120, 0.9)";
         ctx.lineWidth = 2;
@@ -1906,7 +1964,9 @@ class Game {
     const desks = this.generateDesks(basePlatforms);
     const decor = this.generateDecor(basePlatforms);
     const vents = this.generateVents(basePlatforms);
-    const spawnArea = { x: 40, y: CANVAS_HEIGHT - 140, width: CANVAS_WIDTH - 160, height: 0 };
+    const guardSpawnMinX = Math.min(CANVAS_WIDTH - 200, PLAYER_SPAWN_X + FLASHLIGHT_RANGE * 2);
+    const guardSpawnWidth = Math.max(120, CANVAS_WIDTH - guardSpawnMinX - 60);
+    const spawnArea = { x: guardSpawnMinX, y: CANVAS_HEIGHT - 140, width: guardSpawnWidth, height: 0 };
     const exit = { x: CANVAS_WIDTH - 80, y: CANVAS_HEIGHT - 140, width: 60, height: 120 };
 
     const config = {
@@ -1950,7 +2010,7 @@ class Game {
       config.boardMembers = this.generateBoardMembers(floorNumber, 1);
       config.guards = this.generateGuards(floorNumber, spawnArea, exit, 1, basePlatforms);
       config.managers = [];
-      config.officeWorkers = [];
+      config.officeWorkers = this.generateWorkers(basePlatforms).slice(0, 2);
       config.servers = [];
       config.items = this.generateItems(basePlatforms, true);
     }
@@ -2273,6 +2333,7 @@ class Game {
     let weapon = pool[Math.floor(Math.random() * pool.length)];
     if (overrides.weapon) weapon = overrides.weapon;
     const profile = GUARD_WEAPON_PROFILES[weapon] || GUARD_WEAPON_PROFILES.pistol;
+    const baseHealth = overrides.maxHealth ?? overrides.health ?? DAMAGE_AMOUNT * 2;
     const guard = {
       type: "guard",
       width: 28,
@@ -2289,6 +2350,9 @@ class Game {
       lastStrike: 0,
       lastTackle: 0,
       alive: true,
+      maxHealth: baseHealth,
+      health: baseHealth,
+      hitFlashUntil: 0,
       aggressive: overrides.aggressive || false
     };
     const availablePlatforms = platforms.filter((platform) => platform.y < CANVAS_HEIGHT - 20);
@@ -2314,10 +2378,10 @@ class Game {
   generateWorkers(platforms) {
     const workers = [];
     const suitable = platforms.filter((p) => p.y < CANVAS_HEIGHT - 60);
-    if (!suitable.length) return workers;
-    const count = Math.min(6, Math.max(2, suitable.length * 2));
+    const workerPlatforms = suitable.length ? suitable : [{ x: 40, y: CANVAS_HEIGHT - 60, width: CANVAS_WIDTH - 80, height: 12 }];
+    const count = Math.min(6, Math.max(2, workerPlatforms.length * 2));
     for (let i = 0; i < count; i += 1) {
-      const platform = suitable[i % suitable.length];
+      const platform = workerPlatforms[i % workerPlatforms.length];
       const startX = platform.x + Math.random() * Math.max(40, platform.width - 24);
       workers.push({
         type: "worker",
@@ -2327,7 +2391,8 @@ class Game {
         direction: Math.random() > 0.5 ? 1 : -1,
         speed: 28 + (i % 3) * 4,
         patrol: { min: platform.x, max: platform.x + platform.width - 24 },
-        alive: true
+        alive: true,
+        passive: true
       });
     }
     return workers;
