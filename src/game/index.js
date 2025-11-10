@@ -246,6 +246,7 @@ const INFLATION_FLOORS = new Set([6,13,19,26,33]);
 const PAYDAY_INTERVAL = 5;
 const BONUS_FLOOR_MIN = 3;
 const BONUS_FLOOR_MAX = 30;
+const HACK_KEY_POOL = ['q','w','e','a','s','d'];
 
 function getFloorTheme(floor){
   for(const config of FLOOR_THEME_CONFIG){
@@ -357,6 +358,41 @@ function motor({startFreq=120,endFreq=70,dur=0.6,gain=0.09}={}){
     g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
     o.start(t); o.stop(t+dur+0.1);
   }catch(e){}
+}
+
+function stopAmbientLoop(){
+  if(ambientInterval){
+    clearInterval(ambientInterval);
+    ambientInterval=null;
+  }
+}
+
+function setAmbient(type){
+  if(ambientCurrent===type) return;
+  ambientCurrent=type;
+  stopAmbientLoop();
+  if(!type) return;
+  const invoke = ()=>{
+    if(type==='printer'){
+      motor({startFreq:240,endFreq:160,dur:0.9,gain:0.04});
+    } else if(type==='server'){
+      motor({startFreq:150,endFreq:110,dur:1.4,gain:0.05});
+    } else if(type==='wind'){
+      beep({freq:220,dur:0.3,type:'triangle',gain:0.03});
+    }
+  };
+  invoke();
+  ambientInterval = setInterval(invoke, type==='server'?1800:type==='printer'?1600:1400);
+}
+
+function setAmbientForFloor(floor){
+  if(floor<=12){
+    setAmbient('printer');
+  } else if(floor<=24){
+    setAmbient('server');
+  } else {
+    setAmbient('wind');
+  }
 }
 function chime(){ beep({freq:740,dur:0.08}); setTimeout(()=>beep({freq:1100,dur:0.1}),70); }
 function lockedBuzz(){ motor({startFreq:160,endFreq:80,dur:0.2,gain:0.06}); }
@@ -702,8 +738,8 @@ function fmtClock(ms){
 }
 
 // Level arrays
-let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[];
-let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[];
+let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers[];
+let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[];
 let destroyedOnFloor=0, totalServersOnFloor=0;
 let alarm=false, alarmUntil=0;
 let inSub=false; // vent sub-level
@@ -711,11 +747,14 @@ let sub = null;
 let entryVentWorld = null;
 let lightingCondition='normal', lightingPulse=0, lightingPhase=0;
 let floorTheme=null, boardRoomActive=false, ninjaRound=false, serverObjective=false, inflationActive=false, bonusFloorActive=false;
-let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0;
+let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0, sprinklersActiveUntil=0;
 let spotlightDetection=0, elevatorLockedUntil=0;
 let interestDrainTimer=0;
 let scheduledBonusFloor=null;
 let blackMarketOffer=null;
+let activeHack=null;
+let ambientInterval=null, ambientCurrent=null;
+let managerCheckFloor=null, managerDefeated=false;
 
 // Projectiles
 const bullets=[];
@@ -920,6 +959,8 @@ function resetPlayerState(){
   player.interestRate=0;
   player.printerJams=0;
   player.score=0;
+  player.weaponUpgrades=0;
+  player.hacking=false;
   player.prevBottom = player.y + player.h;
   player.prevVy = 0;
   player.dropThroughUntil = 0;
@@ -943,6 +984,7 @@ function startNewRun(name){
   attackHeld = false;
   camX = 0; seenDoor=false;
   scheduledBonusFloor = BONUS_FLOOR_MIN + Math.floor(Math.random()*(BONUS_FLOOR_MAX-BONUS_FLOOR_MIN+1));
+  scheduleManagerFloor();
   resetPlayerState();
   bullets.length = 0;
   setMode(testMode? 'test' : 'normal');
@@ -965,6 +1007,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   toggleCodex(false);
   runActive=false;
   pause=true;
+  setAmbient(null);
   if(outcome==='death') runStats.deaths = (runStats.deaths||0) + 1;
   const endTime = performance.now();
   const elapsed = runStats.start ? Math.max(0, endTime - runStats.start) : 0;
@@ -1013,6 +1056,12 @@ function damage(){
 function addChecking(n){ player.checking = clamp(player.checking+n,0,9999); }
 function addAmmo(n){ player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999); }
 function addFuel(n){ player.flame.fuel = clamp(player.flame.fuel+n, 0, 200); }
+function grantWeaponUpgrade(){
+  player.weaponUpgrades = (player.weaponUpgrades||0) + 1;
+  player.pistol.cooldown = Math.max(70, Math.round(player.pistol.cooldown * 0.92));
+  player.flame.cooldown = Math.max(40, Math.round(player.flame.cooldown * 0.94));
+  player.melee.cooldown = Math.max(80, Math.round(player.melee.cooldown * 0.9));
+}
 
 function rewardWorker(worker){
   if(!worker || worker.rewardClaimed) return;
@@ -1042,7 +1091,13 @@ function damageWorker(worker, amount){
 const keys={};
 let attackHeld=false;
 window.addEventListener('keydown', e=>{
-  const k=e.key.toLowerCase(); keys[k]=true;
+  const k=e.key.toLowerCase();
+  if(activeHack){
+    e.preventDefault();
+    handleHackInput(k);
+    return;
+  }
+  keys[k]=true;
   if(k==='r'){ // reload pistol
     if(player.weapon==='pistol'){
       const need = 9 - player.pistol.ammo;
@@ -1177,16 +1232,27 @@ function pickGuardSpawn(existing = []){
 }
 
 
+function scheduleManagerFloor(){
+  const options=[];
+  for(let f=6; f<=Math.min(FLOORS-1, 32); f++){
+    if(f===scheduledBonusFloor) continue;
+    if(!BOARD_FLOORS.has(f)) options.push(f);
+  }
+  managerCheckFloor = options.length ? options[Math.floor(Math.random()*options.length)] : null;
+  managerDefeated=false;
+}
+
 function makeLevel(i){
   walls=[]; windowsArr=[]; ladders=[]; vents=[]; servers=[]; panels=[]; cameras=[]; guards=[];
-  desks=[]; plants=[]; waterCoolers=[]; spotlights=[]; pickups=[]; movingPlatforms=[];
   workers=[]; coffeeMachines=[]; vendingMachines=[]; printers=[]; serverTerminals=[];
   deskDrawers=[]; hazards=[]; stealthZones=[]; backgroundFX=[]; floatingPapers=[];
-  billboardScreens=[]; boardTables=[]; merchants=[];
+  billboardScreens=[]; boardTables=[]; merchants=[]; sprinklers=[];
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
+  setAmbientForFloor(i);
+  sprinklersActiveUntil = 0;
 
   floorTheme = getFloorTheme(i);
   boardRoomActive = isBoardFloor(i);
@@ -1202,6 +1268,8 @@ function makeLevel(i){
   lightingPulse=0; lightingPhase=0;
 
   activePalette = computePaletteForFloor(i);
+  const baseParallax = i<=12 ? 'cubiclesParallax' : i<=24 ? 'serverParallax' : 'skylineParallax';
+  backgroundFX.push({type: baseParallax});
 
   const baseLighting = floorTheme && floorTheme.lighting ? floorTheme.lighting : 'normal';
   const randomLighting = ['normal','emergency','dim','strobe'];
@@ -1225,8 +1293,9 @@ function makeLevel(i){
 
   if(inflationActive){
     player.cashMultiplier = 0.6;
-    player.interestRate = 1.6;
-    centerNote('Inflation Floor – cash worth less!', 1400);
+    player.interestRate = 2;
+    centerNote('Inflation Floor – cash worth less & interest doubled!', 1600);
+    notify('Inflation floor active: earnings shrink and interest surges.');
   } else {
     player.cashMultiplier = 1;
     player.interestRate = 0;
@@ -1414,7 +1483,21 @@ function makeLevel(i){
 
   const blackMarketChance = (!bonusFloorActive && !serverObjective && i>4 && Math.random()<0.18);
   if(blackMarketChance){
-    blackMarketOffer = {type: Math.random()<0.5?'ammo':'intel', cost: 150 + Math.floor(Math.random()*150)};
+    const templates=[
+      {type:'ammo', currency:'cash', min:150, max:260},
+      {type:'upgrade', currency:'cash', min:200, max:320},
+      {type:'fuel', currency:'intel', cost:1},
+      {type:'weapon', currency:'intel', cost:2}
+    ];
+    const choice = templates[Math.floor(Math.random()*templates.length)];
+    blackMarketOffer = {...choice};
+    if('min' in blackMarketOffer){
+      const max = blackMarketOffer.max ?? blackMarketOffer.min;
+      const cost = blackMarketOffer.min + Math.floor(Math.random()*((max||blackMarketOffer.min) - blackMarketOffer.min + 1));
+      blackMarketOffer.cost = cost;
+      delete blackMarketOffer.min;
+      delete blackMarketOffer.max;
+    }
     merchants.push({x:1.4*W, y:yBase-70, w:40, h:60, offer:blackMarketOffer, opened:false});
     notify('Black market contact spotted on this floor.');
   }
@@ -1434,6 +1517,21 @@ function makeLevel(i){
     const gx = pickGuardSpawn([...initialSpawns]);
     initialSpawns.push(gx);
     guards.push(makeGuard(gx, yBase-42, i));
+  }
+
+  if(!managerDefeated && managerCheckFloor && i===managerCheckFloor){
+    const manager = makeGuard(1.5*W, yBase-46, Math.min(FLOORS, i+2));
+    manager.manager=true;
+    manager.type='manager';
+    manager.maxHp = Math.round(manager.maxHp * 2.2);
+    manager.hp = manager.maxHp;
+    manager.damageReduction = Math.min(0.6, (manager.damageReduction||0) + 0.25);
+    manager.speed = (manager.speed||1) * 1.15;
+    manager.vx = (Math.sign(manager.vx)||1) * manager.speed;
+    manager.lastShot=0;
+    guards.push(manager);
+    notify('Manager check-in! Miniboss deployed.');
+    centerNote('Manager Check-in!', 1600);
   }
 
   const workerZones = [];
@@ -1484,6 +1582,8 @@ function makeLevel(i){
 
   if(evacuationActive && now()<evacuationUntil){
     for(const worker of workers){ worker.vx *= 1.6; }
+    if(sprinklers.length===0){ activateSprinklers(yBase, evacuationUntil); }
+    sprinklersActiveUntil = Math.max(sprinklersActiveUntil, evacuationUntil);
     notify('Evacuation underway! Workers stampede.');
   }
 
@@ -1491,6 +1591,7 @@ function makeLevel(i){
     if(Math.random()<0.12 && i>3){
       evacuationActive=true; evacuationUntil = now()+15000;
       for(const worker of workers){ worker.vx *= 1.4; }
+      activateSprinklers(yBase, evacuationUntil);
       notify('Evacuation event triggered!');
     }
     if(Math.random()<0.08 && i>6){
@@ -1668,7 +1769,98 @@ function inViewport(x){ return x>=camX && x<=camX+W; }
 function nearDoor(){
   return !inSub && Math.abs((player.x+player.w/2) - (door.x+door.w/2)) < 70 && Math.abs((player.y+player.h) - (door.y+door.h)) < 140;
 }
+
+function makeHackSequence(){
+  const len = 3 + Math.floor(Math.random()*3);
+  const seq=[];
+  for(let i=0;i<len;i++){
+    seq.push(HACK_KEY_POOL[Math.floor(Math.random()*HACK_KEY_POOL.length)]);
+  }
+  return seq;
+}
+
+function startHackMinigame(terminal){
+  if(activeHack) return;
+  const sequence = makeHackSequence();
+  activeHack = {
+    terminal,
+    sequence,
+    index:0,
+    stepWindow:900,
+    deadline: now()+900
+  };
+  player.hacking=true;
+  centerNote('Hack initiated', 900);
+  notify('Enter the sequence to override.');
+}
+
+function failHack(reason='Hack failed.'){
+  if(!activeHack) return;
+  notify(reason);
+  centerNote('Hack failed', 1100);
+  beep({freq:320});
+  if(activeHack.terminal){ activeHack.terminal.hacked=false; }
+  activeHack=null;
+  player.hacking=false;
+}
+
+function completeHack(){
+  if(!activeHack) return;
+  const terminal = activeHack.terminal;
+  activeHack=null;
+  player.hacking=false;
+  if(terminal) terminal.hacked=true;
+  if(Math.random()<0.5){
+    lightingCondition='dim';
+    centerNote('Lights disabled', 1600);
+    notify('Hack plunged the floor into darkness.');
+  } else {
+    alarm=false; alarmUntil=0;
+    centerNote('Alarms offline', 1600);
+    notify('Hack suppressed active alarms.');
+  }
+  chime();
+}
+
+function handleHackInput(key){
+  if(!activeHack) return false;
+  if(key==='escape'){
+    failHack('Hack aborted.');
+    return true;
+  }
+  const expected = activeHack.sequence[activeHack.index];
+  if(key===expected){
+    activeHack.index++;
+    beep({freq:740,dur:0.05});
+    if(activeHack.index>=activeHack.sequence.length){
+      completeHack();
+    } else {
+      activeHack.deadline = now() + activeHack.stepWindow;
+    }
+  } else if(HACK_KEY_POOL.includes(key)){
+    failHack('Incorrect input.');
+  }
+  return true;
+}
+
+function activateSprinklers(yBase, until){
+  sprinklers.length = 0;
+  const count = 8;
+  const span = 3*W - 160;
+  for(let i=0;i<count;i++){
+    const x = 80 + (count===1? span/2 : (i/(count-1))*span);
+    sprinklers.push({
+      x,
+      y: 60 + Math.random()*40,
+      length: Math.max(80, yBase - 100),
+      phase: Math.random()*Math.PI*2
+    });
+  }
+  sprinklersActiveUntil = until;
+}
+
 function interact(){
+  if(activeHack) return;
   if(pause) return;
   const p={x:player.x, y:player.y, w:player.w, h:player.h};
 
@@ -1706,13 +1898,21 @@ function interact(){
     for(const vend of vendingMachines){
       if(vend && !vend.broken && rect(p,{x:vend.x-10,y:vend.y-10,w:vend.w+20,h:vend.h+20})){
         vend.broken=true;
-        if(Math.random()<0.7){
-          if(Math.random()<0.5){ addAmmo(24); centerNote('Ammo drop +24', 1200); notify('Vending machine spilled ammo.'); }
-          else { const amt = 80 + Math.floor(Math.random()*120); addChecking(amt); centerNote(`Found $${amt}`, 1200); notify('Cash payout from vending machine.'); }
+        const roll = Math.random();
+        if(roll<0.45){
+          addAmmo(24);
+          centerNote('Ammo drop +24', 1200);
+          notify('Vending machine spilled ammo.');
+        } else if(roll<0.9){
+          const base = 50 + Math.floor(Math.random()*151);
+          const amt = Math.round(base * (player.cashMultiplier||1));
+          addChecking(amt);
+          centerNote(`Found $${amt}`, 1200);
+          notify('Cash payout from vending machine.');
         } else {
-          const loss = 50;
+          const loss = 50 + Math.floor(Math.random()*151);
           player.checking = Math.max(0, player.checking - loss);
-          centerNote('Vending trap! -$50', 1200);
+          centerNote(`Vending trap! -$${loss}`, 1200);
           notify('Faulty vending machine drained funds.');
         }
         boom();
@@ -1731,49 +1931,82 @@ function interact(){
     // Server terminals
     for(const terminal of serverTerminals){
       if(terminal && !terminal.hacked && rect(p,{x:terminal.x-12,y:terminal.y-12,w:terminal.w+24,h:terminal.h+24})){
-        terminal.hacked=true;
-        alarm=false; alarmUntil=0;
-        lightingCondition = 'dim';
-        centerNote('Terminal override — alarms suppressed', 1600);
-        notify('Security lights dimmed.');
-        chime();
+        startHackMinigame(terminal);
       }
     }
     // Desk drawers
     for(const drawer of deskDrawers){
       if(drawer && !drawer.used && rect(p,{x:drawer.x-6,y:drawer.y-6,w:drawer.w+12,h:drawer.h+12})){
         drawer.used=true;
-        const roll=Math.random();
-        if(roll<0.33){ const amt = 40 + Math.floor(Math.random()*60); addChecking(amt); centerNote(`Desk cash +$${amt}`, 1200); notify('Found cash in drawer.'); }
-        else if(roll<0.66){ addAmmo(12); centerNote('Desk ammo +12', 1200); notify('Drawer had emergency ammo.'); }
-        else { player.intel++; centerNote('Intel from drawer', 1200); notify('Hidden intel recovered.'); }
-        beep({freq:660});
+        if(Math.random()<0.1){
+          const reward=['intel','feather','upgrade'][Math.floor(Math.random()*3)];
+          if(reward==='intel'){
+            player.intel++;
+            centerNote('Drawer intel +1', 1400);
+            notify('Hidden intel recovered.');
+            beep({freq:780});
+          } else if(reward==='feather'){
+            player.hasFeather=true;
+            player.featherEnergy=player.featherMax;
+            centerNote('Feather stashed in drawer!', 1400);
+            notify('Feather recovered — air mobility boosted.');
+            chime();
+          } else {
+            grantWeaponUpgrade();
+            centerNote('Weapon upgrade installed', 1500);
+            notify('Drawer held a weapon mod.');
+            chime();
+          }
+        } else {
+          centerNote('Drawer empty.', 900);
+          notify('Just paperwork inside.');
+          beep({freq:520,dur:0.04});
+        }
       }
     }
     // Merchants
     for(const merchant of merchants){
       if(!merchant) continue;
       const bounds={x:merchant.x-12,y:merchant.y-12,w:merchant.w+24,h:merchant.h+24};
-      if(rect(p,bounds) && !merchant.opened && blackMarketOffer){
-        if(blackMarketOffer.type==='ammo'){
-          if(player.checking >= blackMarketOffer.cost){
-            player.checking -= blackMarketOffer.cost;
-            addAmmo(36);
+      if(rect(p,bounds) && !merchant.opened){
+        const offer = merchant.offer || blackMarketOffer;
+        if(!offer) continue;
+        const currency = offer.currency || (offer.type==='ammo' || offer.type==='upgrade' ? 'cash' : 'intel');
+        const cost = offer.cost || (currency==='intel' ? 1 : 0);
+        if(currency==='cash'){
+          if(player.checking >= cost){
+            player.checking -= cost;
+            if(offer.type==='ammo'){
+              addAmmo(36);
+              centerNote('Ammo cache purchased.', 1400);
+              notify('Black market ammo obtained.');
+            } else if(offer.type==='upgrade'){
+              grantWeaponUpgrade();
+              centerNote('Weapon mod installed.', 1500);
+              notify('Black market upgrade acquired.');
+            } else {
+              addChecking(20);
+            }
             merchant.opened=true; blackMarketOffer=null;
-            centerNote('Ammo cache purchased.', 1400);
-            notify('Black market ammo obtained.');
             chime();
           } else {
-            centerNote('Need more cash for ammo.', 1200);
+            centerNote('Need more cash for trade.', 1200);
             notify('Insufficient funds.');
           }
         } else {
-          if(player.intel>0){
-            player.intel--;
-            addFuel(40);
+          if(player.intel >= cost){
+            player.intel -= cost;
+            if(offer.type==='fuel'){
+              addFuel(40);
+              centerNote('Fuel upgrade acquired.', 1400);
+              notify('Intel traded for upgrades.');
+            } else if(offer.type==='weapon'){
+              addFuel(60);
+              setWeapon('flame');
+              centerNote('Weapon shortcut unlocked!', 1500);
+              notify('Black market unlocked your flamethrower.');
+            }
             merchant.opened=true; blackMarketOffer=null;
-            centerNote('Fuel upgrade acquired.', 1400);
-            notify('Intel traded for upgrades.');
             chime();
           } else {
             centerNote('Need intel to barter.', 1200);
@@ -1946,6 +2179,13 @@ function guardFire(g){
     g.lastShot = t;
     const dir = (player.x > g.x ? 1 : -1);
     bullets.push({type:'rocket', x:g.x + (dir>0?g.w:0), y:g.y+14, vx: dir*6, vy:(Math.random()*2-1), life:1100, from:'guard', blast:true, experimental:true});
+  } else if(g.type==='manager'){
+    if(t - g.lastShot < 520) return;
+    g.lastShot = t;
+    const dir = (player.x > g.x ? 1 : -1);
+    for(let burst=0; burst<2; burst++){
+      bullets.push({type:'enemy', x:g.x + (dir>0?g.w:0), y:g.y+14+burst*4, vx: dir*(9+burst*1.5), vy:0, life:900, from:'guard'});
+    }
   } else if(g.type==='policy'){
     if(t - g.lastShot < 900) return;
     g.lastShot = t;
@@ -1975,6 +2215,10 @@ function guardFire(g){
 function update(dt){
   if(!runActive) return;
   lightingPhase += dt;
+  if(activeHack && now()>activeHack.deadline){
+    failHack('Sequence timed out.');
+  }
+  player.hacking = !!activeHack;
   // Track "seen door"
   if(!seenDoor && (inViewport(door.x) || Math.abs(player.x - door.x) < W*0.4)){ seenDoor=true; }
 
@@ -1995,16 +2239,18 @@ function update(dt){
   // Inputs
   const wasOnGround = player.onGround;
   const dropCombo = (keys['w'] && keys['z']) || (keys['arrowup'] && keys['arrowdown']);
-  const jumpPressed = !dropCombo && (keys['w']||keys['arrowup']);
+  const hacking = !!activeHack;
+  const jumpPressed = !dropCombo && !hacking && (keys['w']||keys['arrowup']);
   if(player.dropThroughUntil && now() > player.dropThroughUntil){
     player.dropThroughUntil = 0;
     player.dropThroughFloor = null;
   }
-  player.crouch = keys['s'] || keys['arrowdown'] || keys['x'];
-  player.sprint = keys['shift'];
+  player.crouch = hacking ? false : (keys['s'] || keys['arrowdown'] || keys['x']);
+  player.sprint = !hacking && keys['shift'];
   let ax=0;
   if(keys['a']||keys['arrowleft']) { ax-=1; player.facing=-1; }
   if(keys['d']||keys['arrowright']) { ax+=1; player.facing= 1; }
+  if(hacking){ ax=0; }
   const boost = now()<player.speedBoostUntil ? 1.1 : 1;
   const lawsuitSlow = now()<player.lawsuitSlowUntil ? 0.7 : 1;
   const maxRun = RUN*(player.sprint?SPRINT:1)*(player.crouch?0.6:1)*boost*lawsuitSlow;
@@ -2063,6 +2309,7 @@ function update(dt){
 
   // Movement
   player.vx += ax*0.8;
+  if(hacking){ player.vx *= 0.6; }
   player.vx *= player.onGround?FRICTION:0.99;
   player.vx = clamp(player.vx, -maxRun, maxRun);
   if(!player.climbing) player.vy += GRAV*(player.hasFeather?0.92:1);
@@ -2224,6 +2471,7 @@ function update(dt){
     }
     if(evacuationActive && now()>evacuationUntil){ evacuationActive=false; }
     if(powerSurgeUntil && now()>powerSurgeUntil){ powerSurgeUntil=0; }
+    if(sprinklersActiveUntil && now()>sprinklersActiveUntil){ sprinklersActiveUntil=0; sprinklers.length=0; }
 
     // Guards
     const yGround = floorSlab.y;
@@ -2241,6 +2489,14 @@ function update(dt){
       if(g.hp <= 0) continue;
       updateNinjaMovement(g, dt, px, py, yGround);
       g.t += dt*TIME_SCALE;
+      const evacBoost = (evacuationActive && now()<evacuationUntil) ? 1.25 : 1;
+      if(g.type==='ninja'){
+        g.vx *= evacBoost;
+      } else {
+        const dir = Math.sign(g.vx)||1;
+        const base = g.speed || Math.abs(g.vx) || 1;
+        g.vx = dir * base * evacBoost;
+      }
       g.x += g.vx;
       if(g.x<40){ g.x=40; g.vx=Math.abs(g.vx); }
       if(g.x>3*W-60){ g.x=3*W-60; g.vx=-Math.abs(g.vx); }
@@ -2287,7 +2543,21 @@ function update(dt){
     }
     // kills + reward
     for(let i=guards.length-1;i>=0;i--){
-      if(guards[i].hp<=0){ guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (guard)"); }
+      const defeated = guards[i];
+      if(defeated.hp<=0){
+        guards.splice(i,1);
+        runStats.kills += 1;
+        addChecking(10);
+        notify('+$10 (guard)');
+        if(defeated.manager){
+          managerDefeated=true;
+          const bonus=120;
+          addChecking(bonus);
+          grantWeaponUpgrade();
+          centerNote('Manager defeated! Bonus secured.', 1800);
+          notify(`Manager routed! +$${bonus} and weapon upgrade.`);
+        }
+      }
     }
 
     // Servers armed -> destroyed
@@ -2519,6 +2789,32 @@ function draw(){
       if(fx.type==='ticker'){
         ctx.fillStyle='rgba(255,215,90,0.35)';
         ctx.fillRect(80+ox, fx.y, 3*W-160, 8);
+      } else if(fx.type==='cubiclesParallax'){
+        const offset = (camX*0.25)%160;
+        for(let x=-offset;x<3*W;x+=160){
+          ctx.fillStyle='rgba(200,200,210,0.18)';
+          ctx.fillRect(x+ox, floorSlab.y-200, 120, 90);
+          ctx.fillStyle='rgba(180,180,190,0.12)';
+          ctx.fillRect(x+ox+20, floorSlab.y-160, 80, 60);
+        }
+      } else if(fx.type==='serverParallax'){
+        const offset = (camX*0.3)%200;
+        for(let x=-offset;x<3*W;x+=200){
+          ctx.fillStyle='rgba(80,110,160,0.2)';
+          ctx.fillRect(x+ox, floorSlab.y-240, 140, 160);
+          ctx.fillStyle='rgba(140,200,255,0.1)';
+          for(let row=0; row<5; row++){
+            ctx.fillRect(x+ox+12, floorSlab.y-220+row*26, 116, 8);
+          }
+        }
+      } else if(fx.type==='skylineParallax'){
+        const offset = (camX*0.15)%260;
+        for(let x=-offset;x<3*W;x+=260){
+          ctx.fillStyle='rgba(60,80,120,0.25)';
+          ctx.fillRect(x+ox, 40, 200, H-180);
+          ctx.fillStyle='rgba(100,130,180,0.18)';
+          ctx.fillRect(x+ox+40, 60, 160, H-200);
+        }
       } else if(fx.type==='poster'){
         ctx.fillStyle='rgba(220,120,180,0.45)';
         ctx.fillRect(fx.x+ox, fx.y, 60, 90);
@@ -2556,6 +2852,18 @@ function draw(){
     for(const wc of waterCoolers){
       ctx.fillStyle = activePalette.waterCooler; ctx.fillRect(wc.x+ox,wc.y, wc.w, wc.h);
       ctx.fillStyle = activePalette.waterGlass; ctx.fillRect(wc.x+4+ox,wc.y+6, wc.w-8, wc.h-12);
+    }
+    if(sprinklersActiveUntil && now()<sprinklersActiveUntil){
+      const t = performance.now();
+      for(const spray of sprinklers){
+        const baseX = spray.x + ox;
+        const seg = spray.length/4;
+        for(let d=0; d<4; d++){
+          const sway = Math.sin((t/220) + spray.phase + d*0.8) * 10;
+          ctx.fillStyle='rgba(150,190,255,0.22)';
+          ctx.fillRect(baseX + sway, spray.y + d*seg, 2, seg);
+        }
+      }
     }
     for(const machine of coffeeMachines){
       ctx.fillStyle='#553'; ctx.fillRect(machine.x+ox, machine.y, machine.w, machine.h);
@@ -2895,6 +3203,12 @@ function draw(){
       ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(0,0,W,H);
     }
 
+    if(powerSurgeUntil && now()<powerSurgeUntil){
+      const flicker = 0.18 + 0.18*Math.abs(Math.sin(performance.now()/70));
+      ctx.fillStyle=`rgba(255,255,255,${flicker})`;
+      ctx.fillRect(0,0,W,H);
+    }
+
     if(now()<player.screenFlashUntil){
       ctx.fillStyle='rgba(255,255,255,0.25)';
       ctx.fillRect(0,0,W,H);
@@ -2965,6 +3279,30 @@ function draw(){
     ctx.fillStyle='#f0d2b6'; ctx.fillRect(px+6, py+2, 10, 10);
     ctx.fillStyle='#d14d4d'; ctx.fillRect(px+4, py+12, player.w-8, player.crouch?18:22);
     ctx.fillStyle='#3a3a3a'; if(!player.crouch){ ctx.fillRect(px+4, py+34, 6, 12); ctx.fillRect(px+player.w-10, py+34, 6, 12); } else { ctx.fillRect(px+5, py+30, 12, 8); }
+  }
+  if(activeHack){
+    const hack = activeHack;
+    ctx.save();
+    ctx.fillStyle='rgba(0,0,0,0.65)';
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center';
+    ctx.fillStyle='#44ffaa';
+    ctx.font='22px monospace';
+    ctx.fillText('HACK SEQUENCE', W/2, H/2-80);
+    const display = hack.sequence.map((key, idx)=> idx < hack.index ? '✓' : key.toUpperCase());
+    ctx.font='20px monospace';
+    ctx.fillText(display.join(' '), W/2, H/2-24);
+    const windowMs = hack.stepWindow || 900;
+    const remaining = hack.deadline ? Math.max(0, Math.min(1, (hack.deadline - now()) / windowMs)) : 0;
+    ctx.strokeStyle='rgba(255,255,255,0.3)';
+    ctx.strokeRect(W/2-150, H/2+4, 300, 18);
+    ctx.fillStyle='#44ffaa';
+    ctx.fillRect(W/2-150, H/2+4, 300*remaining, 18);
+    ctx.fillStyle='rgba(255,255,255,0.7)';
+    ctx.font='12px monospace';
+    ctx.fillText('Press keys in order • ESC to abort', W/2, H/2+38);
+    ctx.restore();
+    ctx.textAlign='left';
   }
 }
 
