@@ -627,6 +627,8 @@ function update(state, dt){
   }
   const p = state.player;
   const dtSec = dt / 1000;
+  const prevX = p.x;
+  const prevY = p.y;
   const left = input.isDown('left');
   const right = input.isDown('right');
   let ax = 0;
@@ -665,31 +667,54 @@ function update(state, dt){
   p.vy += PLAYER_CONSTANTS.gravity * dtSec;
   p.y += p.vy * dtSec;
   p.x += p.vx * dtSec;
-  p.y = Math.min(p.y, 520 - p.h);
-  p.x = clamp(p.x, 40, 1040);
 
   const platforms = state.floorDef.platforms;
+  const prevPlatform = p.onPlatform;
   p.grounded = false;
   p.onPlatform = null;
+  const dropThrough = input.isDown('up') && input.isDown('down');
   for(const plat of platforms){
+    const height = plat.h ?? 16;
+    const left = plat.x;
+    const right = plat.x + plat.w;
+    const top = plat.y;
+    const bottom = top + height;
+    if(p.x + p.w <= left || p.x >= right) continue;
+
     if(plat.semisolid){
-      if(p.vy>=0 && p.y + p.h >= plat.y && p.y + p.h <= plat.y + plat.h && p.x + p.w > plat.x && p.x < plat.x + plat.w){
-        if(input.isDown('down') && input.isDown('up')) continue;
-        p.y = plat.y - p.h;
+      if(p.vy >= 0 && prevY + p.h <= top && p.y + p.h >= top){
+        if(dropThrough && plat === prevPlatform) continue;
+        p.y = top - p.h;
         p.vy = 0;
         p.grounded = true;
         p.onPlatform = plat;
       }
     } else {
-      if(rectIntersect(p, plat)){
-        if(p.y + p.h > plat.y && p.y < plat.y){
-          p.y = plat.y - p.h;
-          p.vy = 0;
-          p.grounded = true;
-        }
+      if(prevY + p.h <= top && p.y + p.h >= top){
+        p.y = top - p.h;
+        p.vy = 0;
+        p.grounded = true;
+        p.onPlatform = plat;
+      } else if(prevY >= bottom && p.y <= bottom){
+        p.y = bottom;
+        if(p.vy < 0) p.vy = 0;
+      } else if(prevX + p.w <= left && p.x + p.w >= left){
+        p.x = left - p.w;
+        if(p.vx > 0) p.vx = 0;
+      } else if(prevX >= right && p.x <= right){
+        p.x = right;
+        if(p.vx < 0) p.vx = 0;
       }
     }
   }
+
+  const groundY = 520 - p.h;
+  if(p.y > groundY){
+    p.y = groundY;
+    p.vy = Math.min(p.vy, 0);
+    p.grounded = true;
+  }
+  p.x = clamp(p.x, 40, 1040);
 
   if(p.featherMs>0){
     p.featherMs = Math.max(0, p.featherMs - dt);
