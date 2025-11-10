@@ -305,7 +305,9 @@ const player = {
   melee:{cooldown:GAME_PARAMS.player.meleeCooldownMs, last:0},
   hurtUntil:0,
   prevBottom: GAME_PARAMS.player.height,
-  prevVy: 0
+  prevVy: 0,
+  dropThroughUntil: 0,
+  dropThroughFloor: null
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -513,6 +515,8 @@ function resetPlayerState(){
   player.score=0;
   player.prevBottom = player.y + player.h;
   player.prevVy = 0;
+  player.dropThroughUntil = 0;
+  player.dropThroughFloor = null;
   updateSpecialFileUI();
 }
 
@@ -1056,13 +1060,41 @@ function update(dt){
   }
 
   // Inputs
-  const jumpPressed = (keys['w']||keys['arrowup']);
+  const wasOnGround = player.onGround;
+  const dropCombo = (keys['w'] && keys['z']) || (keys['arrowup'] && keys['arrowdown']);
+  const jumpPressed = !dropCombo && (keys['w']||keys['arrowup']);
+  if(player.dropThroughUntil && now() > player.dropThroughUntil){
+    player.dropThroughUntil = 0;
+    player.dropThroughFloor = null;
+  }
   player.crouch = keys['s'] || keys['arrowdown'] || keys['x'];
   player.sprint = keys['shift'];
   let ax=0;
   if(keys['a']||keys['arrowleft']) { ax-=1; player.facing=-1; }
   if(keys['d']||keys['arrowright']) { ax+=1; player.facing= 1; }
   const maxRun = RUN*(player.sprint?SPRINT:1)*(player.crouch?0.6:1);
+
+  let dropTargetY = null;
+  if(wasOnGround && !inSub){
+    const footRect = { x: player.x + 2, y: player.y + player.h - 1, w: player.w - 4, h: 4 };
+    for(const w of walls){
+      if(!w.isPlatform) continue;
+      if(rect2(footRect.x, footRect.y, footRect.w, footRect.h, w)){ dropTargetY = w.y; break; }
+    }
+    if(dropTargetY===null){
+      for(const m of movingPlatforms){
+        if(rect2(footRect.x, footRect.y, footRect.w, footRect.h, m)){ dropTargetY = m.y; break; }
+      }
+    }
+  }
+  if(dropCombo && wasOnGround && dropTargetY!==null){
+    const tDrop = now();
+    player.dropThroughUntil = tDrop + 220;
+    player.dropThroughFloor = dropTargetY;
+    player.onGround = false;
+    player.vy = Math.max(player.vy, 1.5);
+    player.y += 4;
+  }
 
   // Crouch offset
   const targetOffset = player.crouch? 8 : 0;
@@ -1112,15 +1144,35 @@ function update(dt){
     player.x = clamp(player.x, 0, 3*W - player.w);
 
     // Floor & platforms
+    let dropActive = false;
+    let dropIgnoreY = -Infinity;
+    if(player.dropThroughUntil){
+      const dropNow = now();
+      if(dropNow < player.dropThroughUntil){
+        dropActive = true;
+        dropIgnoreY = player.dropThroughFloor ?? -Infinity;
+      } else {
+        player.dropThroughUntil = 0;
+        player.dropThroughFloor = null;
+      }
+    }
     if(rect(player, floorSlab)){
       if(player.vy>0 && player.y+player.h - floorSlab.y < 28){
         player.y = floorSlab.y - player.h; player.vy=0; player.onGround=true;
+        player.dropThroughUntil = 0;
+        player.dropThroughFloor = null;
+        dropActive=false; dropIgnoreY=-Infinity;
       }
     }
     for(const w of walls){
       if(!w.isPlatform) continue;
       if(rect(player,w) && player.vy>0 && player.y+player.h - w.y < 24){
-        player.y = w.y - player.h; player.vy=0; player.onGround=true;
+        if(!(dropActive && w.y <= dropIgnoreY + 1)){
+          player.y = w.y - player.h; player.vy=0; player.onGround=true;
+          player.dropThroughUntil = 0;
+          player.dropThroughFloor = null;
+          dropActive=false; dropIgnoreY=-Infinity;
+        }
       }
     }
     for(const m of movingPlatforms){
@@ -1128,8 +1180,13 @@ function update(dt){
       if(Math.abs(m.cx)>m.range){ m.vx*=-1; }
       m.x += m.vx;
       if(rect(player, {x:m.x,y:m.y,w:m.w,h:m.h}) && player.vy>0 && player.y+player.h - m.y < 20){
-        player.y = m.y - player.h; player.vy=0; player.onGround=true;
-        player.x += m.vx;
+        if(!(dropActive && m.y <= dropIgnoreY + 1)){
+          player.y = m.y - player.h; player.vy=0; player.onGround=true;
+          player.dropThroughUntil = 0;
+          player.dropThroughFloor = null;
+          dropActive=false; dropIgnoreY=-Infinity;
+          player.x += m.vx;
+        }
       }
     }
 
