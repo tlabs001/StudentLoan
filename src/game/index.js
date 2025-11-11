@@ -166,6 +166,9 @@ const BASE_ENV_COLORS = {
   background:'#0e0f13',
   wall:'#14161b',
   platform:'#2b2e36',
+  platformTop:'#3f4658',
+  platformShadow:'#1a1e27',
+  platformOutline:'#9bb7ff',
   desk:'#5a4634',
   deskEdge:'#3e2f23',
   deskLeg:'#3a2a1f',
@@ -269,6 +272,10 @@ function computePaletteForFloor(floor){
     background: shift(BASE_ENV_COLORS.background),
     wall: shift(BASE_ENV_COLORS.wall),
     platform: shift(BASE_ENV_COLORS.platform),
+    platformTop: shift(BASE_ENV_COLORS.platformTop),
+    platformShadow: shift(BASE_ENV_COLORS.platformShadow),
+    platformOutline: shift(BASE_ENV_COLORS.platformOutline),
+    platformGlow: toRgba(shift(BASE_ENV_COLORS.platformOutline), 0.22),
     desk: shift(BASE_ENV_COLORS.desk),
     deskEdge: shift(BASE_ENV_COLORS.deskEdge),
     deskLeg: shift(BASE_ENV_COLORS.deskLeg),
@@ -926,6 +933,81 @@ const CODEX_SECTIONS = [
   { title:'CEO', entries:[CEO_PROFILE] }
 ];
 
+const BOARD_DECK_PROFILES = [...PROFILE_DECK, CEO_PROFILE].sort((a,b)=>{
+  const af = Number.isFinite(a.floor) ? a.floor : 0;
+  const bf = Number.isFinite(b.floor) ? b.floor : 0;
+  return af - bf;
+});
+const BOARD_DECK_MAP = new Map(BOARD_DECK_PROFILES.map(profile => [profile.floor, profile]));
+
+const deckPortraitCache = new Map();
+
+function hashSeed(str){
+  let h = 2166136261 >>> 0;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function makeSeededRandom(seedStr){
+  let state = hashSeed(seedStr || 'deck');
+  return function(){
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(state ^ state >>> 15, 1 | state);
+    t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
+    t ^= t >>> 14;
+    return (t >>> 0) / 4294967296;
+  };
+}
+
+function generateDeckPortrait(profile){
+  const key = `${profile && (profile.card || profile.name || profile.floor) || 'board'}`;
+  if(deckPortraitCache.has(key)) return deckPortraitCache.get(key);
+  const size = 32;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rand = makeSeededRandom(key);
+  const palette = ['#0a1122','#192745','#2d4170','#4f6fa8','#7ea7ff','#f0f5ff'];
+  const half = Math.ceil(size / 2);
+  for(let y=0; y<size; y++){
+    for(let x=0; x<half; x++){
+      const color = palette[Math.floor(rand()*palette.length)];
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, 1, 1);
+      ctx.fillRect(size - 1 - x, y, 1, 1);
+    }
+  }
+  const eyeY = 10 + Math.floor(rand()*6);
+  const eyeX = 9 + Math.floor(rand()*5);
+  ctx.fillStyle = '#f8fbff';
+  ctx.fillRect(eyeX, eyeY, 2, 2);
+  ctx.fillRect(size - eyeX - 2, eyeY, 2, 2);
+  const browY = Math.max(eyeY - 3, 2);
+  ctx.fillStyle = '#1c2236';
+  ctx.fillRect(eyeX - 1, browY, 4, 1);
+  ctx.fillRect(size - eyeX - 3, browY, 4, 1);
+  const accentY = 14 + Math.floor(rand()*4);
+  ctx.fillStyle = '#253356';
+  ctx.fillRect(eyeX - 2, accentY, 4, 2);
+  ctx.fillRect(size - eyeX - 2, accentY, 4, 2);
+  const mouthY = 20 + Math.floor(rand()*4);
+  const mouthWidth = 6 + Math.floor(rand()*3);
+  ctx.fillStyle = '#ff8fb3';
+  ctx.fillRect(Math.floor(size/2 - mouthWidth/2), mouthY, mouthWidth, 2);
+  const collarY = 24 + Math.floor(rand()*4);
+  ctx.fillStyle = '#1d2842';
+  ctx.fillRect(size/2 - 6, collarY, 12, size - collarY);
+  ctx.fillStyle = '#2a3b66';
+  ctx.fillRect(size/2 - 2, collarY, 4, size - collarY);
+  const dataUrl = canvas.toDataURL();
+  deckPortraitCache.set(key, dataUrl);
+  return dataUrl;
+}
+
 const EFFECTS = {
   NJ:   { name:'Night Job',            color:'#5F66FF', icon:'NJ', kind:'pulse',   tick_ms:6000, params:{sleep_ms:1000} },
   SJ:   { name:'Second Job',           color:'#8A9FBF', icon:'SJ', kind:'continuous', params:{move_mult:0.75, jump_mult:0.80} },
@@ -1052,6 +1134,8 @@ let activeHack=null;
 let ambientInterval=null, ambientCurrent=null;
 let managerCheckFloor=null, managerDefeated=false;
 let minimapUnlocked=false, minimapVisible=false;
+let deckVisible=false;
+const unlockedDeckFloors = new Set();
 let floorBannerTimeout=null;
 
 function desiredMusicMode(){
@@ -1096,6 +1180,10 @@ const miniBossEl = document.getElementById('miniBossCount');
 const mapBtn = document.getElementById('mapBtn');
 const minimapOverlay = document.getElementById('minimapOverlay');
 const minimapTower = document.getElementById('minimapTower');
+const deckBtn = document.getElementById('deckBtn');
+const deckOverlay = document.getElementById('deckOverlay');
+const deckGrid = document.getElementById('deckGrid');
+const deckProgress = document.getElementById('deckProgress');
 const floorBannerEl = document.getElementById('floorBanner');
 const floorBannerText = document.getElementById('floorBannerText');
 const minimapCells = [];
@@ -1181,6 +1269,21 @@ if(mapBtn){
   });
 }
 
+if(deckBtn){
+  deckBtn.addEventListener('click', ()=>{
+    if(deckVisible){ toggleDeck(false); }
+    else { toggleDeck(true); }
+  });
+}
+
+if(deckOverlay){
+  deckOverlay.addEventListener('click', (event)=>{
+    if(event.target === deckOverlay){ toggleDeck(false); }
+  });
+  const panel = deckOverlay.querySelector('.deck-panel');
+  if(panel){ panel.addEventListener('click', (event)=>event.stopPropagation()); }
+}
+
 if(minimapOverlay){
   minimapOverlay.addEventListener('click', (event)=>{
     if(event.target === minimapOverlay){ toggleMinimap(false); }
@@ -1200,6 +1303,7 @@ if(minimapTower){
 }
 
 updateMapButtonState();
+resetDeckState();
 toggleMinimap(false);
 hideFloorBanner();
 
@@ -1289,6 +1393,148 @@ function toggleMinimap(force){
     minimapOverlay.classList.add('hidden');
   }
   if(mapBtn){ mapBtn.classList.toggle('active', target); }
+}
+
+function updateDeckProgress(){
+  if(deckProgress){
+    deckProgress.textContent = `Unlocked ${unlockedDeckFloors.size}/${BOARD_DECK_PROFILES.length}`;
+  }
+}
+
+function updateDeckButton(){
+  if(!deckBtn) return;
+  deckBtn.textContent = `Board Deck (P) ${unlockedDeckFloors.size}/${BOARD_DECK_PROFILES.length}`;
+}
+
+function renderDeck(){
+  if(!deckGrid) return;
+  updateDeckProgress();
+  deckGrid.textContent = '';
+  for(const profile of BOARD_DECK_PROFILES){
+    const unlocked = unlockedDeckFloors.has(profile.floor);
+    const cardEl = document.createElement('div');
+    cardEl.className = `deck-card ${unlocked ? 'unlocked' : 'locked'}`;
+    const portrait = document.createElement('div');
+    portrait.className = 'deck-portrait';
+    if(unlocked){
+      const portraitTexture = generateDeckPortrait(profile);
+      if(portraitTexture){
+        portrait.style.backgroundImage = `url(${portraitTexture})`;
+      }
+    }
+    cardEl.appendChild(portrait);
+    const info = document.createElement('div');
+    info.className = 'deck-info';
+    const title = document.createElement('div');
+    title.className = 'deck-title';
+    title.textContent = unlocked ? `${profile.card} — ${profile.name}` : '???';
+    info.appendChild(title);
+    const subtitle = document.createElement('div');
+    subtitle.className = 'deck-subtitle';
+    const floorLabel = Number.isFinite(profile.floor) ? formatFloorLabel(profile.floor) : '';
+    if(unlocked){
+      const parts = [];
+      if(floorLabel) parts.push(floorLabel);
+      if(profile.title) parts.push(profile.title);
+      if(Number.isFinite(profile.hp)) parts.push(`HP ${profile.hp}`);
+      subtitle.textContent = parts.join(' • ');
+    } else {
+      subtitle.textContent = floorLabel ? `${floorLabel} — Intel Locked` : 'Eliminate to reveal dossier';
+    }
+    info.appendChild(subtitle);
+    if(unlocked){
+      if(profile.bio){
+        const bio = document.createElement('div');
+        bio.className = 'deck-bio';
+        bio.textContent = profile.bio;
+        info.appendChild(bio);
+      }
+      if(profile.power){
+        const power = document.createElement('div');
+        power.className = 'deck-power';
+        const strong = document.createElement('strong');
+        strong.textContent = 'Power:';
+        power.appendChild(strong);
+        power.appendChild(document.createTextNode(` ${profile.power}`));
+        info.appendChild(power);
+      }
+      if(Array.isArray(profile.specials) && profile.specials.length){
+        const specialsLabel = document.createElement('div');
+        specialsLabel.className = 'deck-effects';
+        specialsLabel.textContent = 'Special Abilities:';
+        info.appendChild(specialsLabel);
+        const specialsList = document.createElement('ul');
+        specialsList.className = 'deck-list';
+        for(const spec of profile.specials){
+          const li = document.createElement('li');
+          li.textContent = spec;
+          specialsList.appendChild(li);
+        }
+        info.appendChild(specialsList);
+      }
+      if(Array.isArray(profile.debtEffects) && profile.debtEffects.length){
+        const effectsLabel = document.createElement('div');
+        effectsLabel.className = 'deck-effects';
+        effectsLabel.textContent = `${profile.effectsLabel || 'Debt Effects'}:`;
+        info.appendChild(effectsLabel);
+        const effectsList = document.createElement('ul');
+        effectsList.className = 'deck-list';
+        for(const eff of profile.debtEffects){
+          if(!eff) continue;
+          const li = document.createElement('li');
+          const prefix = eff.id ? `${eff.id}: ` : '';
+          li.textContent = `${prefix}${eff.desc || ''}`.trim();
+          effectsList.appendChild(li);
+        }
+        info.appendChild(effectsList);
+      }
+    } else {
+      const teaser = document.createElement('div');
+      teaser.className = 'deck-bio';
+      teaser.textContent = 'Defeat this board member to reveal their dossier.';
+      info.appendChild(teaser);
+    }
+    cardEl.appendChild(info);
+    deckGrid.appendChild(cardEl);
+  }
+}
+
+function toggleDeck(force){
+  if(!deckOverlay) return;
+  const target = force !== undefined ? force : !deckVisible;
+  if(target && minimapVisible){ toggleMinimap(false); }
+  deckVisible = target;
+  if(target){
+    deckOverlay.classList.remove('hidden');
+    renderDeck();
+  } else {
+    deckOverlay.classList.add('hidden');
+  }
+  if(deckBtn){ deckBtn.classList.toggle('active', target); }
+}
+
+function unlockDeckCardForFloor(floor){
+  const profile = BOARD_DECK_MAP.get(floor);
+  if(!profile) return;
+  if(unlockedDeckFloors.has(profile.floor)) return;
+  unlockedDeckFloors.add(profile.floor);
+  updateDeckButton();
+  updateDeckProgress();
+  renderDeck();
+  chime();
+  const nameLine = profile.name ? `${profile.card} – ${profile.name}` : profile.card;
+  notify(`${nameLine} dossier unlocked.`);
+  centerNote(`${profile.card} dossier unlocked!`, 1500);
+}
+
+function resetDeckState(){
+  unlockedDeckFloors.clear();
+  deckVisible=false;
+  if(deckOverlay){ deckOverlay.classList.add('hidden'); }
+  if(deckBtn){ deckBtn.classList.remove('active'); }
+  updateDeckButton();
+  updateDeckProgress();
+  renderDeck();
 }
 
 function unlockMinimap(){
@@ -1456,6 +1702,7 @@ function startNewRun(name){
   setMode(testMode? 'test' : 'normal');
   setWeapon('pistol');
   toggleCodex(false);
+  resetDeckState();
   minimapUnlocked=false;
   minimapVisible=false;
   updateMapButtonState();
@@ -1478,6 +1725,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   if(!runActive) return;
   toggleCodex(false);
   toggleMinimap(false);
+  toggleDeck(false);
   hideFloorBanner();
   runActive=false;
   pause=true;
@@ -1588,15 +1836,35 @@ window.addEventListener('keydown', e=>{
   if(k==='0'){
     if(!runActive){ return; }
     e.preventDefault();
-    if(minimapVisible){ toggleMinimap(false); }
-    else if(minimapUnlocked){ toggleMinimap(true); }
-    else { centerNote('Clear a vent to access the map.', 1400); lockedBuzz(); }
+    if(minimapVisible){
+      toggleMinimap(false);
+    } else if(minimapUnlocked){
+      if(deckVisible){ toggleDeck(false); }
+      toggleMinimap(true);
+    } else {
+      centerNote('Clear a vent to access the map.', 1400);
+      lockedBuzz();
+    }
     return;
   }
-  if(k==='escape' && minimapVisible){
+  if(k==='p'){
+    if(!runActive){ return; }
     e.preventDefault();
-    toggleMinimap(false);
+    if(deckVisible){ toggleDeck(false); }
+    else { toggleDeck(true); }
     return;
+  }
+  if(k==='escape'){
+    if(minimapVisible){
+      e.preventDefault();
+      toggleMinimap(false);
+      return;
+    }
+    if(deckVisible){
+      e.preventDefault();
+      toggleDeck(false);
+      return;
+    }
   }
   keys[k]=true;
   if(k==='r'){ // reload pistol
@@ -3136,6 +3404,9 @@ function update(dt){
           centerNote('Manager defeated! Bonus secured.', 1800);
           notify(`Manager routed! +$${bonus} and weapon upgrade.`);
         }
+        if(defeated.boss){
+          unlockDeckCardForFloor(currentFloor);
+        }
       }
     }
 
@@ -3477,6 +3748,38 @@ function drawNinjaPlayer(ctx, px, py, state){
   ctx.restore();
 }
 
+function drawPlatformBlock(ctx, x, y, width, height, palette){
+  if(!ctx || !palette || width<=0 || height<=0) return;
+  ctx.save();
+  const baseColor = palette.platform || '#2b2e36';
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(x, y, width, height);
+  const topHeight = Math.min(height, Math.max(2, Math.round(height*0.25)));
+  if(topHeight>0){
+    ctx.fillStyle = palette.platformTop || baseColor;
+    ctx.fillRect(x, y, width, topHeight);
+  }
+  const shadowHeight = Math.min(height, Math.max(2, Math.round(height*0.2)));
+  if(shadowHeight>0){
+    ctx.fillStyle = palette.platformShadow || baseColor;
+    ctx.fillRect(x, y + height - shadowHeight, width, shadowHeight);
+  }
+  if(palette.platformGlow){
+    const glowHeight = Math.min(topHeight, 3);
+    if(glowHeight>0){
+      const glowY = Math.max(0, y - glowHeight + 1);
+      ctx.fillStyle = palette.platformGlow;
+      ctx.fillRect(x, glowY, width, glowHeight);
+    }
+  }
+  if(palette.platformOutline && width>2 && height>2){
+    ctx.strokeStyle = palette.platformOutline;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 0.75, y + 0.75, width - 1.5, height - 1.5);
+  }
+  ctx.restore();
+}
+
 function drawBoardMembers(ctx, ox){
   if(!boardMembers.length) return;
   const table = boardTables && boardTables.length ? boardTables[0] : null;
@@ -3566,8 +3869,13 @@ function draw(){
 
     // back wall
     for(const wall of walls){
-      ctx.fillStyle = wall.isPlatform? activePalette.platform : activePalette.wall;
-      ctx.fillRect(wall.x+ox, wall.y, wall.w, wall.h);
+      const wx = wall.x + ox;
+      if(wall.isPlatform){
+        drawPlatformBlock(ctx, wx, wall.y, wall.w, wall.h, activePalette);
+      } else {
+        ctx.fillStyle = activePalette.wall;
+        ctx.fillRect(wx, wall.y, wall.w, wall.h);
+      }
     }
     // windows
     for(const wdw of windowsArr){
@@ -3651,7 +3959,7 @@ function draw(){
       ctx.fillRect(paper.x + sway + ox, paper.y + Math.sin(performance.now()/900+paper.sway)*12, 12, 6);
     }
     // floor
-    ctx.fillStyle = activePalette.platform; ctx.fillRect(floorSlab.x+ox,floorSlab.y,floorSlab.w,floorSlab.h);
+    drawPlatformBlock(ctx, floorSlab.x+ox, floorSlab.y, floorSlab.w, floorSlab.h, activePalette);
 
     // desks
     for(const d of desks){
@@ -3708,9 +4016,18 @@ function draw(){
 
     // moving platforms
     for(const m of movingPlatforms){
-      ctx.fillStyle = activePalette.movingPlatform;
-      ctx.fillRect(m.x+ox,m.y,m.w,m.h);
-      ctx.fillStyle = activePalette.movingPlatformHighlight; ctx.fillRect(m.x+4+ox,m.y+2,m.w-8,2);
+      const mpPalette = {
+        platform: activePalette.movingPlatform || activePalette.platform,
+        platformTop: activePalette.movingPlatformHighlight || activePalette.platformTop,
+        platformShadow: activePalette.platformShadow || activePalette.movingPlatform,
+        platformOutline: activePalette.platformOutline,
+        platformGlow: activePalette.platformGlow
+      };
+      drawPlatformBlock(ctx, m.x+ox, m.y, m.w, m.h, mpPalette);
+      if(activePalette.movingPlatformHighlight){
+        ctx.fillStyle = activePalette.movingPlatformHighlight;
+        ctx.fillRect(m.x+4+ox, m.y+2, Math.max(0, m.w-8), 2);
+      }
     }
 
     for(const table of boardTables){
@@ -3743,8 +4060,12 @@ function draw(){
         ctx.fillStyle='rgba(200,200,200,0.25)';
         ctx.fillRect(hz.x+ox, hz.y, hz.w, hz.h);
       } else if(hz.type==='fall'){
-        ctx.fillStyle=hz.open ? 'rgba(30,30,30,0.6)' : activePalette.platform;
-        ctx.fillRect(hz.x+ox, hz.y, hz.w, hz.h);
+        if(hz.open){
+          ctx.fillStyle='rgba(30,30,30,0.6)';
+          ctx.fillRect(hz.x+ox, hz.y, hz.w, hz.h);
+        } else {
+          drawPlatformBlock(ctx, hz.x+ox, hz.y, hz.w, hz.h, activePalette);
+        }
       } else if(hz.type==='spark'){
         ctx.fillStyle='rgba(80,200,255,0.4)';
         ctx.fillRect(hz.x-6+ox, hz.y, hz.w+12, hz.h);
