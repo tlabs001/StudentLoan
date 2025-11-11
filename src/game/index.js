@@ -89,6 +89,8 @@ const PLAYER_BULLET_DAMAGE = GAME_PARAMS.player.damages.bullet;
 const PLAYER_FLAME_DAMAGE = GAME_PARAMS.player.damages.flame;
 const PLAYER_MELEE_DAMAGE = GAME_PARAMS.player.damages.melee;
 const STOMP_DAMAGE = GAME_PARAMS.player.damages.stomp;
+const GUARD_WIDTH = 20;
+const GUARD_HEIGHT = 42;
 const initialSpawnX = GAME_PARAMS.player.spawnX;
 const RUN_LOAN_START = GAME_PARAMS.economy.startingLoanBalance;
 const GUARD_BASE_DAMAGE = GAME_PARAMS.enemies.guardBaseDamage;
@@ -2793,8 +2795,8 @@ function makeGuard(x,y,i){
   const guard = new Agent({
     x,
     y,
-    w:20,
-    h:42,
+    w:GUARD_WIDTH,
+    h:GUARD_HEIGHT,
     vx: direction > 0 ? Math.abs(speed) : -Math.abs(speed),
     hp,
     maxHp: hp,
@@ -3139,8 +3141,8 @@ function makeLevel(i){
   }
 
   if(i === FLOORS){
-    const ceoWidth = 80;
-    const ceoHeight = 168;
+    const ceoWidth = GUARD_WIDTH * 4;
+    const ceoHeight = GUARD_HEIGHT * 4;
     const ceoX = Math.max(60, 1.5*W - ceoWidth/2);
     const ceo = new Agent({
       x: ceoX,
@@ -5211,9 +5213,24 @@ function drawOutside(){
     ctx.fill();
   }
 
+  const skirtWidth = Math.max(42, outsideScope.radius * 0.18);
+
+  // Darken the periphery while keeping the scope view clear and leaving a lighter
+  // "skirt" around the edge so enemies are still partially visible.
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.97)';
+  ctx.fillStyle = 'rgba(0,0,0,0.94)';
   ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius + skirtWidth, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.58)';
+  ctx.beginPath();
+  ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius + skirtWidth, 0, Math.PI*2);
+  ctx.fill();
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath();
   ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius, 0, Math.PI*2);
