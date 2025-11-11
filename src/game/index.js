@@ -3380,11 +3380,11 @@ function drawNinjaPlayer(ctx, px, py, state){
   const stride = clamp(state.stepStride || 0, 0, 1);
   const phase = state.stepPhase || 0;
   const swing = Math.sin(phase) * stride;
-  const top = py + 2;
+  const top = 2;
   const hoodHeight = 12;
   const torsoHeight = crouch ? 16 : 18;
   const legBase = top + hoodHeight + torsoHeight;
-  const rawLegHeight = height - (legBase - py);
+  const rawLegHeight = height - (legBase - top) - 2;
   const legHeight = Math.max(6, rawLegHeight - (crouch ? 4 : 0));
   const leftLift = Math.max(0, swing) * (crouch ? 1.8 : 4.2);
   const rightLift = Math.max(0, -swing) * (crouch ? 1.8 : 4.2);
