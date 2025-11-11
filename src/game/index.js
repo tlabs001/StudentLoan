@@ -117,23 +117,36 @@ const OUTSIDE_PLATFORM_SPANS = [
   { x: OUTSIDE_BUILDING.x + 80, y: OUTSIDE_BUILDING.y + 290, w: OUTSIDE_BUILDING.width - 160 }
 ];
 const OUTSIDE_GUARD_SLOTS = [
-  { id:'roof-left', x: OUTSIDE_BUILDING.x + 90, y: OUTSIDE_BUILDING.roofY + 28, swing: 16, bob: 5 },
-  { id:'roof-mid', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width/2, y: OUTSIDE_BUILDING.roofY + 26, swing: 22, bob: 6 },
-  { id:'roof-right', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width - 90, y: OUTSIDE_BUILDING.roofY + 28, swing: 16, bob: 5 },
-  { id:'span1-left', x: OUTSIDE_PLATFORM_SPANS[0].x + 50, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 18, bob: 6 },
-  { id:'span1-mid', x: OUTSIDE_PLATFORM_SPANS[0].x + OUTSIDE_PLATFORM_SPANS[0].w/2, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 24, bob: 7 },
-  { id:'span1-right', x: OUTSIDE_PLATFORM_SPANS[0].x + OUTSIDE_PLATFORM_SPANS[0].w - 50, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 18, bob: 6 },
-  { id:'span2-left', x: OUTSIDE_PLATFORM_SPANS[1].x + 40, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 20, bob: 6 },
-  { id:'span2-mid', x: OUTSIDE_PLATFORM_SPANS[1].x + OUTSIDE_PLATFORM_SPANS[1].w/2, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 24, bob: 7 },
-  { id:'span2-right', x: OUTSIDE_PLATFORM_SPANS[1].x + OUTSIDE_PLATFORM_SPANS[1].w - 40, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 20, bob: 6 },
-  { id:'span3-left', x: OUTSIDE_PLATFORM_SPANS[2].x + 50, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 18, bob: 5 },
-  { id:'span3-mid', x: OUTSIDE_PLATFORM_SPANS[2].x + OUTSIDE_PLATFORM_SPANS[2].w/2, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 22, bob: 6 },
-  { id:'span3-right', x: OUTSIDE_PLATFORM_SPANS[2].x + OUTSIDE_PLATFORM_SPANS[2].w - 50, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 18, bob: 5 },
-  { id:'span4-left', x: OUTSIDE_PLATFORM_SPANS[3].x + 40, y: OUTSIDE_PLATFORM_SPANS[3].y, swing: 20, bob: 5 },
-  { id:'span4-right', x: OUTSIDE_PLATFORM_SPANS[3].x + OUTSIDE_PLATFORM_SPANS[3].w - 40, y: OUTSIDE_PLATFORM_SPANS[3].y, swing: 20, bob: 5 },
-  { id:'ground-left', x: OUTSIDE_BUILDING.x + 110, y: OUTSIDE_FRONT_WALK, swing: 24, bob: 4 },
-  { id:'ground-mid', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width/2, y: OUTSIDE_FRONT_WALK, swing: 28, bob: 4 },
-  { id:'ground-right', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width - 110, y: OUTSIDE_FRONT_WALK, swing: 24, bob: 4 }
+  { id:'ground-west', x: OUTSIDE_BUILDING.x - 70, y: OUTSIDE_FRONT_WALK, swing: 18, bob: 3 },
+  { id:'ground-entry-left', x: OUTSIDE_BUILDING.x + 80, y: OUTSIDE_FRONT_WALK, swing: 20, bob: 4 },
+  { id:'ground-entry-mid', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width/2 - 40, y: OUTSIDE_FRONT_WALK, swing: 22, bob: 4 },
+  { id:'ground-entry-right', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width - 120, y: OUTSIDE_FRONT_WALK, swing: 20, bob: 4 },
+  { id:'ground-east', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width + 70, y: OUTSIDE_FRONT_WALK, swing: 18, bob: 3 },
+  { id:'ground-west-car', x: OUTSIDE_BUILDING.x - 150, y: OUTSIDE_FRONT_WALK, swing: 14, bob: 3 },
+  { id:'ground-east-car', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width + 150, y: OUTSIDE_FRONT_WALK, swing: 14, bob: 3 }
+];
+const OUTSIDE_WORKER_COUNT = 15;
+const OUTSIDE_WINDOW_LAYOUT = (()=>{
+  const winCols = 6;
+  const winRows = 6;
+  const winWidth = 30;
+  const winHeight = 36;
+  const winGapX = (OUTSIDE_BUILDING.width - winCols * winWidth) / (winCols + 1);
+  const winGapY = (OUTSIDE_BUILDING.height - 140 - winRows * winHeight) / (winRows + 1);
+  const positions = [];
+  for(let r=0; r<winRows; r++){
+    for(let c=0; c<winCols; c++){
+      const winX = OUTSIDE_BUILDING.x + winGapX + c * (winWidth + winGapX);
+      const winY = OUTSIDE_BUILDING.y + 46 + winGapY + r * (winHeight + winGapY);
+      positions.push({ x: winX, y: winY, w: winWidth, h: winHeight, row:r, col:c });
+    }
+  }
+  return { cols: winCols, rows: winRows, width: winWidth, height: winHeight, gapX: winGapX, gapY: winGapY, positions };
+})();
+const OUTSIDE_WINDOW_GUARD_SLOTS = [
+  { row: 1, col: 1, id: 'window-nw' },
+  { row: 2, col: 3, id: 'window-mid' },
+  { row: 3, col: 4, id: 'window-se' }
 ];
 
 (()=>{
@@ -437,6 +450,61 @@ function noteToFrequency(note){
 }
 
 const MUSIC_TRACKS = {
+  outsideSpy: {
+    tempo: 118,
+    voices: [
+      {
+        wave: 'square',
+        gain: 0.1,
+        release: 0.24,
+        sequence: [
+          { note: 'E4', beats: 0.5 },
+          { note: 'G4', beats: 0.5 },
+          { note: 'B4', beats: 0.5 },
+          { note: 'D5', beats: 0.5 },
+          { note: 'C5', beats: 0.5 },
+          { note: 'A4', beats: 0.5 },
+          { note: 'G4', beats: 0.5 },
+          { rest: true, beats: 0.5 },
+          { note: 'F#4', beats: 0.5 },
+          { note: 'A4', beats: 0.5 },
+          { note: 'C5', beats: 0.5 },
+          { note: 'E5', beats: 0.5 },
+          { note: 'D5', beats: 1 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.08,
+        release: 0.4,
+        sequence: [
+          { note: 'E2', beats: 1 },
+          { note: 'B2', beats: 1 },
+          { note: 'D3', beats: 1 },
+          { note: 'C3', beats: 1 },
+          { note: 'A2', beats: 1 },
+          { note: 'E2', beats: 1 },
+          { note: 'F#2', beats: 1 },
+          { note: 'C3', beats: 1 }
+        ]
+      },
+      {
+        wave: 'square',
+        gain: 0.05,
+        release: 0.18,
+        sequence: [
+          { note: 'E5', beats: 0.25 },
+          { note: 'F#5', beats: 0.25 },
+          { note: 'G5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'D5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'C5', beats: 0.25 },
+          { rest: true, beats: 0.25 }
+        ]
+      }
+    ]
+  },
   level: {
     tempo: 128,
     voices: [
@@ -1114,6 +1182,8 @@ const codexState = { open:false };
 let outsideMode = false;
 let outsideKillCount = 0;
 let outsideGuards = [];
+let outsideWorkers = [];
+let outsideWindowGuards = [];
 let outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
 let outsideAim = { x: W/2, y: H/2 };
 let outsideLastShot = 0;
@@ -2194,8 +2264,8 @@ function spawnOutsideGuard(){
   if(available.length===0) return;
   const slot = available[Math.floor(Math.random()*available.length)];
   outsideOccupiedSlots.add(slot.id);
-  const width = 30;
-  const height = 44;
+  const width = 24;
+  const height = 42;
   outsideGuards.push({
     slot: slot.id,
     baseX: slot.x,
@@ -2214,10 +2284,72 @@ function spawnOutsideGuard(){
   });
 }
 
+function initOutsideWorkers(){
+  outsideWorkers.length = 0;
+  const workerWidth = 18;
+  const walkwayMin = Math.max(60, OUTSIDE_BUILDING.x - 160);
+  const walkwayMax = Math.min(W - 60, OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width + 160) - workerWidth;
+  const range = Math.max(0, walkwayMax - walkwayMin);
+  const step = OUTSIDE_WORKER_COUNT>1 ? range / (OUTSIDE_WORKER_COUNT - 1) : 0;
+  for(let i=0; i<OUTSIDE_WORKER_COUNT; i++){
+    const base = walkwayMin + step * i;
+    const jitter = (Math.random() - 0.5) * 16;
+    const x = Math.max(walkwayMin, Math.min(walkwayMax, base + jitter));
+    const appearance = createWorkerAppearance();
+    const showTie = !!appearance.tie && Math.random()<0.8;
+    outsideWorkers.push({
+      x,
+      y: OUTSIDE_FRONT_WALK - 38,
+      w: workerWidth,
+      h: 38,
+      alive: true,
+      baseX: x,
+      minX: walkwayMin,
+      maxX: walkwayMax,
+      bob: Math.random() * Math.PI * 2,
+      walkPhase: Math.random() * Math.PI * 2,
+      walkSpeed: 0.6 + Math.random() * 0.6,
+      walkAmplitude: 10 + Math.random() * 16,
+      facing: Math.random() < 0.5 ? 1 : -1,
+      appearance,
+      showTie,
+      hasBadge: Math.random() < 0.4,
+      hasClipboard: Math.random() < 0.22,
+      clipboardSide: Math.random() < 0.5 ? -1 : 1,
+      glasses: Math.random() < 0.22,
+      hitFlashUntil: 0
+    });
+  }
+}
+
+function initOutsideWindowGuards(){
+  outsideWindowGuards = OUTSIDE_WINDOW_GUARD_SLOTS.map(slot => {
+    const windowRect = OUTSIDE_WINDOW_LAYOUT.positions.find(pos => pos.row === slot.row && pos.col === slot.col);
+    if(!windowRect) return null;
+    return {
+      id: slot.id,
+      window: windowRect,
+      x: windowRect.x + windowRect.w/2,
+      width: 20,
+      height: 34,
+      paddingBottom: 6,
+      popPhase: Math.random() * Math.PI * 2,
+      speed: 0.9 + Math.random() * 0.6,
+      popAmount: 0,
+      facing: Math.random() < 0.5 ? 1 : -1,
+      dead: false,
+      hitUntil: 0,
+      respawnAt: 0
+    };
+  }).filter(Boolean);
+}
+
 function initOutsideRound(){
   outsideMode = true;
   outsideKillCount = 0;
   outsideGuards.length = 0;
+  outsideWorkers.length = 0;
+  outsideWindowGuards.length = 0;
   outsideOccupiedSlots.clear();
   outsideSpawnTimer = 0;
   outsideLastShot = 0;
@@ -2225,6 +2357,8 @@ function initOutsideRound(){
   outsideShotPulseUntil = 0;
   outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
   outsideAim = { x: W/2, y: H/2 };
+  initOutsideWorkers();
+  initOutsideWindowGuards();
   const initialGuards = Math.min(OUTSIDE_MAX_ACTIVE_GUARDS, 4);
   for(let i=0; i<initialGuards; i++){ spawnOutsideGuard(); }
   if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(OUTSIDE_FLOOR);
@@ -2233,6 +2367,7 @@ function initOutsideRound(){
   notify('Outside perimeter: use arrow keys to aim and eliminate 20 guards.');
   centerNote('Arrow keys to aim. Eliminate 20 guards.', 2000);
   updateHudForOutside();
+  startMusic('outsideSpy');
 }
 
 function fireOutsideShot(){
@@ -2246,8 +2381,8 @@ function fireOutsideShot(){
   let hit = false;
   for(const guard of outsideGuards){
     if(guard.dead) continue;
-    const halfW = (guard.width || 30) / 2;
-    const top = guard.renderY - (guard.height || 44);
+    const halfW = (guard.width || 24) / 2;
+    const top = guard.renderY - (guard.height || 42);
     if(aimX >= guard.renderX - halfW && aimX <= guard.renderX + halfW && aimY >= top && aimY <= guard.renderY){
       guard.dead = true;
       guard.hitUntil = t + 160;
@@ -2255,6 +2390,32 @@ function fireOutsideShot(){
       outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
       hit = true;
       break;
+    }
+  }
+  if(!hit){
+    for(const guard of outsideWindowGuards){
+      if(!guard || guard.dead) continue;
+      const progress = guard.popAmount ?? 0;
+      if(progress <= 0.25) continue;
+      const windowRect = guard.window;
+      if(!windowRect) continue;
+      const guardWidth = guard.width || 20;
+      const guardHeight = guard.height || 34;
+      const guardBottom = windowRect.y + windowRect.h - (guard.paddingBottom || 0);
+      const guardTopFull = guardBottom - guardHeight;
+      const hiddenOffset = guardHeight * (1 - progress);
+      const guardTop = guardTopFull + hiddenOffset;
+      const guardLeft = guard.x - guardWidth/2;
+      const guardRight = guardLeft + guardWidth;
+      if(aimX >= guardLeft && aimX <= guardRight && aimY >= guardTop && aimY <= guardBottom){
+        guard.dead = true;
+        guard.popAmount = Math.max(0, progress - 0.4);
+        guard.hitUntil = t + 160;
+        guard.respawnAt = t + 1800;
+        outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
+        hit = true;
+        break;
+      }
     }
   }
   if(hit){
@@ -2294,6 +2455,31 @@ function updateOutside(dt){
       outsideSpawnTimer = 0;
     }
   }
+  for(const worker of outsideWorkers){
+    if(!worker.alive) continue;
+    worker.walkPhase = (worker.walkPhase || 0) + dt * (worker.walkSpeed || 0.8);
+    const offset = Math.sin(worker.walkPhase) * (worker.walkAmplitude || 12);
+    const targetX = (worker.baseX || worker.x) + offset;
+    worker.x = Math.max(worker.minX ?? 0, Math.min(worker.maxX ?? W, targetX));
+    worker.facing = Math.cos(worker.walkPhase) >= 0 ? 1 : -1;
+    worker.bob = (worker.bob || 0) + dt * (2.1 + Math.abs(Math.sin(worker.walkPhase))*1.2);
+  }
+  for(const guard of outsideWindowGuards){
+    if(!guard) continue;
+    if(guard.dead){
+      guard.popAmount = Math.max(0, (guard.popAmount || 0) - dt * 3.2);
+      if(t > guard.respawnAt){
+        guard.dead = false;
+        guard.hitUntil = 0;
+        guard.popPhase = Math.random() * Math.PI * 2;
+      }
+      continue;
+    }
+    guard.popPhase = (guard.popPhase || 0) + dt * (guard.speed || 1);
+    const raw = 0.5 + 0.5*Math.sin(guard.popPhase);
+    guard.popAmount = Math.max(0, Math.min(1, raw));
+    if(guard.hitUntil && t > guard.hitUntil){ guard.hitUntil = 0; }
+  }
   if(outsideKillCount >= OUTSIDE_KILL_TARGET && outsideMode){
     completeOutsideRound();
     return;
@@ -2305,6 +2491,8 @@ function completeOutsideRound(){
   if(!outsideMode) return;
   outsideMode = false;
   outsideGuards.length = 0;
+  outsideWorkers.length = 0;
+  outsideWindowGuards.length = 0;
   outsideOccupiedSlots.clear();
   outsideSpawnTimer = 0;
   outsideLastShot = 0;
@@ -2401,6 +2589,8 @@ function finishRun(outcome, { message=null, note=null }={}){
   hideFloorBanner();
   outsideMode = false;
   outsideGuards.length = 0;
+  outsideWorkers.length = 0;
+  outsideWindowGuards.length = 0;
   outsideOccupiedSlots.clear();
   runActive=false;
   pause=true;
@@ -5094,6 +5284,150 @@ function drawContactInterference(ctx){
   ctx.restore();
 }
 
+function drawWorkerSprite(ctx, worker, offsetX=0){
+  if(!worker || !worker.alive) return;
+  const appearance = worker.appearance || (worker.appearance = createWorkerAppearance());
+  const wobble = Math.sin(worker.bob || 0) * 1.2;
+  const walkSwing = Math.sin((worker.bob || 0) * 1.1);
+  const facing = worker.facing || 1;
+  const width = worker.w || 18;
+  const height = worker.h || 38;
+  const bodyX = worker.x + offsetX;
+  const bodyY = worker.y + wobble;
+  const headHeight = 9;
+  const hairHeight = 3;
+  const torsoHeight = 16;
+  const legHeight = Math.max(8, height - headHeight - torsoHeight);
+  const headWidth = width - 4;
+  const headX = bodyX + 2;
+  const hairY = bodyY - hairHeight;
+  const faceY = hairY + hairHeight;
+  const torsoY = bodyY + headHeight;
+  const legY = torsoY + torsoHeight;
+  const armSwing = walkSwing * 1.6;
+  const flashing = worker.hitFlashUntil && worker.hitFlashUntil > now();
+  if(flashing){
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(255,150,150,0.35)';
+    ctx.fillRect(bodyX-2, bodyY - hairHeight - 4, width+4, height + hairHeight + 6);
+    ctx.restore();
+  }
+
+  const legWidth = Math.floor((width-6)/2);
+  const stepLift = Math.sin((worker.bob || 0) * 0.9);
+  const leftLift = Math.max(0, stepLift) * 2.4;
+  const rightLift = Math.max(0, -stepLift) * 2.4;
+  const leftLegX = bodyX + 2;
+  const rightLegX = bodyX + width - 2 - legWidth;
+  ctx.fillStyle = appearance.pants;
+  ctx.fillRect(leftLegX, legY, legWidth, legHeight - leftLift);
+  ctx.fillRect(rightLegX, legY, legWidth, legHeight - rightLift);
+  ctx.fillStyle = appearance.shoes;
+  ctx.fillRect(leftLegX, legY + legHeight - leftLift, legWidth, 2);
+  ctx.fillRect(rightLegX, legY + legHeight - rightLift, legWidth, 2);
+
+  ctx.fillStyle = appearance.shirt;
+  ctx.fillRect(bodyX+3, torsoY, width-6, 6);
+  ctx.fillStyle = appearance.suit;
+  ctx.fillRect(bodyX+1, torsoY+4, width-2, torsoHeight-4);
+  ctx.fillStyle = appearance.suitShadow;
+  ctx.fillRect(bodyX+1, torsoY+4, 3, torsoHeight-4);
+  ctx.fillRect(bodyX+width-4, torsoY+4, 3, torsoHeight-4);
+  ctx.fillStyle = appearance.accent;
+  ctx.fillRect(bodyX+2, torsoY+4, 2, torsoHeight-6);
+  ctx.fillRect(bodyX+width-4, torsoY+4, 2, torsoHeight-6);
+
+  const leftArmX = bodyX - 1 + (facing>0 ? -armSwing : armSwing);
+  const rightArmX = bodyX + width - 2 + (facing>0 ? armSwing : -armSwing);
+  ctx.fillStyle = appearance.suit;
+  ctx.fillRect(leftArmX, torsoY+4, 3, torsoHeight-4);
+  ctx.fillRect(rightArmX, torsoY+4, 3, torsoHeight-4);
+  ctx.fillStyle = appearance.cuffs;
+  ctx.fillRect(leftArmX, torsoY+torsoHeight-4, 3, 2);
+  ctx.fillRect(rightArmX, torsoY+torsoHeight-4, 3, 2);
+  ctx.fillStyle = appearance.skin;
+  ctx.fillRect(leftArmX, torsoY+torsoHeight-2, 3, 3);
+  ctx.fillRect(rightArmX, torsoY+torsoHeight-2, 3, 3);
+
+  if(worker.hasClipboard){
+    const useLeft = worker.clipboardSide === -1;
+    const handX = useLeft ? leftArmX : rightArmX;
+    const boardX = handX + (useLeft ? -5 : 3);
+    const boardY = torsoY + torsoHeight - 3;
+    ctx.fillStyle = appearance.clipboard;
+    ctx.fillRect(boardX, boardY-6, 5, 8);
+    ctx.fillStyle = appearance.clipboardPaper;
+    ctx.fillRect(boardX+1, boardY-5, 3, 4);
+  }
+
+  if(worker.showTie){
+    const tieX = Math.floor(bodyX + width/2) - 1;
+    if(appearance.tieKnot){ ctx.fillStyle = appearance.tieKnot; ctx.fillRect(tieX, torsoY+2, 2, 3); }
+    ctx.fillStyle = appearance.tie || appearance.accent;
+    ctx.fillRect(tieX, torsoY+5, 2, torsoHeight-6);
+    ctx.fillRect(tieX-1, torsoY+torsoHeight-3, 4, 3);
+  }
+  if(worker.hasBadge){
+    const badgeX = facing>0 ? bodyX+width-6 : bodyX+2;
+    ctx.fillStyle = appearance.badge;
+    ctx.fillRect(badgeX, torsoY+6, 3, 3);
+  }
+
+  ctx.fillStyle = appearance.hairShadow;
+  ctx.fillRect(headX, hairY-1, headWidth, 2);
+  ctx.fillStyle = appearance.hair;
+  ctx.fillRect(headX, hairY, headWidth, hairHeight);
+  ctx.fillStyle = appearance.skin;
+  ctx.fillRect(headX, faceY, headWidth, headHeight - hairHeight);
+  ctx.fillStyle = appearance.skinShadow;
+  ctx.fillRect(headX + Math.floor(headWidth/2)-1, faceY+3, 2, 2);
+  const eyeY = faceY + 3;
+  ctx.fillStyle = '#1b1b1b';
+  ctx.fillRect(headX+2, eyeY, 2, 1);
+  ctx.fillRect(headX+headWidth-4, eyeY, 2, 1);
+  if(worker.glasses){
+    ctx.fillStyle = appearance.glasses;
+    ctx.fillRect(headX+1, eyeY-1, headWidth-2, 2);
+    ctx.fillRect(headX+1, eyeY-1, 1, 3);
+    ctx.fillRect(headX+headWidth-2, eyeY-1, 1, 3);
+  }
+  ctx.fillStyle = appearance.mouth;
+  ctx.fillRect(headX+3, faceY + headHeight - 3, headWidth-6, 1);
+}
+
+function drawWindowGuard(ctx, guard, nowTs){
+  if(!guard || !guard.window) return;
+  const progress = guard.popAmount ?? 0;
+  const flashing = guard.hitUntil && guard.hitUntil > nowTs;
+  if(progress <= 0.05 && !flashing) return;
+  const width = guard.width || 20;
+  const height = guard.height || 34;
+  const rect = guard.window;
+  const guardBottom = rect.y + rect.h - (guard.paddingBottom || 0);
+  const guardTopFull = guardBottom - height;
+  const hiddenOffset = height * (1 - progress);
+  const spriteY = guardTopFull + hiddenOffset;
+  const left = guard.x - width/2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(left + 4, guardBottom - 6, width - 8, 4);
+  const bodyColor = flashing ? '#ff9c9c' : '#2f6fa2';
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(left+2, spriteY+10, width-4, 22);
+  ctx.fillStyle = '#1d1d1d';
+  ctx.fillRect(left+3, guardBottom-10, 6, 10);
+  ctx.fillRect(left+width-9, guardBottom-10, 6, 10);
+  ctx.fillStyle = '#1d3b56';
+  ctx.fillRect(left+4, spriteY, width-8, 10);
+  ctx.fillStyle = '#fbeede';
+  ctx.fillRect(left+6, spriteY+4, width-12, 3);
+  ctx.restore();
+}
+
 function drawOutside(){
   const building = OUTSIDE_BUILDING;
   const nowTs = now();
@@ -5123,21 +5457,13 @@ function drawOutside(){
   ctx.fillRect(building.x-12, building.y+building.height-12, building.width+24, 12);
   ctx.fillRect(building.x, building.y-6, building.width, 6);
 
-  const winCols = 6;
-  const winRows = 6;
-  const winWidth = 30;
-  const winHeight = 36;
-  const winGapX = (building.width - winCols * winWidth) / (winCols + 1);
-  const winGapY = (building.height - 140 - winRows * winHeight) / (winRows + 1);
-  for(let r=0; r<winRows; r++){
-    for(let c=0; c<winCols; c++){
-      const winX = building.x + winGapX + c * (winWidth + winGapX);
-      const winY = building.y + 46 + winGapY + r * (winHeight + winGapY);
-      ctx.fillStyle = 'rgba(90,140,220,0.38)';
-      ctx.fillRect(winX, winY, winWidth, winHeight);
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.fillRect(winX+4, winY+4, winWidth-8, 10);
-    }
+  for(const rect of OUTSIDE_WINDOW_LAYOUT.positions){
+    ctx.fillStyle = 'rgba(90,140,220,0.38)';
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+
+  for(const guard of outsideWindowGuards){
+    drawWindowGuard(ctx, guard, nowTs);
   }
 
   ctx.fillStyle = '#2b3a55';
@@ -5191,26 +5517,34 @@ function drawOutside(){
     ctx.fillRect(car.x+carWidth-18, carBaseY+carHeight-4, 8, 4);
   }
 
+  for(const worker of outsideWorkers){
+    drawWorkerSprite(ctx, worker, 0);
+  }
+
   for(const guard of outsideGuards){
-    const width = guard.width || 30;
-    const height = guard.height || 44;
+    const width = guard.width || 24;
+    const height = guard.height || 42;
     const gx = guard.renderX - width/2;
     const gy = guard.renderY - height;
     const flashing = guard.hitUntil && guard.hitUntil > nowTs;
-    const baseColor = flashing ? '#ffe8a6' : '#ff6666';
-    ctx.fillStyle = baseColor;
-    ctx.fillRect(gx, gy, width, height);
-    ctx.fillStyle = '#2f1a1a';
-    ctx.fillRect(gx+5, gy+8, width-10, height-20);
-    ctx.fillStyle = '#0b0f18';
-    ctx.fillRect(gx+4, gy+height-12, width-8, 12);
-    ctx.strokeStyle = '#140909';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(gx+1, gy+1, width-2, height-2);
+    const bodyWidth = Math.max(12, width-4);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(guard.renderX - bodyWidth/2, guard.renderY - 6, bodyWidth, 4);
+    const bodyColor = flashing ? '#ff9c9c' : '#2f6fa2';
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(gx+2, gy+10, width-4, 22);
+    ctx.fillStyle = '#1d1d1d';
+    ctx.fillRect(gx+3, gy+32, 6, 10);
+    ctx.fillRect(gx+width-9, gy+32, 6, 10);
+    ctx.fillStyle = '#1d3b56';
+    ctx.fillRect(gx+4, gy, width-8, 10);
     ctx.fillStyle = '#fbeede';
-    ctx.beginPath();
-    ctx.arc(guard.renderX, gy + height*0.42, Math.max(4, width*0.18), 0, Math.PI*2);
-    ctx.fill();
+    ctx.fillRect(gx+6, gy+4, width-12, 3);
+  }
+
+  for(const rect of OUTSIDE_WINDOW_LAYOUT.positions){
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(rect.x+4, rect.y+4, rect.w-8, 10);
   }
 
   const skirtWidth = Math.max(42, outsideScope.radius * 0.18);
@@ -5512,114 +5846,7 @@ function draw(){
 
     // workers
     for(const worker of workers){
-      if(!worker.alive) continue;
-      const appearance = worker.appearance || createWorkerAppearance();
-      const wobble = Math.sin(worker.bob || 0) * 1.2;
-      const walkSwing = Math.sin((worker.bob || 0) * 1.1);
-      const facing = worker.facing || 1;
-      const width = worker.w;
-      const bodyX = worker.x + ox;
-      const bodyY = worker.y + wobble;
-      const headHeight = 9;
-      const hairHeight = 3;
-      const torsoHeight = 16;
-      const legHeight = Math.max(8, worker.h - headHeight - torsoHeight);
-      const headWidth = width - 4;
-      const headX = bodyX + 2;
-      const hairY = bodyY - hairHeight;
-      const faceY = hairY + hairHeight;
-      const torsoY = bodyY + headHeight;
-      const legY = torsoY + torsoHeight;
-      const armSwing = walkSwing * 1.6;
-      const flashing = worker.hitFlashUntil && worker.hitFlashUntil > now();
-      if(flashing){
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fillStyle = 'rgba(255,150,150,0.35)';
-        ctx.fillRect(bodyX-2, bodyY - hairHeight - 4, width+4, worker.h + hairHeight + 6);
-        ctx.restore();
-      }
-
-      const legWidth = Math.floor((width-6)/2);
-      const stepLift = Math.sin((worker.bob || 0) * 0.9);
-      const leftLift = Math.max(0, stepLift) * 2.4;
-      const rightLift = Math.max(0, -stepLift) * 2.4;
-      const leftLegX = bodyX + 2;
-      const rightLegX = bodyX + width - 2 - legWidth;
-      ctx.fillStyle = appearance.pants;
-      ctx.fillRect(leftLegX, legY, legWidth, legHeight - leftLift);
-      ctx.fillRect(rightLegX, legY, legWidth, legHeight - rightLift);
-      ctx.fillStyle = appearance.shoes;
-      ctx.fillRect(leftLegX, legY + legHeight - leftLift, legWidth, 2);
-      ctx.fillRect(rightLegX, legY + legHeight - rightLift, legWidth, 2);
-
-      ctx.fillStyle = appearance.shirt;
-      ctx.fillRect(bodyX+3, torsoY, width-6, 6);
-      ctx.fillStyle = appearance.suit;
-      ctx.fillRect(bodyX+1, torsoY+4, width-2, torsoHeight-4);
-      ctx.fillStyle = appearance.suitShadow;
-      ctx.fillRect(bodyX+1, torsoY+4, 3, torsoHeight-4);
-      ctx.fillRect(bodyX+width-4, torsoY+4, 3, torsoHeight-4);
-      ctx.fillStyle = appearance.accent;
-      ctx.fillRect(bodyX+2, torsoY+4, 2, torsoHeight-6);
-      ctx.fillRect(bodyX+width-4, torsoY+4, 2, torsoHeight-6);
-
-      const leftArmX = bodyX - 1 + (facing>0 ? -armSwing : armSwing);
-      const rightArmX = bodyX + width - 2 + (facing>0 ? armSwing : -armSwing);
-      ctx.fillStyle = appearance.suit;
-      ctx.fillRect(leftArmX, torsoY+4, 3, torsoHeight-4);
-      ctx.fillRect(rightArmX, torsoY+4, 3, torsoHeight-4);
-      ctx.fillStyle = appearance.cuffs;
-      ctx.fillRect(leftArmX, torsoY+torsoHeight-4, 3, 2);
-      ctx.fillRect(rightArmX, torsoY+torsoHeight-4, 3, 2);
-      ctx.fillStyle = appearance.skin;
-      ctx.fillRect(leftArmX, torsoY+torsoHeight-2, 3, 3);
-      ctx.fillRect(rightArmX, torsoY+torsoHeight-2, 3, 3);
-
-      if(worker.hasClipboard){
-        const useLeft = worker.clipboardSide === -1;
-        const handX = useLeft ? leftArmX : rightArmX;
-        const boardX = handX + (useLeft ? -5 : 3);
-        const boardY = torsoY + torsoHeight - 3;
-        ctx.fillStyle = appearance.clipboard;
-        ctx.fillRect(boardX, boardY-6, 5, 8);
-        ctx.fillStyle = appearance.clipboardPaper;
-        ctx.fillRect(boardX+1, boardY-5, 3, 4);
-      }
-
-      if(worker.showTie){
-        const tieX = Math.floor(bodyX + width/2) - 1;
-        if(appearance.tieKnot){ ctx.fillStyle = appearance.tieKnot; ctx.fillRect(tieX, torsoY+2, 2, 3); }
-        ctx.fillStyle = appearance.tie || appearance.accent;
-        ctx.fillRect(tieX, torsoY+5, 2, torsoHeight-6);
-        ctx.fillRect(tieX-1, torsoY+torsoHeight-3, 4, 3);
-      }
-      if(worker.hasBadge){
-        const badgeX = facing>0 ? bodyX+width-6 : bodyX+2;
-        ctx.fillStyle = appearance.badge;
-        ctx.fillRect(badgeX, torsoY+6, 3, 3);
-      }
-
-      ctx.fillStyle = appearance.hairShadow;
-      ctx.fillRect(headX, hairY-1, headWidth, 2);
-      ctx.fillStyle = appearance.hair;
-      ctx.fillRect(headX, hairY, headWidth, hairHeight);
-      ctx.fillStyle = appearance.skin;
-      ctx.fillRect(headX, faceY, headWidth, headHeight - hairHeight);
-      ctx.fillStyle = appearance.skinShadow;
-      ctx.fillRect(headX + Math.floor(headWidth/2)-1, faceY+3, 2, 2);
-      const eyeY = faceY + 3;
-      ctx.fillStyle = '#1b1b1b';
-      ctx.fillRect(headX+2, eyeY, 2, 1);
-      ctx.fillRect(headX+headWidth-4, eyeY, 2, 1);
-      if(worker.glasses){
-        ctx.fillStyle = appearance.glasses;
-        ctx.fillRect(headX+1, eyeY-1, headWidth-2, 2);
-        ctx.fillRect(headX+1, eyeY-1, 1, 3);
-        ctx.fillRect(headX+headWidth-2, eyeY-1, 1, 3);
-      }
-      ctx.fillStyle = appearance.mouth;
-      ctx.fillRect(headX+3, faceY + headHeight - 3, headWidth-6, 1);
+      drawWorkerSprite(ctx, worker, ox);
     }
 
     if(ecoBossActive){
