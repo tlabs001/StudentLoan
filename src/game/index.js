@@ -5215,19 +5215,26 @@ function drawOutside(){
 
   const skirtWidth = Math.max(42, outsideScope.radius * 0.18);
 
-  // Darken the periphery while keeping the scope view clear and leaving a lighter
-  // "skirt" around the edge so enemies are still partially visible.
+  // Apply a soft vignette so the city remains visible instead of a hard black mask.
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.94)';
-  ctx.fillRect(0,0,W,H);
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.beginPath();
-  ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius + skirtWidth, 0, Math.PI*2);
-  ctx.fill();
+  const vignetteRadius = Math.max(outsideScope.radius + skirtWidth, Math.hypot(W, H));
+  const vignette = ctx.createRadialGradient(
+    outsideScope.x,
+    outsideScope.y,
+    outsideScope.radius * 0.9,
+    outsideScope.x,
+    outsideScope.y,
+    vignetteRadius
+  );
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(0.55, 'rgba(0,0,0,0.18)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
   ctx.restore();
 
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.58)';
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
   ctx.beginPath();
   ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius + skirtWidth, 0, Math.PI*2);
   ctx.fill();
@@ -5243,7 +5250,7 @@ function drawOutside(){
   ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius+1.5, 0, Math.PI*2);
   ctx.stroke();
 
-  const crossStyle = (outsideCrosshairFlashUntil > nowTs) ? 'rgba(255,240,150,0.9)' : 'rgba(0,0,0,0.82)';
+  const crossStyle = (outsideCrosshairFlashUntil > nowTs) ? 'rgba(255,240,150,0.9)' : 'rgba(240,248,255,0.9)';
   ctx.strokeStyle = crossStyle;
   ctx.lineWidth = 1.4;
   ctx.beginPath();
