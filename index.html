@@ -45,6 +45,8 @@
   .btn.active { background:rgba(120,255,160,0.25); border-color:rgba(120,255,160,0.6); }
   .btn.map { background:rgba(120,160,255,0.22); border-color:rgba(160,200,255,0.45); }
   .btn.map.locked { opacity:0.4; cursor:not-allowed; }
+  .btn.deck { background:rgba(200,160,255,0.18); border-color:rgba(210,170,255,0.38); }
+  .btn.deck.active { background:rgba(220,190,255,0.32); border-color:rgba(230,210,255,0.6); }
   .btn:disabled { opacity:0.45; cursor:not-allowed; }
   .btnGroup { display:flex; gap:6px; flex-wrap:wrap; }
 .pill { padding:1px 6px; border-radius:999px; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2); }
@@ -182,6 +184,28 @@
   .minimap-cell:hover { background:rgba(70,120,200,0.38); }
   .minimap-cell.active { background:rgba(120,255,200,0.35); color:#0b1120; font-weight:bold; }
   .minimap-overlay.hidden { display:none !important; }
+
+  .deck-overlay { position:fixed; inset:0; background:rgba(6,8,18,0.82); display:flex; align-items:center; justify-content:center; z-index:65; }
+  .deck-overlay.hidden { display:none !important; }
+  .deck-panel { background:rgba(14,18,32,0.94); border:2px solid rgba(200,170,255,0.45); border-radius:16px; padding:20px 24px; width:min(420px,92vw); max-height:82vh; box-shadow:0 18px 44px rgba(0,0,0,0.6); color:#f4f1ff; font-family:monospace; display:flex; flex-direction:column; gap:10px; }
+  .deck-panel h3 { margin:0; text-align:center; letter-spacing:2px; font-size:14px; text-transform:uppercase; }
+  .deck-progress { text-align:center; font-size:11px; color:#d5ccff; letter-spacing:1px; }
+  .deck-grid { display:grid; grid-template-columns:1fr; gap:12px; overflow-y:auto; padding-right:4px; }
+  .deck-card { display:flex; gap:12px; align-items:flex-start; padding:12px; border-radius:12px; background:linear-gradient(135deg, rgba(46,34,70,0.9), rgba(18,14,28,0.92)); border:1px solid rgba(210,180,255,0.35); box-shadow:0 10px 24px rgba(0,0,0,0.45); transition:transform 0.2s ease, border-color 0.2s ease; }
+  .deck-card.unlocked:hover { transform:translateY(-2px); border-color:rgba(235,210,255,0.6); }
+  .deck-card.locked { background:linear-gradient(135deg, rgba(16,16,26,0.9), rgba(8,8,16,0.95)); border:1px dashed rgba(120,120,160,0.4); color:#a7acc6; box-shadow:none; }
+  .deck-portrait { width:72px; height:72px; border-radius:12px; background-color:rgba(26,30,48,0.94); background-size:cover; background-position:center; image-rendering:pixelated; position:relative; border:2px solid rgba(210,190,255,0.55); box-shadow:0 0 0 3px rgba(48,26,78,0.35) inset, 0 6px 18px rgba(0,0,0,0.45); overflow:hidden; }
+  .deck-portrait::after { content:''; position:absolute; inset:0; background-image:linear-gradient(95deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 60%), repeating-linear-gradient(0deg, rgba(0,0,0,0.12) 0, rgba(0,0,0,0.12) 4px, transparent 4px, transparent 8px); mix-blend-mode:screen; }
+  .deck-card.locked .deck-portrait { background:linear-gradient(135deg, #090b12, #04050a); border-color:rgba(90,90,120,0.7); box-shadow:none; }
+  .deck-card.locked .deck-portrait::after { content:'?'; color:#cdd6ff; font:28px/72px 'Press Start 2P', monospace; text-align:center; background:none; mix-blend-mode:normal; }
+  .deck-info { flex:1; display:flex; flex-direction:column; gap:6px; }
+  .deck-title { font-size:13px; letter-spacing:1px; text-transform:uppercase; color:#f3eaff; }
+  .deck-subtitle { font-size:11px; color:#d0d5ff; letter-spacing:0.6px; }
+  .deck-bio { font-size:11px; color:#f6eaff; line-height:1.45; }
+  .deck-power { font-size:11px; color:#ffe9ff; }
+  .deck-list { font-size:11px; color:#e7ddff; margin:0; padding-left:16px; }
+  .deck-list li { margin-bottom:2px; }
+  .deck-effects { font-size:11px; color:#fbe8ff; }
 </style>
 </head>
 <body>
@@ -269,6 +293,7 @@
       <div id="weaponAmmo" class="ammo">Ammo 0/0</div>
     </div>
     <button id="mapBtn" type="button" class="btn map locked">Map (0)</button>
+    <button id="deckBtn" type="button" class="btn deck">Board Deck (P) 0/9</button>
   </div>
   <div class="hud-line small">
     <div id="floorLabel" class="hud-flex">LEVEL —</div>
@@ -294,6 +319,14 @@
 </div>
 
 <div id="floorBanner" class="floor-banner hidden"><span id="floorBannerText">LEVEL —</span></div>
+
+<div id="deckOverlay" class="deck-overlay hidden" role="dialog" aria-modal="true">
+  <div class="deck-panel">
+    <h3>Board Deck</h3>
+    <div id="deckProgress" class="deck-progress">Unlocked 0/9</div>
+    <div id="deckGrid" class="deck-grid"></div>
+  </div>
+</div>
 
 <div id="minimapOverlay" class="minimap-overlay hidden" role="dialog" aria-modal="true">
   <div class="minimap">
