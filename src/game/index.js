@@ -755,6 +755,8 @@ let blackMarketOffer=null;
 let activeHack=null;
 let ambientInterval=null, ambientCurrent=null;
 let managerCheckFloor=null, managerDefeated=false;
+let minimapUnlocked=false, minimapVisible=false;
+let floorBannerTimeout=null;
 
 // Projectiles
 const bullets=[];
@@ -764,15 +766,9 @@ let smokeActive=false, smokeT=0;
 
 // HUD helpers
 const noteEl = document.getElementById('note');
-const floorEl = document.getElementById('floor');
 const timeEl = document.getElementById('time');
-const checkVal = document.getElementById('checkVal');
-const saveVal = document.getElementById('saveVal');
-const checkFill = document.getElementById('checkFill');
-const saveFill = document.getElementById('saveFill');
 const serversEl = document.getElementById('servers');
 const alarmsEl = document.getElementById('alarms');
-const ammoEl = document.getElementById('ammo');
 const invEl = document.getElementById('inv');
 const filesPill = document.getElementById('filesPill');
 const intelPill = document.getElementById('intelPill');
@@ -782,6 +778,20 @@ const codexPanel = document.getElementById('codexPanel');
 const codexGrid = document.getElementById('codexGrid');
 const codexProgress = document.getElementById('codexProgress');
 const codexCloseBtn = document.getElementById('codexClose');
+const hpFill = document.getElementById('hpFill');
+const hpText = document.getElementById('hpText');
+const cashVal = document.getElementById('cashVal');
+const weaponNameEl = document.getElementById('weaponName');
+const weaponAmmoEl = document.getElementById('weaponAmmo');
+const featherTimerEl = document.getElementById('featherTimer');
+const floorLabelEl = document.getElementById('floorLabel');
+const miniBossEl = document.getElementById('miniBossCount');
+const mapBtn = document.getElementById('mapBtn');
+const minimapOverlay = document.getElementById('minimapOverlay');
+const minimapTower = document.getElementById('minimapTower');
+const floorBannerEl = document.getElementById('floorBanner');
+const floorBannerText = document.getElementById('floorBannerText');
+const minimapCells = [];
 
 // Buttons
 const btnTest=document.getElementById('btnTest');
@@ -813,6 +823,76 @@ function setWeapon(w){
 btnP.onclick=()=>setWeapon('pistol');
 btnF.onclick=()=>setWeapon('flame');
 btnM.onclick=()=>setWeapon('melee');
+
+const boardFloorOrder = [...BOARD_FLOORS].sort((a,b)=>a-b);
+
+function boardRoomLetter(floor){
+  const idx = boardFloorOrder.indexOf(floor);
+  return idx >= 0 ? String.fromCharCode('A'.charCodeAt(0) + idx) : '';
+}
+
+function formatFloorLabel(floor){
+  if(!Number.isFinite(floor)) return 'LEVEL —';
+  if(isBoardFloor(floor)){
+    const letter = boardRoomLetter(floor);
+    return `LEVEL ${floor} – BOARD ROOM ${letter || ''}`.trim();
+  }
+  return `LEVEL ${floor}`;
+}
+
+function formatFloorSecondaryLabel(floor){
+  if(isBoardFloor(floor)){
+    const letter = boardRoomLetter(floor);
+    return letter ? `BR ${letter}` : 'BOARD';
+  }
+  return `F${String(floor).padStart(2,'0')}`;
+}
+
+if(minimapTower){
+  for(let f=FLOORS; f>=1; f--){
+    const cell=document.createElement('button');
+    cell.type='button';
+    cell.className='minimap-cell';
+    cell.dataset.floor=String(f);
+    cell.innerHTML = `<span>${formatFloorLabel(f)}</span><span>${formatFloorSecondaryLabel(f)}</span>`;
+    minimapTower.appendChild(cell);
+    minimapCells.push(cell);
+  }
+}
+
+if(mapBtn){
+  mapBtn.addEventListener('click', ()=>{
+    if(minimapVisible){ toggleMinimap(false); return; }
+    if(!minimapUnlocked){
+      centerNote('Clear a vent to access the map.', 1400);
+      lockedBuzz();
+      return;
+    }
+    toggleMinimap(true);
+  });
+}
+
+if(minimapOverlay){
+  minimapOverlay.addEventListener('click', (event)=>{
+    if(event.target === minimapOverlay){ toggleMinimap(false); }
+  });
+  const inner = minimapOverlay.querySelector('.minimap');
+  if(inner){ inner.addEventListener('click', (event)=>event.stopPropagation()); }
+}
+
+if(minimapTower){
+  minimapTower.addEventListener('click', (event)=>{
+    const cell = event.target.closest('.minimap-cell');
+    if(!cell) return;
+    const floor = Number(cell.dataset.floor);
+    if(!Number.isFinite(floor)) return;
+    centerNote(formatFloorLabel(floor), 1100);
+  });
+}
+
+updateMapButtonState();
+toggleMinimap(false);
+hideFloorBanner();
 
 if(specialFilesPill){
   specialFilesPill.addEventListener('click', ()=>{
@@ -846,6 +926,76 @@ function rect(a,b){ return !(a.x+a.w<b.x || a.x>b.x+b.w || a.y+a.h<b.y || a.y>b.
 function rect2(x,y,w,h,b){ return !(x+w<b.x || x>b.x+b.w || y+h<b.y || y>b.y+b.h); }
 function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
 function notify(text){ noteEl.textContent = text; }
+
+function hideFloorBanner(){
+  if(!floorBannerEl) return;
+  floorBannerEl.classList.remove('visible');
+  floorBannerEl.classList.add('hidden');
+  if(floorBannerTimeout){
+    clearTimeout(floorBannerTimeout);
+    floorBannerTimeout=null;
+  }
+}
+
+function showFloorBanner(floor){
+  if(!floorBannerEl || !floorBannerText) return;
+  floorBannerText.textContent = formatFloorLabel(floor);
+  floorBannerEl.classList.remove('hidden');
+  requestAnimationFrame(()=>floorBannerEl.classList.add('visible'));
+  if(floorBannerTimeout){ clearTimeout(floorBannerTimeout); }
+  floorBannerTimeout = setTimeout(()=>{
+    floorBannerEl.classList.remove('visible');
+    floorBannerTimeout = setTimeout(()=>{ floorBannerEl.classList.add('hidden'); floorBannerTimeout=null; }, 260);
+  }, 2200);
+}
+
+function updateMapButtonState(){
+  if(!mapBtn) return;
+  mapBtn.classList.toggle('locked', !minimapUnlocked);
+  mapBtn.disabled = !minimapUnlocked;
+  if(!minimapUnlocked){ mapBtn.classList.remove('active'); }
+}
+
+function updateMinimapHighlight(){
+  if(minimapCells.length===0) return;
+  for(const cell of minimapCells){
+    const floor = Number(cell.dataset.floor);
+    cell.classList.toggle('active', floor === currentFloor);
+  }
+}
+
+function toggleMinimap(force){
+  if(!minimapOverlay) return;
+  const target = force !== undefined ? force : !minimapVisible;
+  if(target && !minimapUnlocked){
+    centerNote('Clear a vent to access the map.', 1400);
+    lockedBuzz();
+    return;
+  }
+  minimapVisible = target;
+  if(target){
+    minimapOverlay.classList.remove('hidden');
+    updateMinimapHighlight();
+  } else {
+    minimapOverlay.classList.add('hidden');
+  }
+  if(mapBtn){ mapBtn.classList.toggle('active', target); }
+}
+
+function unlockMinimap(){
+  if(minimapUnlocked) return;
+  minimapUnlocked = true;
+  updateMapButtonState();
+  centerNote('Minimap unlocked!', 1600);
+  notify('Skyscraper schematics recovered. Map access granted.');
+}
+
+function checkVentForMinimapUnlock(){
+  if(minimapUnlocked || !inSub || !sub) return;
+  const guardsAlive = (sub.guards||[]).some(g=>g && g.hp>0);
+  const bossesAlive = (sub.bosses||[]).some(b=>b && b.hp>0);
+  if(!guardsAlive && !bossesAlive){ unlockMinimap(); }
+}
 
 function specialFilesRequired(){ return 10; }
 
@@ -990,14 +1140,20 @@ function startNewRun(name){
   setMode(testMode? 'test' : 'normal');
   setWeapon('pistol');
   toggleCodex(false);
+  minimapUnlocked=false;
+  minimapVisible=false;
+  updateMapButtonState();
+  toggleMinimap(false);
   makeLevel(currentFloor);
   player.y = floorSlab.y - player.h;
   player.prevBottom = player.y + player.h;
   player.prevVy = 0;
   notify("Evening infiltration. New intel & loot on each floor.");
   centerNote("Infiltration begins.", 1600);
-  floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
-  timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ ${fmtClock(0)}`;
+  showFloorBanner(currentFloor);
+  if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
+  if(timeEl) timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ ${fmtClock(0)}`;
+  updateMinimapHighlight();
   ensureLoop();
   canvas.focus();
 }
@@ -1005,6 +1161,8 @@ function startNewRun(name){
 function finishRun(outcome, { message=null, note=null }={}){
   if(!runActive) return;
   toggleCodex(false);
+  toggleMinimap(false);
+  hideFloorBanner();
   runActive=false;
   pause=true;
   setAmbient(null);
@@ -1095,6 +1253,19 @@ window.addEventListener('keydown', e=>{
   if(activeHack){
     e.preventDefault();
     handleHackInput(k);
+    return;
+  }
+  if(k==='0'){
+    if(!runActive){ return; }
+    e.preventDefault();
+    if(minimapVisible){ toggleMinimap(false); }
+    else if(minimapUnlocked){ toggleMinimap(true); }
+    else { centerNote('Clear a vent to access the map.', 1400); lockedBuzz(); }
+    return;
+  }
+  if(k==='escape' && minimapVisible){
+    e.preventDefault();
+    toggleMinimap(false);
     return;
   }
   keys[k]=true;
@@ -1605,50 +1776,75 @@ function makeLevel(i){
 }
 
 function makeBoardRoomLevel(floor, yBase){
-  const hallX = 0.4*W;
-  const hallWidth = 2.2*W;
-  walls.push({x:hallX, y:yBase-220, w:hallWidth, h:12, isPlatform:true});
-  walls.push({x:hallX, y:yBase-120, w:hallWidth, h:12, isPlatform:true});
+  const tableTop = yBase - 150;
+  floorSlab.x = 0;
+  floorSlab.y = tableTop;
+  floorSlab.w = 3*W;
+  floorSlab.h = 22;
 
-  boardTables.push({x:hallX+80, y:yBase-150, w:hallWidth-160, h:18});
-  deskDrawers.push({x:hallX+120, y:yBase-150, w:24, h:14, used:false});
+  backgroundFX.length = 0;
+  backgroundFX.push({type:'boardCharts'});
 
-  ladders.push({x:hallX+40, y:yBase-240, w:20, h:240});
-  ladders.push({x:hallX+hallWidth-60, y:yBase-240, w:20, h:240});
+  const tableX = 0.2*W;
+  const tableWidth = 3*W - 0.4*W;
+  const tableHeight = 26;
+  const legs = [
+    {x: tableX + 42, y: tableTop, w:28, h:96},
+    {x: tableX + tableWidth - 70, y: tableTop, w:28, h:96}
+  ];
+  boardTables.push({
+    x: tableX,
+    y: tableTop - tableHeight,
+    w: tableWidth,
+    h: tableHeight,
+    legs,
+    runner: {x: tableX + 30, y: tableTop - tableHeight + 6, w: tableWidth - 60, h:10}
+  });
+  deskDrawers.push({x: tableX + tableWidth/2 - 24, y: tableTop - 32, w:48, h:18, used:false});
 
-  coffeeMachines.push({x:hallX+60, y:yBase-90, w:32, h:58, used:false});
-  vendingMachines.push({x:hallX+hallWidth-80, y:yBase-100, w:36, h:68, broken:false});
+  coffeeMachines.push({x: tableX + 48, y: tableTop - 58, w:32, h:58, used:false});
+  vendingMachines.push({x: tableX + tableWidth - 84, y: tableTop - 68, w:36, h:68, broken:false});
 
   const serverCount = serverObjective ? 4 : 2;
   for(let s=0;s<serverCount;s++){
-    const sx = hallX + 120 + s*((hallWidth-240) / Math.max(1, serverCount-1));
-    servers.push({x:sx, y:yBase-70, w:32, h:30, hp:18 + Math.floor(floor/3), destroyed:false, armed:false, armTime:0});
+    const t = serverCount===1 ? 0.5 : (serverCount===0 ? 0 : s/Math.max(1, serverCount-1));
+    const sx = tableX + 120 + t*(tableWidth - 240);
+    servers.push({x:sx, y:tableTop - 30, w:32, h:30, hp:18 + Math.floor(floor/3), destroyed:false, armed:false, armTime:0});
   }
 
-  panels.push({x: hallX+hallWidth-140, y: yBase-110, w:32,h:28, disabled:false});
-  spotlights.push({x:hallX+80, y:yBase-210, w:140, h:20, range:220, t:0, speed:0.8});
-  spotlights.push({x:hallX+hallWidth-180, y:yBase-210, w:140, h:20, range:220, t:Math.PI, speed:0.8});
+  panels.push({x: tableX + tableWidth - 150, y: tableTop - 90, w:32,h:28, disabled:false});
+  spotlights.push({x: tableX + 120, y: tableTop - 200, w:160, h:20, range:240, t:0, speed:0.8});
+  spotlights.push({x: tableX + tableWidth - 280, y: tableTop - 200, w:160, h:20, range:240, t:Math.PI, speed:0.8});
 
-  const bossGuard = makeGuard(hallX + hallWidth/2, yBase-192, Math.min(FLOORS, floor+4));
+  const bossGuard = makeGuard(tableX + tableWidth/2, tableTop - 42, Math.min(FLOORS, floor+4));
+  const originalBossWidth = bossGuard.w;
   bossGuard.maxHp = Math.round(bossGuard.maxHp * 1.45);
   bossGuard.hp = bossGuard.maxHp;
   bossGuard.damageReduction = Math.min(0.55, (bossGuard.damageReduction||0) + 0.2);
   bossGuard.boss = true;
+  bossGuard.w = Math.round(bossGuard.w * 2);
+  bossGuard.h = Math.round(bossGuard.h * 2);
+  bossGuard.x -= Math.round((bossGuard.w - originalBossWidth)/2);
+  bossGuard.x = clamp(bossGuard.x, tableX + 40, tableX + tableWidth - bossGuard.w - 40);
+  bossGuard.y = tableTop - bossGuard.h;
   guards.push(bossGuard);
   if(floor >= 16){
-    const aide = makeGuard(hallX + hallWidth/2 - 160, yBase-132, Math.min(FLOORS, floor+2));
+    const aide = makeGuard(tableX + tableWidth/2 - 200, tableTop - 42, Math.min(FLOORS, floor+2));
+    aide.y = tableTop - aide.h;
     guards.push(aide);
   }
 
-  pickups.push({type:'special', x:hallX+hallWidth/2-20, y:yBase-168, w:24, h:24});
-  pickups.push({type:'cash', x:hallX+120, y:yBase-96, w:20, h:20, amount:120});
-  pickups.push({type:'intel', x:hallX+hallWidth-180, y:yBase-96, w:20, h:20});
+  pickups.push({type:'special', x:tableX+tableWidth/2-20, y:tableTop-52, w:24, h:24});
+  pickups.push({type:'cash', x:tableX+100, y:tableTop-40, w:20, h:20, amount:120});
+  pickups.push({type:'intel', x:tableX+tableWidth-180, y:tableTop-40, w:20, h:20});
 
-  door = { x: hallX+hallWidth+40, y: yBase-180, w:140, h:180, unlocked:false, open:false, lift:0, glowUntil:0 };
+  door = { x: tableX+tableWidth+60, y: tableTop-180, w:140, h:180, unlocked:false, open:false, lift:0, glowUntil:0 };
 
   if(serverObjective){
-    serverTerminals.push({x:hallX+hallWidth/2-20, y:yBase-210, w:36, h:36, hacked:false});
+    serverTerminals.push({x:tableX+tableWidth/2-20, y:tableTop-36, w:36, h:36, hacked:false});
   }
+
+  player.x = clamp(player.x, tableX + 60, tableX + tableWidth - 120);
 }
 
 function updateNinjaMovement(guard, dt, playerCenterX, playerCenterY, groundY){
@@ -2048,13 +2244,14 @@ function interact(){
               return;
             }
             currentFloor = Math.min(FLOORS, currentFloor+1);
-            centerNote(`Floor ${currentFloor}`);
+            showFloorBanner(currentFloor);
             notify(`Entered floor ${currentFloor}.`);
             player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
             makeLevel(currentFloor);
             player.y = floorSlab.y - player.h;
             player.prevBottom = player.y + player.h;
             player.prevVy = 0;
+            if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
           }, 700);
         }
       }
@@ -2073,6 +2270,7 @@ function interact(){
         player.prevVy = 0;
         sub=null; entryVentWorld=null;
         centerNote("Exited vents", 700); chime(); notify("Returned from vents.");
+        if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
       }
     }
     // loot
@@ -2615,10 +2813,10 @@ function update(dt){
     }
     // removals
     for(let i=sub.guards.length-1;i>=0;i--){
-      if(sub.guards[i].hp<=0){ sub.guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (vent guard)"); }
+      if(sub.guards[i].hp<=0){ sub.guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (vent guard)"); checkVentForMinimapUnlock(); }
     }
     for(let i=sub.bosses.length-1;i>=0;i--){
-      if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (boss)"); }
+      if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (boss)"); checkVentForMinimapUnlock(); }
     }
   }
 
@@ -2744,26 +2942,47 @@ function update(dt){
   for(let i=bullets.length-1;i>=0;i--) if(bullets[i].life<=0) bullets.splice(i,1);
 
   // HUD update
-  floorEl.textContent=`Floor ${currentFloor} / ${FLOORS}`;
-  timeEl.textContent= `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
-  serversEl.textContent=`Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
-  alarmsEl.textContent= alarm? 'Alarms: ACTIVE' : 'Alarms: OK';
-  let ammoText = '';
-  if(player.weapon==='pistol') ammoText = `Pistol: ${player.pistol.ammo}/${player.pistol.reserve}`;
-  else if(player.weapon==='flame') ammoText = `Flame fuel: ${player.flame.fuel}`;
-  else ammoText = `Melee: ready${now()-player.melee.last<player.melee.cooldown?' (cooling)':''}`;
-  ammoEl.textContent = ammoText;
+  if(timeEl) timeEl.textContent= `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
+  if(serversEl) serversEl.textContent=`Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
+  if(alarmsEl) alarmsEl.textContent= alarm? 'Alarms: ACTIVE' : 'Alarms: OK';
   const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges');
   if(player.hasFeather) inv.push('Feather');
-  invEl.textContent=`Inv: ${inv.join(', ')||'—'}`;
-  checkVal.textContent = `$${player.checking}`;
-  saveVal.textContent = `$${player.savings}`;
-  checkFill.style.width = `${Math.min(100, (player.checking / CHECKING_HUD_MAX) * 100)}%`;
-  saveFill.style.width = `${Math.min(100, (player.savings / SAVINGS_HUD_MAX) * 100)}%`;
-  filesPill.textContent = `Files: ${player.files}`;
-  intelPill.textContent = `Intel: ${player.intel}`;
-  featherPill.textContent = player.hasFeather ? `Feather: ${Math.round(player.featherEnergy)}` : "Feather: —";
+  if(invEl) invEl.textContent=`Inv: ${inv.join(', ')||'—'}`;
+  const hpRatio = Math.min(1, Math.max(0, player.checking / CHECKING_HUD_MAX));
+  if(hpFill) hpFill.style.width = `${hpRatio*100}%`;
+  if(hpText) hpText.textContent = Math.max(0, Math.round(player.checking));
+  if(cashVal) cashVal.textContent = `$${Math.max(0, Math.round(player.savings)).toLocaleString()}`;
+  const weaponOrder = ['pistol','flame','melee'];
+  const weaponNames = { pistol:'Pistol', flame:'Flamethrower', melee:'Melee' };
+  const weaponIdx = weaponOrder.indexOf(player.weapon);
+  if(weaponNameEl){
+    const label = weaponNames[player.weapon] || player.weapon;
+    const prefix = weaponIdx>=0 ? `${weaponIdx+1} • ` : '';
+    weaponNameEl.textContent = `${prefix}${label}`;
+  }
+  if(weaponAmmoEl){
+    let ammoText = '';
+    if(player.weapon==='pistol') ammoText = `Ammo ${player.pistol.ammo}/${player.pistol.reserve}`;
+    else if(player.weapon==='flame') ammoText = `Fuel ${player.flame.fuel}`;
+    else ammoText = `Melee ready${now()-player.melee.last<player.melee.cooldown?' (cooling)':''}`;
+    weaponAmmoEl.textContent = ammoText;
+  }
+  if(featherTimerEl) featherTimerEl.textContent = player.hasFeather ? `Feather ${Math.round(player.featherEnergy)}` : 'Feather —';
+  if(floorLabelEl){
+    if(inSub && sub) floorLabelEl.textContent = `VENT ${sub.id}`;
+    else floorLabelEl.textContent = formatFloorLabel(currentFloor);
+  }
+  if(miniBossEl){
+    const bossCount = inSub && sub
+      ? (sub.bosses||[]).filter(b=>b && b.hp>0).length
+      : guards.filter(g=>g && g.boss && g.hp>0).length;
+    miniBossEl.textContent = `Mini-Bosses: ${bossCount}`;
+  }
+  if(filesPill) filesPill.textContent = `Files: ${player.files}`;
+  if(intelPill) intelPill.textContent = `Intel: ${player.intel}`;
+  if(featherPill) featherPill.textContent = player.hasFeather ? `Feather: ${Math.round(player.featherEnergy)}` : 'Feather: —';
   updateSpecialFileUI();
+  updateMinimapHighlight();
 }
 
 // ========= Draw =========
@@ -2821,6 +3040,31 @@ function draw(){
       } else if(fx.type==='skyline'){
         ctx.fillStyle='rgba(60,80,120,0.25)';
         ctx.fillRect(ox, 40, 3*W, H-160);
+      } else if(fx.type==='boardCharts'){
+        const offset = (camX*0.12)%200;
+        for(let x=-offset; x<3*W; x+=200){
+          const panelX = x+ox+80;
+          ctx.fillStyle='rgba(12,20,34,0.72)';
+          ctx.fillRect(panelX-8, 78, 154, 186);
+          ctx.fillStyle='rgba(40,70,120,0.48)';
+          ctx.fillRect(panelX, 86, 138, 168);
+          ctx.lineWidth=2;
+          ctx.strokeStyle='rgba(90,190,120,0.75)';
+          ctx.beginPath();
+          ctx.moveTo(panelX+6, 232);
+          ctx.lineTo(panelX+40, 192);
+          ctx.lineTo(panelX+78, 214);
+          ctx.lineTo(panelX+118, 168);
+          ctx.stroke();
+          ctx.strokeStyle='rgba(220,100,100,0.75)';
+          ctx.beginPath();
+          ctx.moveTo(panelX+6, 132);
+          ctx.lineTo(panelX+38, 152);
+          ctx.lineTo(panelX+78, 118);
+          ctx.lineTo(panelX+118, 140);
+          ctx.stroke();
+          ctx.lineWidth=1;
+        }
       }
     }
     for(const screen of billboardScreens){
@@ -2898,10 +3142,23 @@ function draw(){
     }
 
     for(const table of boardTables){
+      if(table.legs){
+        ctx.fillStyle='#24170d';
+        for(const leg of table.legs){
+          ctx.fillRect(leg.x+ox, leg.y, leg.w, leg.h);
+          ctx.fillStyle='#1a120a';
+          ctx.fillRect(leg.x+4+ox, leg.y, Math.max(4, leg.w-8), leg.h-6);
+          ctx.fillStyle='#24170d';
+        }
+      }
       ctx.fillStyle='#3b2b1a';
       ctx.fillRect(table.x+ox, table.y, table.w, table.h);
       ctx.fillStyle='rgba(255,255,255,0.1)';
-      ctx.fillRect(table.x+8+ox, table.y+4, table.w-16, table.h-8);
+      ctx.fillRect(table.x+8+ox, table.y+4, table.w-16, Math.max(0, table.h-10));
+      if(table.runner){
+        ctx.fillStyle='rgba(220,180,120,0.22)';
+        ctx.fillRect(table.runner.x+ox, table.runner.y, table.runner.w, table.runner.h);
+      }
     }
 
     for(const hz of hazards){
