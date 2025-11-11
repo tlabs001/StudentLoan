@@ -31,8 +31,10 @@ const GAME_PARAMS = {
     flashlightRange: 240,
     checkingStart: 100,
     savingsStart: 1200,
-    checkingHudMax: 200,
-    savingsHudMax: 2000,
+    checkingHudMax: 250,
+    checkingMax: 250,
+    savingsHudMax: 1200,
+    savingsMax: 1200,
     pistol: {
       magazine: 9,
       reserve: 60,
@@ -90,8 +92,9 @@ const STOMP_DAMAGE = GAME_PARAMS.player.damages.stomp;
 const initialSpawnX = GAME_PARAMS.player.spawnX;
 const RUN_LOAN_START = GAME_PARAMS.economy.startingLoanBalance;
 const GUARD_BASE_DAMAGE = GAME_PARAMS.enemies.guardBaseDamage;
-const CHECKING_HUD_MAX = Math.max(1, GAME_PARAMS.player.checkingHudMax);
-const SAVINGS_HUD_MAX = Math.max(1, GAME_PARAMS.player.savingsHudMax);
+const CHECKING_MAX = Math.max(1, GAME_PARAMS.player.checkingMax || GAME_PARAMS.player.checkingHudMax);
+const SAVINGS_MAX = Math.max(1, GAME_PARAMS.player.savingsMax || GAME_PARAMS.player.savingsHudMax);
+const LOAN_CAP = 999999999;
 const GUARD_CONTACT_DELAY_MS = 500;
 
 (()=>{
@@ -1067,6 +1070,10 @@ const player = {
   vx:0, vy:0, onGround:false, facing:1, crouch:false, crouchOffset:0,
   sprint:false, climbing:false, inVent:false, hidden:false, spotted:false,
   checking:GAME_PARAMS.player.checkingStart, savings:GAME_PARAMS.player.savingsStart,
+  loanBalance: RUN_LOAN_START,
+  checkingMax: CHECKING_MAX,
+  savingsMax: SAVINGS_MAX,
+  hpMax: CHECKING_MAX,
   hasScrew:false, hasCharges:true,
   hasFeather:false, featherEnergy:0, featherMax:100, featherRecharge:12, lastFlap:10, flapCooldown:120,
   files:0, intel:0, specialFiles:0,
@@ -1094,7 +1101,31 @@ const player = {
   contactInterferenceUntil:0,
   contactInterferencePhase:0,
   stepPhase:0,
-  stepStride:0
+  stepStride:0,
+  hopeBuffUntil:0
+};
+
+const HOSTAGE_SEQUENCE = ['Grandpa','Mom','Dad','Grandma','Brother','Sister',
+  '1st Cousin','2nd Cousin','3rd Cousin','4th Cousin','5th Cousin','6th Cousin'];
+
+const hostageState = {
+  taken: [],
+  rescued: [],
+  lost: [],
+  nextIndex: 0
+};
+
+const ECO_BOSS_FLOOR = 30;
+let ecoBossActive = false;
+let ecoBoss = null;
+let ecoProjectiles = [];
+let hostagesInRoom = [];
+let collectionsPressure = 1;
+let ceoQTEAttempted = false;
+
+const state = {
+  ceoPassive: false,
+  playerWeaponsDisabled: false
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -1171,7 +1202,11 @@ const codexProgress = document.getElementById('codexProgress');
 const codexCloseBtn = document.getElementById('codexClose');
 const hpFill = document.getElementById('hpFill');
 const hpText = document.getElementById('hpText');
-const cashVal = document.getElementById('cashVal');
+const savingsFill = document.getElementById('savingsFill');
+const savingsText = document.getElementById('savingsText');
+const loanFill = document.getElementById('loanFill');
+const loanText = document.getElementById('loanText');
+const hostageInfo = document.getElementById('hostageInfo');
 const weaponNameEl = document.getElementById('weaponName');
 const weaponAmmoEl = document.getElementById('weaponAmmo');
 const featherTimerEl = document.getElementById('featherTimer');
@@ -1337,8 +1372,48 @@ const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const now=()=>performance.now();
 function rect(a,b){ return !(a.x+a.w<b.x || a.x>b.x+b.w || a.y+a.h<b.y || a.y>b.y+b.h); }
 function rect2(x,y,w,h,b){ return !(x+w<b.x || x>b.x+b.w || y+h<b.y || y>b.y+b.h); }
+const fmtCurrency = (value)=>Math.round(Math.max(0, Math.abs(value))).toLocaleString();
 function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
 function notify(text){ noteEl.textContent = text; }
+
+const ui = {
+  confirm: (msg) => window.confirm(msg),
+  toast: (msg) => notify(msg),
+  banner: (msg, duration=4000) => centerNote(msg, duration)
+};
+
+const audio = {
+  play(id){
+    if(id==='hallelujah'){
+      beep({freq:620,dur:0.3});
+      setTimeout(()=>beep({freq:740,dur:0.3}), 180);
+      setTimeout(()=>beep({freq:880,dur:0.45}), 360);
+    }
+  }
+};
+
+const qte = {
+  run({rounds=5, required=4, windowMs=900}={}){
+    if(typeof window.prompt !== 'function') return false;
+    let success = 0;
+    const pool = 'asdfqwe';
+    for(let i=0;i<rounds;i++){
+      let seq='';
+      const length = 3;
+      for(let j=0;j<length;j++){
+        seq += pool[Math.floor(Math.random()*pool.length)];
+      }
+      const start = performance.now();
+      const input = window.prompt(`Refinance QTE (${i+1}/${rounds}): Type "${seq.toUpperCase()}" within ${(windowMs/1000).toFixed(1)}s`);
+      if(typeof input !== 'string') continue;
+      const elapsed = performance.now() - start;
+      if(elapsed <= windowMs && input.trim().toLowerCase() === seq){
+        success++;
+      }
+    }
+    return success >= required;
+  }
+};
 
 function hideFloorBanner(){
   if(!floorBannerEl) return;
@@ -1640,8 +1715,12 @@ function resetPlayerState(){
   player.onGround=false; player.facing=1; player.crouch=false; player.crouchOffset=0;
   player.sprint=false; player.climbing=false; player.hidden=false; player.spotted=false;
   player.inVent=false;
+  player.checkingMax = CHECKING_MAX;
+  player.savingsMax = SAVINGS_MAX;
+  player.hpMax = CHECKING_MAX;
+  player.loanBalance = RUN_LOAN_START;
   player.checking=GAME_PARAMS.player.checkingStart;
-  player.savings=GAME_PARAMS.player.savingsStart;
+  player.savings=Math.min(player.savingsMax, GAME_PARAMS.player.savingsStart);
   player.hasScrew=false; player.hasCharges=true;
   player.hasFeather=false; player.featherEnergy=0; player.featherMax=100; player.featherRecharge=12; player.lastFlap=0; player.flapCooldown=120;
   player.files=0; player.intel=0; player.specialFiles=0; player.codexUnlocked=false; player.weapon='pistol';
@@ -1656,6 +1735,7 @@ function resetPlayerState(){
   player.melee.last=0;
   player.hurtUntil=0;
   player.speedBoostUntil=0;
+  player.hopeBuffUntil=0;
   player.screenFlashUntil=0;
   player.lawsuitSlowUntil=0;
   player.stealthGraceUntil=0;
@@ -1680,6 +1760,55 @@ function resetPlayerState(){
   updateSpecialFileUI();
 }
 
+function resetHostageState(){
+  hostageState.taken.length = 0;
+  hostageState.rescued.length = 0;
+  hostageState.lost.length = 0;
+  hostageState.nextIndex = 0;
+  updateHostageHud();
+}
+
+function ordinalSuffix(n){
+  const mod100 = n % 100;
+  if(mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch(n % 10){
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function nextHostageName(){
+  const idx = hostageState.nextIndex;
+  hostageState.nextIndex++;
+  if(idx < HOSTAGE_SEQUENCE.length){
+    return HOSTAGE_SEQUENCE[idx];
+  }
+  const extra = idx - HOSTAGE_SEQUENCE.length + 1;
+  return `${ordinalSuffix(extra)} Cousin`;
+}
+
+function getActiveHostages(){
+  return hostageState.taken.filter((name)=>{
+    return !hostageState.lost.includes(name) && !hostageState.rescued.includes(name);
+  });
+}
+
+function updateHostageHud(){
+  if(!hostageInfo) return;
+  const activeNames = getActiveHostages();
+  const active = activeNames.length;
+  const rescued = hostageState.rescued.length;
+  const lost = hostageState.lost.length;
+  hostageInfo.textContent = `Hostages: ${active}`;
+  const sections = [];
+  if(active){ sections.push(`Captured: ${activeNames.join(', ')}`); }
+  if(rescued){ sections.push(`Rescued: ${hostageState.rescued.join(', ')}`); }
+  if(lost){ sections.push(`Lost: ${hostageState.lost.join(', ')}`); }
+  hostageInfo.title = sections.length ? sections.join('\n') : 'No hostages captured.';
+}
+
 function ensureLoop(){ if(!loopStarted){ loopStarted=true; requestAnimationFrame(loop); } }
 
 function startNewRun(name){
@@ -1689,6 +1818,12 @@ function startNewRun(name){
   runStats = makeRunStats();
   runStats.start = performance.now();
   runStats.kills = 0; runStats.deaths = 0; runStats.refinances = 0;
+  collectionsPressure = 1;
+  ceoQTEAttempted = false;
+  state.ceoPassive = false;
+  state.playerWeaponsDisabled = false;
+  resetHostageState();
+  updateCollectionsPressure();
   runActive = true;
   pause = false;
   startClock = performance.now();
@@ -1708,6 +1843,7 @@ function startNewRun(name){
   updateMapButtonState();
   toggleMinimap(false);
   makeLevel(currentFloor);
+  handleFloorStart(currentFloor);
   player.y = floorSlab.y - player.h;
   player.prevBottom = player.y + player.h;
   player.prevVy = 0;
@@ -1734,7 +1870,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   if(outcome==='death') runStats.deaths = (runStats.deaths||0) + 1;
   const endTime = performance.now();
   const elapsed = runStats.start ? Math.max(0, endTime - runStats.start) : 0;
-  const loanRemaining = Math.round(RUN_LOAN_START - player.score * 25);
+  const loanRemaining = Math.round(player.loanBalance);
   const detail = {
     outcome,
     name: currentPlayerName,
@@ -1751,6 +1887,103 @@ function finishRun(outcome, { message=null, note=null }={}){
   if(message) centerNote(message, 2400);
   window.dispatchEvent(new CustomEvent('loanTower:end', { detail }));
 }
+function reviveAfterRefinance(){
+  player.checking = player.checkingMax || CHECKING_MAX;
+  player.hurtUntil = now() + 400;
+  player.x = initialSpawnX; player.y = 0; player.vx = 0; player.vy = 0;
+  makeLevel(currentFloor);
+  handleFloorStart(currentFloor);
+  player.y = floorSlab.y - player.h;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  state.ceoPassive = false;
+  state.playerWeaponsDisabled = false;
+  ceoQTEAttempted = false;
+  pause = false;
+  notify('Cosigner bail-out: run continues.');
+  centerNote('Refinanced — debt doubled.', 1400);
+}
+
+function offerRefinanceOnDeath(){
+  const chooseRefi = ui.confirm(
+    'Refinance with a cosigner?\nDebt will DOUBLE and a family member is taken hostage.'
+  );
+  if(chooseRefi){
+    runStats.refinances = (runStats.refinances||0) + 1;
+    player.loanBalance = clampLoanBalance(player.loanBalance * 2);
+    const name = nextHostageName();
+    hostageState.taken.push(name);
+    updateHostageHud();
+    ui.toast(`Cosigner added: ${name}. Debt doubled to $${fmtCurrency(player.loanBalance)}.`);
+    updateCollectionsPressure();
+    reviveAfterRefinance();
+    return true;
+  }
+  return false;
+}
+
+function tryPeacefulEnding(){
+  const hpRequirement = player.hpMax || CHECKING_MAX;
+  const savingsRequirement = player.savingsMax || SAVINGS_MAX;
+  if(player.loanBalance <= 0 && player.checking >= hpRequirement && player.savings >= savingsRequirement){
+    state.ceoPassive = true;
+    state.playerWeaponsDisabled = true;
+    pause = true;
+    ui.banner('YOU BEAT STUDENT LOANS', 10000);
+    audio.play('hallelujah');
+    setTimeout(()=> endGame('peaceful'), 10000);
+    return true;
+  }
+  return false;
+}
+
+function attemptRefinanceQTE(){
+  if(ceoQTEAttempted) return false;
+  ceoQTEAttempted = true;
+  const wasPaused = pause;
+  pause = true;
+  const ok = qte.run({rounds:5, required:4, windowMs:900});
+  pause = wasPaused;
+  if(ok){
+    player.loanBalance = clampLoanBalance(Math.ceil(player.loanBalance * 0.5));
+    ui.toast(`Refinance success! Debt now $${fmtCurrency(player.loanBalance)}.`);
+    endGame('refinance');
+    return true;
+  }
+  ui.toast('Refinance attempt failed.');
+  return false;
+}
+
+function endGame(mode){
+  if(!runActive) return;
+  if(mode==='peaceful'){
+    finishRun('peaceful', { message:'YOU BEAT STUDENT LOANS', note:'Peaceful payoff ending secured.' });
+  } else if(mode==='refinance'){
+    finishRun('refinance', { message:'Refinance reprieve!', note:'Debt cut in half. You live to fight another day.' });
+  } else {
+    finishRun(mode || 'victory', { message:'CEO defeated!', note:'Combat victory.' });
+  }
+}
+
+function handleFloorStart(floor){
+  state.ceoPassive = false;
+  state.playerWeaponsDisabled = false;
+  if(floor === ECO_BOSS_FLOOR && getActiveHostages().length){
+    ui.toast('Hostages detected ahead. Free them to reduce the loan!');
+  }
+  if(floor === FLOORS){
+    if(tryPeacefulEnding()) return;
+    if(player.loanBalance > 0){
+      setTimeout(()=>{
+        if(runActive && !state.ceoPassive){
+          if(!attemptRefinanceQTE()){
+            notify('Refinance failed. CEO engages in combat!');
+          }
+        }
+      }, 1200);
+    }
+  }
+}
 function handleDeath(){
   if(!runActive && !testMode) return;
   pause=true;
@@ -1766,15 +1999,15 @@ function handleDeath(){
       notify("Revived on same floor.");
     }, 700);
   } else {
+    if(offerRefinanceOnDeath()) return;
     notify("Checking drained. Run failed.");
     finishRun('death', { message:"You ran out of Checking." });
   }
 }
 function damage(){
   const t=now();
-  player.checking = Math.max(0, player.checking - GUARD_BASE_DAMAGE);
+  loseChecking(GUARD_BASE_DAMAGE);
   player.hurtUntil = t+120;
-  if(player.checking===0){ handleDeath(); }
 }
 
 function scheduleGuardContactDamage(){
@@ -1789,7 +2022,68 @@ function scheduleGuardContactDamage(){
   player.contactInterferencePhase = (player.contactInterferencePhase || 0) + 1;
   return true;
 }
-function addChecking(n){ player.checking = clamp(player.checking+n,0,9999); }
+function clampLoanBalance(value){
+  return Math.max(-LOAN_CAP, Math.min(LOAN_CAP, value));
+}
+function applyLoanPayment(amount){
+  if(amount<=0) return;
+  player.loanBalance = clampLoanBalance(player.loanBalance - amount);
+}
+function applyCash(amount){
+  let remaining = amount;
+  if(remaining<=0) return;
+  if(player.savings < player.savingsMax){
+    const take = Math.min(remaining, player.savingsMax - player.savings);
+    player.savings += take;
+    remaining -= take;
+  }
+  if(remaining>0){
+    applyLoanPayment(remaining);
+  }
+}
+function reduceLoanByPercent(percent){
+  const clamped = Math.max(0, Math.min(1, percent));
+  if(player.loanBalance > 0){
+    const reduction = Math.ceil(player.loanBalance * clamped);
+    applyLoanPayment(reduction);
+  } else {
+    player.loanBalance = clampLoanBalance(player.loanBalance);
+  }
+}
+function applyHopeBuff(){
+  player.hopeBuffUntil = Math.max(player.hopeBuffUntil, now() + 10000);
+  notify('Hope momentum surges!');
+}
+function updateCollectionsPressure(){
+  const refinances = runStats && Number.isFinite(runStats.refinances) ? runStats.refinances : 0;
+  collectionsPressure = 1 + 0.1 * Math.max(0, refinances - 2);
+}
+function loseChecking(amount){
+  if(amount<=0) return 0;
+  const max = player.checkingMax || CHECKING_MAX;
+  const scaled = Math.max(0, Math.round(amount * collectionsPressure));
+  const prev = player.checking;
+  player.checking = Math.max(0, Math.min(max, prev - scaled));
+  if(player.checking===0 && prev>0){ handleDeath(); }
+  return scaled;
+}
+function addChecking(n){
+  if(!Number.isFinite(n) || n===0){
+    return;
+  }
+  const max = player.checkingMax || CHECKING_MAX;
+  if(n > 0){
+    const space = Math.max(0, max - player.checking);
+    const use = Math.min(space, n);
+    player.checking = clamp(player.checking + use, 0, max);
+    const overflow = n - use;
+    if(overflow > 0){
+      applyCash(overflow);
+    }
+  } else {
+    player.checking = clamp(player.checking + n, 0, max);
+  }
+}
 function addAmmo(n){ player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999); }
 function addFuel(n){ player.flame.fuel = clamp(player.flame.fuel+n, 0, 200); }
 function grantWeaponUpgrade(){
@@ -2019,6 +2313,7 @@ function makeLevel(i){
   boardMembers=[];
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
+  ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
   setAmbientForFloor(i);
@@ -2027,6 +2322,11 @@ function makeLevel(i){
   floorTheme = getFloorTheme(i);
   boardRoomActive = isBoardFloor(i);
   ninjaRound = (i===21);
+  if(i === ECO_BOSS_FLOOR){
+    spawnEcoBossRoom(i);
+    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    return;
+  }
   serverObjective = isServerFloor(i);
   inflationActive = isInflationFloor(i);
   bonusFloorActive = !!(scheduledBonusFloor && scheduledBonusFloor===i && !boardRoomActive && i < FLOORS);
@@ -2375,6 +2675,202 @@ function makeLevel(i){
   camX = clamp(player.x - W*0.45, 0, 3*W - W);
 }
 
+function spawnEcoBossRoom(floor){
+  ecoBossActive = true;
+  ecoProjectiles = [];
+  hostagesInRoom = [];
+  backgroundFX.push({type:'serverParallax'});
+  const yBase = H - 70;
+  const upperPlatform = yBase - 140;
+  walls.push({x:0,y:0,w:3*W,h:H});
+  floorSlab = {x:0,y:yBase,w:3*W,h:18};
+  walls.push({x:0.35*W, y:upperPlatform, w:0.5*W, h:12, isPlatform:true});
+  walls.push({x:1.25*W, y:upperPlatform-60, w:0.6*W, h:12, isPlatform:true});
+  walls.push({x:2.15*W, y:upperPlatform, w:0.5*W, h:12, isPlatform:true});
+  plants.push({x:0.48*W, y:yBase-32, w:24, h:32});
+  plants.push({x:2.32*W, y:yBase-32, w:24, h:32});
+  door = { x: 3*W-200, y: yBase-200, w:160, h:200, unlocked:false, open:false, lift:0, glowUntil:0 };
+  ecoBoss = {
+    x: 1.5*W - 90,
+    y: upperPlatform - 220,
+    baseY: upperPlatform - 220,
+    w: 180,
+    h: 220,
+    hp: 520,
+    maxHp: 520,
+    hitFlashUntil: 0,
+    attackTimer: 2.6,
+    pattern: 0,
+    bob: 0,
+    defeated: false
+  };
+  const slots = [
+    { x: 0.55*W, y: yBase-60 },
+    { x: 0.9*W, y: yBase-88 },
+    { x: 1.25*W, y: yBase-54 },
+    { x: 1.65*W, y: yBase-86 },
+    { x: 2.0*W, y: yBase-58 },
+    { x: 2.35*W, y: yBase-78 }
+  ];
+  const available = getActiveHostages();
+  const toSeat = Math.min(available.length, slots.length);
+  for(let i=0;i<toSeat;i++){
+    hostagesInRoom.push(spawnHostageChair(available[i], slots[i]));
+  }
+  player.x = initialSpawnX;
+  player.y = yBase - player.h;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  notify('Eco Boss: Green Overseer has staged hostages. Rescue them!');
+  centerNote('Green Overseer', 1600);
+  updateHostageHud();
+}
+
+function spawnHostageChair(name, slot){
+  const chair = {
+    name,
+    x: slot.x,
+    y: slot.y,
+    w: 36,
+    h: 44,
+    timerMs: 20000,
+    freed:false,
+    lost:false,
+    removed:false
+  };
+  chair.free = ()=>{
+    if(chair.freed || chair.lost) return;
+    chair.freed = true;
+    chair.removed = true;
+    hostageState.taken = hostageState.taken.filter((n)=>n!==name);
+    if(!hostageState.rescued.includes(name)) hostageState.rescued.push(name);
+    reduceLoanByPercent(0.10);
+    applyHopeBuff();
+    ui.toast(`Freed ${name}! Loan reduced to $${fmtCurrency(player.loanBalance)}.`);
+    updateHostageHud();
+  };
+  chair.fail = ()=>{
+    if(chair.freed || chair.lost) return;
+    chair.lost = true;
+    chair.removed = true;
+    if(!hostageState.lost.includes(name)) hostageState.lost.push(name);
+    ui.toast(`${name} was taken away…`);
+    updateHostageHud();
+  };
+  return chair;
+}
+
+function updateHostageChairs(dt){
+  if(!ecoBossActive || !hostagesInRoom.length) return;
+  const dtMs = dt * 1000;
+  for(const chair of hostagesInRoom){
+    if(!chair || chair.removed || chair.freed || chair.lost) continue;
+    chair.timerMs -= dtMs;
+    if(chair.timerMs <= 0){
+      chair.fail();
+    }
+  }
+  hostagesInRoom = hostagesInRoom.filter((chair)=>chair && !chair.removed);
+}
+
+function spawnRootSnare(){
+  const px = player.x + player.w/2;
+  const py = player.y + player.h;
+  ecoProjectiles.push({ type:'root', x:px-36, y:py-12, w:72, h:42, life:0.9, triggered:false });
+}
+
+function spawnSporeCloud(){
+  const center = ecoBoss ? ecoBoss.x + ecoBoss.w/2 : player.x + player.w/2;
+  for(let i=0;i<3;i++){
+    const offset = (i-1) * 90;
+    ecoProjectiles.push({ type:'spore', x:center + offset, y:(ecoBoss?ecoBoss.y:player.y) - 20, vx:(Math.random()*2-1)*40, vy:30 + Math.random()*20, radius:26, life:4.5 });
+  }
+}
+
+function spawnSolarFlare(){
+  const startX = player.x + player.w/2 - 14;
+  ecoProjectiles.push({ type:'flare', x:startX, y:80, w:28, h:floorSlab ? (floorSlab.y-80) : (H-120), life:1.2, flashed:false });
+}
+
+function updateEcoProjectiles(dt){
+  if(!ecoProjectiles.length) return;
+  const playerBox = { x:player.x, y:player.y, w:player.w, h:player.h };
+  for(const proj of ecoProjectiles){
+    proj.life -= dt;
+    if(proj.type==='root'){
+      if(!proj.triggered && rect(playerBox, {x:proj.x, y:proj.y, w:proj.w, h:proj.h})){
+        loseChecking(15);
+        player.vx *= 0.2;
+        proj.triggered = true;
+      }
+    } else if(proj.type==='spore'){
+      proj.x += proj.vx * dt;
+      proj.y += proj.vy * dt;
+      const dx = (player.x + player.w/2) - proj.x;
+      const dy = (player.y + player.h/2) - proj.y;
+      if(Math.hypot(dx, dy) < (proj.radius||24)){
+        loseChecking(6);
+        player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+700);
+        proj.life -= 0.6;
+      }
+    } else if(proj.type==='flare'){
+      if(!proj.flashed){
+        player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+900);
+        proj.flashed = true;
+      }
+      if(rect(playerBox, {x:proj.x, y:proj.y, w:proj.w, h:proj.h})){
+        loseChecking(18);
+        proj.life -= 0.4;
+      }
+    }
+  }
+  ecoProjectiles = ecoProjectiles.filter((proj)=>proj.life>0);
+}
+
+function updateEcoBoss(dt){
+  if(!ecoBossActive || !ecoBoss || ecoBoss.defeated) return;
+  ecoBoss.bob = (ecoBoss.bob || 0) + dt * 1.4;
+  const wander = Math.sin(ecoBoss.bob * 0.6) * 60;
+  const center = 1.5*W;
+  ecoBoss.x = clamp(center + wander - ecoBoss.w/2, 0.9*W, 2.1*W - ecoBoss.w);
+  ecoBoss.y = ecoBoss.baseY + Math.sin(ecoBoss.bob) * 24;
+  ecoBoss.attackTimer -= dt;
+  if(ecoBoss.attackTimer <= 0){
+    const pattern = ecoBoss.pattern || 0;
+    if(pattern % 3 === 0) spawnRootSnare();
+    else if(pattern % 3 === 1) spawnSporeCloud();
+    else spawnSolarFlare();
+    ecoBoss.pattern = pattern + 1;
+    ecoBoss.attackTimer = 2.6 + Math.random()*1.8;
+  }
+}
+
+function onEcoBossDeath(){
+  if(!ecoBoss || ecoBoss.defeated) return;
+  ecoBoss.defeated = true;
+  for(const chair of hostagesInRoom){
+    if(!chair || chair.removed) continue;
+    if(!chair.freed && !chair.lost){
+      chair.freed = true;
+      hostageState.taken = hostageState.taken.filter((n)=>n!==chair.name);
+      if(!hostageState.rescued.includes(chair.name)) hostageState.rescued.push(chair.name);
+      reduceLoanByPercent(0.10);
+      applyHopeBuff();
+      ui.toast(`Auto-freed ${chair.name}. Loan now $${fmtCurrency(player.loanBalance)}.`);
+    }
+  }
+  hostagesInRoom = [];
+  updateHostageHud();
+  if(door){
+    door.unlocked = true;
+    door.glowUntil = now()+4000;
+  }
+  ecoProjectiles = [];
+  ecoBossActive = false;
+  notify('Eco Boss defeated — hostages released.');
+  centerNote('Green Overseer Fallen', 1800);
+}
+
 function makeBoardRoomLevel(floor, yBase){
   const tableTop = yBase - 150;
   floorSlab.x = 0;
@@ -2680,6 +3176,15 @@ function interact(){
   const p={x:player.x, y:player.y, w:player.w, h:player.h};
 
   if(!inSub){
+    if(ecoBossActive){
+      for(const chair of hostagesInRoom){
+        if(!chair || chair.removed || chair.freed || chair.lost) continue;
+        const interactBox = {x:chair.x-24, y:chair.y-52, w:48, h:60};
+        if(rect(p, interactBox)){
+          chair.free();
+        }
+      }
+    }
     // Pickups
     for(const it of pickups){
       if(it.type && rect(p,it)){
@@ -2726,7 +3231,7 @@ function interact(){
           notify('Cash payout from vending machine.');
         } else {
           const loss = 50 + Math.floor(Math.random()*151);
-          player.checking = Math.max(0, player.checking - loss);
+          loseChecking(loss);
           centerNote(`Vending trap! -$${loss}`, 1200);
           notify('Faulty vending machine drained funds.');
         }
@@ -2867,6 +3372,7 @@ function interact(){
             notify(`Entered floor ${currentFloor}.`);
             player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
             makeLevel(currentFloor);
+            handleFloorStart(currentFloor);
             player.y = floorSlab.y - player.h;
             player.prevBottom = player.y + player.h;
             player.prevVy = 0;
@@ -2907,6 +3413,7 @@ function interact(){
 // Attacks / weapons
 function attack(){
   if(pause) return;
+  if(state.playerWeaponsDisabled) return;
   if(ninjaRound && player.weapon!=='melee'){
     centerNote('Melee only during ninja round!', 1200);
     notify('Switch to melee.');
@@ -2915,7 +3422,8 @@ function attack(){
   }
   const t=now();
   if(player.weapon==='pistol'){
-    if(t - player.pistol.last < player.pistol.cooldown) return;
+    const pistolCooldown = now()<player.hopeBuffUntil ? Math.max(40, Math.round(player.pistol.cooldown * 0.85)) : player.pistol.cooldown;
+    if(t - player.pistol.last < pistolCooldown) return;
     if(player.pistol.ammo<=0){ centerNote("Reload (R)"); beep({freq:320}); notify("Out of ammo."); return; }
     player.pistol.last=t;
     player.pistol.ammo--;
@@ -2927,7 +3435,8 @@ function attack(){
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
   } else if(player.weapon==='flame'){
     if(player.flame.fuel<=0) { notify("Out of fuel."); return; }
-    if(t - player.flame.last < player.flame.cooldown) return;
+    const flameCooldown = now()<player.hopeBuffUntil ? Math.max(30, Math.round(player.flame.cooldown * 0.85)) : player.flame.cooldown;
+    if(t - player.flame.last < flameCooldown) return;
     player.flame.last=t; player.flame.fuel = Math.max(0, player.flame.fuel-1);
     const dir = player.facing>0 ? 1 : -1;
     const bx = player.x + (dir>0?player.w:0);
@@ -2961,6 +3470,14 @@ function attack(){
             hits++;
           }
         }
+      }
+    }
+    if(ecoBossActive && ecoBoss && ecoBoss.hp>0){
+      const bossBox = {x:ecoBoss.x, y:ecoBoss.y, w:ecoBoss.w, h:ecoBoss.h};
+      if(rect(hitBox, bossBox)){
+        ecoBoss.hp = Math.max(0, ecoBoss.hp - PLAYER_MELEE_DAMAGE);
+        ecoBoss.hitFlashUntil = now() + 160;
+        hits++;
       }
     }
     if(hits>0) beep({freq:520}); else beep({freq:380});
@@ -3078,7 +3595,8 @@ function update(dt){
   if(hacking){ ax=0; }
   const boost = now()<player.speedBoostUntil ? 1.1 : 1;
   const lawsuitSlow = now()<player.lawsuitSlowUntil ? 0.7 : 1;
-  const maxRun = RUN*(player.sprint?SPRINT:1)*(player.crouch?0.6:1)*boost*lawsuitSlow;
+  const hopeBoost = now()<player.hopeBuffUntil ? 1.1 : 1;
+  const maxRun = RUN*(player.sprint?SPRINT:1)*(player.crouch?0.6:1)*boost*hopeBoost*lawsuitSlow;
 
   let dropTargetY = null;
   if(wasOnGround && !inSub){
@@ -3410,6 +3928,16 @@ function update(dt){
       }
     }
 
+    if(ecoBossActive){
+      updateEcoBoss(dt);
+      updateHostageChairs(dt);
+      updateEcoProjectiles(dt);
+      if(ecoBoss && ecoBoss.hp <= 0 && !ecoBoss.defeated){
+        ecoBoss.hp = 0;
+        onEcoBossDeath();
+      }
+    }
+
     // Servers armed -> destroyed
     for(const s of servers){
       if(!s.destroyed && s.armed && now()>s.armTime){
@@ -3541,12 +4069,21 @@ function update(dt){
           const box={x:s.x,y:s.y,w:s.w,h:s.h};
           if(rect2(b.x-3,b.y-3,6,6,box)){ s.hp-= (b.type==='flame'? 3 : 2); if(s.hp<=0){ s.destroyed=true; } b.life=0; break; }
         }
+        if(b.life>0 && ecoBossActive && ecoBoss && ecoBoss.hp>0){
+          const bossBox = {x:ecoBoss.x, y:ecoBoss.y, w:ecoBoss.w, h:ecoBoss.h};
+          if(rect2(b.x-3, b.y-3, 6, 6, bossBox)){
+            const dmgBase = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
+            ecoBoss.hp = Math.max(0, ecoBoss.hp - dmgBase);
+            ecoBoss.hitFlashUntil = now() + 160;
+            b.life = 0;
+          }
+        }
       } else {
         const pbox={x:player.x,y:player.y,w:player.w,h:player.h};
         if(b.type==='policy'){
           if(rect2(b.x-4,b.y-4,8,8,pbox)){
             const loss = 40;
-            player.checking = Math.max(0, player.checking - loss);
+            loseChecking(loss);
             player.hurtUntil = now()+200;
             notify('Policy binder drained funds!');
             b.life=0;
@@ -3606,10 +4143,27 @@ function update(dt){
   const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges');
   if(player.hasFeather) inv.push('Feather');
   if(invEl) invEl.textContent=`Inv: ${inv.join(', ')||'—'}`;
-  const hpRatio = Math.min(1, Math.max(0, player.checking / CHECKING_HUD_MAX));
+  const hpRatio = Math.min(1, Math.max(0, player.checking / (player.checkingMax || CHECKING_MAX)));
   if(hpFill) hpFill.style.width = `${hpRatio*100}%`;
   if(hpText) hpText.textContent = Math.max(0, Math.round(player.checking));
-  if(cashVal) cashVal.textContent = `$${Math.max(0, Math.round(player.savings)).toLocaleString()}`;
+  if(savingsFill){
+    const savingsRatio = Math.min(1, Math.max(0, player.savings / (player.savingsMax || SAVINGS_MAX)));
+    savingsFill.style.width = `${savingsRatio*100}%`;
+  }
+  if(savingsText) savingsText.textContent = `$${fmtCurrency(player.savings)}`;
+  if(loanFill){
+    const debt = player.loanBalance;
+    const progress = RUN_LOAN_START>0 ? Math.min(1, Math.max(0, 1 - Math.max(0, debt) / RUN_LOAN_START)) : 1;
+    loanFill.style.width = `${progress*100}%`;
+  }
+  if(loanText){
+    const debt = player.loanBalance;
+    loanText.textContent = debt > 0
+      ? `-$${fmtCurrency(debt)}`
+      : debt < 0
+        ? `+$${fmtCurrency(Math.abs(debt))}`
+        : '$0';
+  }
   const weaponOrder = ['pistol','flame','melee'];
   const weaponNames = { pistol:'Pistol', flame:'Flamethrower', melee:'Melee' };
   const weaponIdx = weaponOrder.indexOf(player.weapon);
@@ -4197,6 +4751,74 @@ function draw(){
       }
       ctx.fillStyle = appearance.mouth;
       ctx.fillRect(headX+3, faceY + headHeight - 3, headWidth-6, 1);
+    }
+
+    if(ecoBossActive){
+      for(const chair of hostagesInRoom){
+        if(!chair || chair.removed) continue;
+        const hx = chair.x + ox;
+        const hy = chair.y;
+        ctx.fillStyle = 'rgba(40,60,80,0.8)';
+        ctx.fillRect(hx-18, hy-6, 36, 10);
+        ctx.fillRect(hx-12, hy-44, 24, 38);
+        if(!chair.lost){
+          ctx.fillStyle = chair.freed ? 'rgba(120,255,180,0.9)' : 'rgba(255,220,160,0.9)';
+          ctx.fillRect(hx-9, hy-50, 18, 32);
+          ctx.fillStyle = '#10201a';
+          ctx.fillRect(hx-9, hy-50, 18, 4);
+        }
+        if(!chair.freed && !chair.lost){
+          const ratio = Math.max(0, Math.min(1, chair.timerMs / 20000));
+          ctx.fillStyle = 'rgba(255,90,90,0.85)';
+          ctx.fillRect(hx-18, hy-18, 36*ratio, 4);
+          ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+          ctx.strokeRect(hx-18, hy-18, 36, 4);
+          ctx.fillStyle = 'rgba(255,255,255,0.65)';
+          ctx.font = '10px monospace';
+          ctx.fillText(chair.name, hx-18, hy-24);
+        } else if(chair.lost){
+          ctx.fillStyle = 'rgba(200,80,80,0.6)';
+          ctx.font = '10px monospace';
+          ctx.fillText(`${chair.name} ✖`, hx-18, hy-24);
+        } else if(chair.freed){
+          ctx.fillStyle = 'rgba(120,255,180,0.75)';
+          ctx.font = '10px monospace';
+          ctx.fillText(`${chair.name} ✓`, hx-18, hy-24);
+        }
+      }
+      if(ecoBoss){
+        const bx = ecoBoss.x + ox;
+        ctx.fillStyle = '#1f3b2f';
+        ctx.fillRect(bx, ecoBoss.y, ecoBoss.w, ecoBoss.h);
+        ctx.fillStyle = '#29503c';
+        ctx.fillRect(bx+12, ecoBoss.y+20, ecoBoss.w-24, ecoBoss.h-40);
+        if(ecoBoss.hitFlashUntil && ecoBoss.hitFlashUntil > now()){
+          ctx.fillStyle = 'rgba(255,255,255,0.35)';
+          ctx.fillRect(bx, ecoBoss.y, ecoBoss.w, ecoBoss.h);
+        }
+        const hpRatio = ecoBoss.maxHp>0 ? Math.max(0, Math.min(1, ecoBoss.hp / ecoBoss.maxHp)) : 0;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(bx, ecoBoss.y-18, ecoBoss.w, 6);
+        ctx.fillStyle = '#6bff94';
+        ctx.fillRect(bx, ecoBoss.y-18, ecoBoss.w * hpRatio, 6);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.strokeRect(bx, ecoBoss.y-18, ecoBoss.w, 6);
+      }
+      for(const proj of ecoProjectiles){
+        if(!proj) continue;
+        if(proj.type==='root'){
+          ctx.fillStyle = 'rgba(90,140,90,0.6)';
+          ctx.fillRect(proj.x + ox, proj.y, proj.w, proj.h);
+        } else if(proj.type==='spore'){
+          ctx.fillStyle = 'rgba(120,220,160,0.35)';
+          ctx.beginPath();
+          ctx.arc(proj.x + ox, proj.y, proj.radius || 24, 0, Math.PI*2);
+          ctx.fill();
+        } else if(proj.type==='flare'){
+          ctx.fillStyle = 'rgba(255,240,120,0.35)';
+          ctx.fillRect(proj.x + ox, proj.y, proj.w, proj.h);
+        }
+      }
     }
 
     // servers
