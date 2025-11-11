@@ -705,11 +705,11 @@ const PROFILE_DECK = [
     bio:'The tower’s numbers whisper her name; she can balance any debt ledger blindfolded. Beneath the calm veneer lies a black-suit reaper of accounts.',
     power:'Ledger Shield – Reflects bullets for 2 s / 6 s cooldown.',
     specials:['Tax Sweep (coin fan – $5 drain)','Overdraft Pop (grenade detonation)'],
-    hp:60, portrait:'portraits/ace_spades.png',
+    hp:69, portrait:'portraits/ace_spades.png',
     debtEffects:[
-      { id:'HI',  radius:420, desc:'High Interest – The compounding monster. Your balance drains $1 per second; when you’re broke it starts eating your health instead.' },
-      { id:'CAP', radius:420, desc:'Interest Capitalization – Interest grows the longer you linger. Each few seconds in range increases how fast High Interest drains your money.' },
-      { id:'MIN', radius:360, desc:'Minimum Payment – You can only afford the bare minimum—fire rate slowed 20%.' }
+      { id:'HI',  radius:483, desc:'High Interest – The compounding monster. Your balance drains $1 per second; when you’re broke it starts eating your health instead.' },
+      { id:'CAP', radius:483, desc:'Interest Capitalization – Interest grows the longer you linger. Each few seconds in range increases how fast High Interest drains your money.' },
+      { id:'MIN', radius:414, desc:'Minimum Payment – You can only afford the bare minimum—fire rate slowed 20%.' }
     ]
   },
   {
@@ -717,10 +717,10 @@ const PROFILE_DECK = [
     bio:'A muscle in a suit. He treats risk like a contact sport.',
     power:'Credit Snare – Slow 40%.',
     specials:['Charge-Off Volley (3×10 dmg)','Margin Call (knockback)'],
-    hp:70, portrait:'portraits/king_clubs.png',
+    hp:81, portrait:'portraits/king_clubs.png',
     debtEffects:[
-      { id:'WG', radius:380, desc:'Wage Garnish – Every hit costs an extra $5 from your account.' },
-      { id:'RS', radius:320, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' }
+      { id:'WG', radius:437, desc:'Wage Garnish – Every hit costs an extra $5 from your account.' },
+      { id:'RS', radius:368, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' }
     ]
   },
   {
@@ -728,10 +728,10 @@ const PROFILE_DECK = [
     bio:'Glamorous and deadly, she signs settlements in blood-red ink. Her diamonds sparkle like legal daggers.',
     power:'Injunction Beam – 0.9 s stun (cancels Feather).',
     specials:['Discovery Drones (8 dmg)'],
-    hp:80, portrait:'portraits/queen_diamonds.png',
+    hp:92, portrait:'portraits/queen_diamonds.png',
     debtEffects:[
-      { id:'HOLD', radius:360, desc:'Loan Servicer Hold – “Your call is very important to us…” Inputs stutter randomly for a moment.' },
-      { id:'FP',   radius:340, desc:'Fine Print – Legalese catches you—grenade and saber specials disabled while in range.' }
+      { id:'HOLD', radius:414, desc:'Loan Servicer Hold – “Your call is very important to us…” Inputs stutter randomly for a moment.' },
+      { id:'FP',   radius:391, desc:'Fine Print – Legalese catches you—grenade and saber specials disabled while in range.' }
     ]
   },
   {
@@ -739,10 +739,10 @@ const PROFILE_DECK = [
     bio:'Blue-collar romantic of corporate machinery. Fixes everything but his own conscience.',
     power:'Vacuum Dash – Invuln dash + suction wake.',
     specials:['Tool Rain (10 dmg)','Conveyor Shift (reversed friction)'],
-    hp:90, portrait:'portraits/jack_hearts.png',
+    hp:104, portrait:'portraits/jack_hearts.png',
     debtEffects:[
-      { id:'RS',  radius:320, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' },
-      { id:'MIN', radius:360, desc:'Minimum Payment – Fire rate reduced by 20% while in range.' }
+      { id:'RS',  radius:368, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' },
+      { id:'MIN', radius:414, desc:'Minimum Payment – Fire rate reduced by 20% while in range.' }
     ]
   },
   {
@@ -750,10 +750,10 @@ const PROFILE_DECK = [
     bio:'Sells despair as self-care; debt as destiny. Every campaign ends with a signature and a smile.',
     power:'Hype Mirage – 2 clones.',
     specials:['Viral Spray (8×10 dmg)','Rebrand Flash (hue hide)'],
-    hp:100, portrait:'portraits/ten_spades.png',
+    hp:115, portrait:'portraits/ten_spades.png',
     debtEffects:[
-      { id:'REPR', radius:380, desc:'Reprice – Random penalties like Minimum Payment or Wage Garnish flicker on for short bursts.' },
-      { id:'DP',   radius:360, desc:'Delinquency Ping – Floating debt notices home in; contact drains $3 (or 1 HP if broke).' }
+      { id:'REPR', radius:437, desc:'Reprice – Random penalties like Minimum Payment or Wage Garnish flicker on for short bursts.' },
+      { id:'DP',   radius:414, desc:'Delinquency Ping – Floating debt notices home in; contact drains $3 (or 1 HP if broke).' }
     ]
   },
   {
@@ -761,10 +761,10 @@ const PROFILE_DECK = [
     bio:'Wrote the algorithm that predicts failure before it happens. Now she’s debugging the world.',
     power:'Firewall Dome – Halves incoming bullet speed.',
     specials:['Packet Lance (15 dmg)','Patch Cycle (heal 5 hp/5 s)'],
-    hp:110, portrait:'portraits/nine_clubs.png',
+    hp:127, portrait:'portraits/nine_clubs.png',
     debtEffects:[
-      { id:'HI',    radius:400, desc:'High Interest – Your balance drains $1 per second; when broke it drains health instead.' },
-      { id:'CLAMP', radius:360, desc:'Credit Clamp – Critical hits halved and weapon spread widened by 10%.' }
+      { id:'HI',    radius:460, desc:'High Interest – Your balance drains $1 per second; when broke it drains health instead.' },
+      { id:'CLAMP', radius:414, desc:'Credit Clamp – Critical hits halved and weapon spread widened by 10%.' }
     ]
   },
   {
@@ -772,10 +772,10 @@ const PROFILE_DECK = [
     bio:'Cuts personnel like topiary; calls it “creative pruning.”',
     power:'Severance Wave – Ground shock 10 dmg.',
     specials:['Exit Interview (tether 1 s)','Paperstorm (20×5 dmg)'],
-    hp:115, portrait:'portraits/eight_diamonds.png',
+    hp:132, portrait:'portraits/eight_diamonds.png',
     debtEffects:[
-      { id:'COLL', radius:420, desc:'Collections Call – Spotlights detect you twice as fast; on full alert, more guards spawn and the elevator relocks briefly.' },
-      { id:'HOLD', radius:360, desc:'Loan Servicer Hold – Inputs stutter briefly at intervals.' }
+      { id:'COLL', radius:483, desc:'Collections Call – Spotlights detect you twice as fast; on full alert, more guards spawn and the elevator relocks briefly.' },
+      { id:'HOLD', radius:414, desc:'Loan Servicer Hold – Inputs stutter briefly at intervals.' }
     ]
   },
   {
@@ -783,11 +783,11 @@ const PROFILE_DECK = [
     bio:'Loves games with other people’s lives as chips. Plays every floor like poker night.',
     power:'Arb Slide – Rail dash + rapid fire.',
     specials:['Hedge Ring (orbit bullets)','Golden Parachute (heal 20 once @ 50% HP)'],
-    hp:120, portrait:'portraits/seven_hearts.png',
+    hp:138, portrait:'portraits/seven_hearts.png',
     debtEffects:[
-      { id:'WG',  radius:380, desc:'Wage Garnish – Each hit takes an extra $5.' },
-      { id:'MIN', radius:360, desc:'Minimum Payment – Fire rate −20% while nearby.' },
-      { id:'REPR',radius:380, desc:'Reprice – Randomly imposes Minimum Payment or Wage Garnish for short durations.' }
+      { id:'WG',  radius:437, desc:'Wage Garnish – Each hit takes an extra $5.' },
+      { id:'MIN', radius:414, desc:'Minimum Payment – Fire rate −20% while nearby.' },
+      { id:'REPR',radius:437, desc:'Reprice – Randomly imposes Minimum Payment or Wage Garnish for short durations.' }
     ]
   }
 ];
@@ -797,12 +797,12 @@ const CEO_PROFILE = {
   bio:'The architect of the tower; believes gravity should accrue interest.',
   power:'Capital Storm – Cluster fire: inner 10 dmg / outer 20 dmg.',
   specials:['Buyback Shield (absorb 30 → 10×10 blast)','Hostile Takeover (3 board powers for 8 s)','Final Phase (ninja summons, faster patterns)'],
-  hp:220, portrait:'portraits/ace_aces.png',
+  hp:253, portrait:'portraits/ace_aces.png',
   debtEffects:[
-    { id:'HI',   radius:480, desc:'High Interest – Drains $1 per second; if broke, drains health instead.' },
-    { id:'CAP',  radius:480, desc:'Interest Capitalization – Staying close ramps the High Interest drain faster over time.' },
-    { id:'COLL', radius:460, desc:'Collections Call – Detection accelerates, extra guards spawn, and the elevator relocks briefly.' },
-    { id:'WG',   radius:420, desc:'Wage Garnish – Every hit costs an extra $5.' }
+    { id:'HI',   radius:552, desc:'High Interest – Drains $1 per second; if broke, drains health instead.' },
+    { id:'CAP',  radius:552, desc:'Interest Capitalization – Staying close ramps the High Interest drain faster over time.' },
+    { id:'COLL', radius:529, desc:'Collections Call – Detection accelerates, extra guards spawn, and the elevator relocks briefly.' },
+    { id:'WG',   radius:483, desc:'Wage Garnish – Every hit costs an extra $5.' }
   ]
 };
 
@@ -1014,7 +1014,7 @@ function generateDeckPortrait(profile){
 const EFFECTS = {
   NJ:   { name:'Night Job',            color:'#5F66FF', icon:'NJ', kind:'pulse',   tick_ms:6000, params:{sleep_ms:1000} },
   SJ:   { name:'Second Job',           color:'#8A9FBF', icon:'SJ', kind:'continuous', params:{move_mult:0.75, jump_mult:0.80} },
-  HI:   { name:'High Interest',        color:'#B455FF', icon:'HI', kind:'drain',   tick_ms:250,  params:{dollars_per_sec:1.0} },
+  HI:   { name:'High Interest',        color:'#B455FF', icon:'HI', kind:'drain',   tick_ms:250,  params:{dollars_per_sec:10.0} },
   WG:   { name:'Wage Garnish',         color:'#FF7A7A', icon:'WG', kind:'on_hit',  params:{extra_dollars:5} },
   COLL: { name:'Collections',          color:'#FFB84D', icon:'C',  kind:'alert',   tick_ms:300,  params:{mult:2.0, spawn_cd_ms:12000, lock_ms:5000} },
   FF:   { name:'Forbearance Freeze',   color:'#77E3FF', icon:'F',  kind:'feather', params:{block:true, accel_mult:2.0} },
@@ -1029,15 +1029,15 @@ const EFFECTS = {
 };
 
 const BOSS_AURAS = {
-  4:  [{id:'HI',radius:420},{id:'CAP',radius:420},{id:'MIN',radius:360}],
-  8:  [{id:'WG',radius:380},{id:'RS',radius:320}],
-  12: [{id:'HOLD',radius:360},{id:'FP',radius:340}],
-  16: [{id:'RS',radius:320},{id:'MIN',radius:360}],
-  20: [{id:'REPR',radius:380},{id:'DP',radius:360}],
-  24: [{id:'HI',radius:400},{id:'CLAMP',radius:360}],
-  28: [{id:'COLL',radius:420},{id:'HOLD',radius:360}],
-  32: [{id:'WG',radius:380},{id:'MIN',radius:360},{id:'REPR',radius:380}],
-  36: [{id:'HI',radius:480},{id:'CAP',radius:480},{id:'COLL',radius:460},{id:'WG',radius:420}]
+  4:  [{id:'HI',radius:483},{id:'CAP',radius:483},{id:'MIN',radius:414}],
+  8:  [{id:'WG',radius:437},{id:'RS',radius:368}],
+  12: [{id:'HOLD',radius:414},{id:'FP',radius:391}],
+  16: [{id:'RS',radius:368},{id:'MIN',radius:414}],
+  20: [{id:'REPR',radius:437},{id:'DP',radius:414}],
+  24: [{id:'HI',radius:460},{id:'CLAMP',radius:414}],
+  28: [{id:'COLL',radius:483},{id:'HOLD',radius:414}],
+  32: [{id:'WG',radius:437},{id:'MIN',radius:414},{id:'REPR',radius:437}],
+  36: [{id:'HI',radius:552},{id:'CAP',radius:552},{id:'COLL',radius:529},{id:'WG',radius:483}]
 };
 
 // ===== Input fixes =====
@@ -1079,9 +1079,15 @@ const player = {
   files:0, intel:0, specialFiles:0,
   codexUnlocked:false,
   weapon:'pistol',
-  pistol:{ammo:GAME_PARAMS.player.pistol.magazine, reserve:GAME_PARAMS.player.pistol.reserve, cooldown:GAME_PARAMS.player.pistol.cooldownMs, last:0, muzzleUntil:0},
+  weaponsUnlocked:{ pistol:true, silenced:true, flame:true, melee:true, grenade:false, saber:false, machineGun:false },
+  pistol:{ammo:GAME_PARAMS.player.pistol.magazine, reserve:GAME_PARAMS.player.pistol.reserve, cooldown:GAME_PARAMS.player.pistol.cooldownMs, last:0, muzzleUntil:0, mag:GAME_PARAMS.player.pistol.magazine},
+  silenced:{ammo:GAME_PARAMS.player.pistol.magazine, cooldown:Math.round(GAME_PARAMS.player.pistol.cooldownMs*0.9), last:0, muzzleUntil:0, mag:GAME_PARAMS.player.pistol.magazine},
   flame:{fuel:GAME_PARAMS.player.flame.fuel, cooldown:GAME_PARAMS.player.flame.cooldownMs, last:0}, // "ammo" for flamethrower
   melee:{cooldown:GAME_PARAMS.player.meleeCooldownMs, last:0},
+  grenade:{ammo:0, reserve:0, cooldown:520, last:0, mag:1},
+  saber:{cooldown:Math.max(140, Math.round(GAME_PARAMS.player.meleeCooldownMs*0.75)), last:0},
+  machineGun:{ammo:90, reserve:360, cooldown:80, last:0, muzzleUntil:0, mag:90},
+  damageMultiplier:1,
   hurtUntil:0,
   speedBoostUntil:0,
   screenFlashUntil:0,
@@ -1125,7 +1131,8 @@ let ceoQTEAttempted = false;
 
 const state = {
   ceoPassive: false,
-  playerWeaponsDisabled: false
+  playerWeaponsDisabled: false,
+  midnightRage: false
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -1168,6 +1175,38 @@ let minimapUnlocked=false, minimapVisible=false;
 let deckVisible=false;
 const unlockedDeckFloors = new Set();
 let floorBannerTimeout=null;
+
+function placeFloorFeather(layerYs, yBase){
+  const candidates = [];
+  candidates.push({y:yBase, type:'base'});
+  if(layerYs && layerYs.length>0){ candidates.push({y:layerYs[0], type:'platform'}); }
+  if(layerYs && layerYs.length>1){ candidates.push({y:layerYs[1], type:'platform'}); }
+  const choice = candidates[Math.floor(Math.random()*candidates.length)];
+  const targetY = choice.type==='base' ? yBase : choice.y;
+  let targetX = 1.5*W - 20;
+  if(choice.type==='platform'){
+    const platform = walls.find(w=>w.isPlatform && Math.abs((w.y||0) - targetY) < 1);
+    if(platform){ targetX = platform.x + platform.w/2 - 10; }
+  }
+  targetX = clamp(targetX, 60, 3*W - 80);
+  pickups.push({type:'feather', x:targetX, y:targetY-24, w:20, h:20});
+}
+
+function clearFeather(reason){
+  if(!player || !player.hasFeather) return false;
+  player.hasFeather = false;
+  player.featherEnergy = 0;
+  player.lastFlap = now();
+  if(featherTimerEl) featherTimerEl.textContent = 'Feather —';
+  if(featherPill) featherPill.textContent = 'Feather: —';
+  if(reason==='damage'){
+    centerNote('Feather lost!', 1100);
+    notify('A hit knocked away your feather.');
+  } else if(reason==='elevator'){
+    notify('Feather winds fade between floors.');
+  }
+  return true;
+}
 
 function desiredMusicMode(){
   if(inSub) return 'vent';
@@ -1227,8 +1266,29 @@ const minimapCells = [];
 const btnTest=document.getElementById('btnTest');
 const btnNormal=document.getElementById('btnNormal');
 const btnP=document.getElementById('btnPistol');
+const btnSilenced=document.getElementById('btnSilenced');
 const btnF=document.getElementById('btnFlame');
 const btnM=document.getElementById('btnMelee');
+const btnGrenade=document.getElementById('btnGrenade');
+const btnSaber=document.getElementById('btnSaber');
+const btnMachine=document.getElementById('btnMachine');
+const rageModal=document.getElementById('rageModal');
+const rageContinue=document.getElementById('rageContinue');
+const rageMessage=document.getElementById('rageMessage');
+const weaponButtons = {
+  pistol: btnP,
+  silenced: btnSilenced,
+  flame: btnF,
+  melee: btnM,
+  grenade: btnGrenade,
+  saber: btnSaber,
+  machineGun: btnMachine
+};
+const weaponRequirements = {
+  grenade: { type:'intel', amount:20, label:'Intel 20' },
+  saber: { type:'files', amount:25, label:'Files 25' },
+  machineGun: { type:'intel', amount:40, label:'Intel 40' }
+};
 
 function setMode(m){
   testMode = (m==='test');
@@ -1238,21 +1298,201 @@ function setMode(m){
 }
 btnTest.onclick=()=>setMode('test');
 btnNormal.onclick=()=>setMode('normal');
+function weaponIsUnlocked(w){
+  return !!(player.weaponsUnlocked && player.weaponsUnlocked[w]);
+}
+function updateWeaponButtons(){
+  for(const [weapon, btn] of Object.entries(weaponButtons)){
+    if(!btn) continue;
+    const unlocked = weaponIsUnlocked(weapon);
+    btn.classList.toggle('locked', !unlocked);
+    if(unlocked){
+      btn.removeAttribute('data-lock');
+    } else {
+      const req = weaponRequirements[weapon];
+      if(req){
+        const current = req.type==='intel' ? player.intel : req.type==='files' ? player.files : 0;
+        const remaining = Math.max(0, req.amount - current);
+        const label = remaining>0 ? `${req.label} (${remaining})` : req.label;
+        btn.setAttribute('data-lock', label);
+      }
+    }
+    btn.classList.toggle('active', player.weapon===weapon);
+  }
+}
+function unlockWeapon(weapon, reason){
+  if(!player.weaponsUnlocked) player.weaponsUnlocked={};
+  if(player.weaponsUnlocked[weapon]) return;
+  player.weaponsUnlocked[weapon]=true;
+  updateWeaponButtons();
+  evaluateWeaponUnlocks();
+  if(reason){
+    notify(`${reason} unlocked.`);
+    centerNote(`${reason} ready!`, 1400);
+  }
+}
+function evaluateWeaponUnlocks(){
+  if(player.intel>=20) unlockWeapon('grenade','Grenade launcher');
+  if(player.files>=25) unlockWeapon('saber','Saber');
+  if(player.intel>=40) unlockWeapon('machineGun','Machine gun');
+  updateWeaponButtons();
+}
+function showRageModal(message){
+  if(rageMessage && message){ rageMessage.textContent = message; }
+  if(rageModal){
+    rageModal.classList.remove('hidden');
+  }
+  pause = true;
+}
+function hideRageModal(){
+  if(rageModal){
+    rageModal.classList.add('hidden');
+  }
+  if(runActive){
+    pause = false;
+    canvas.focus();
+  }
+}
+function activateMidnightRage(){
+  if(state.midnightRage) return;
+  state.midnightRage = true;
+  player.savings = 0;
+  notify('Savings drained at midnight.');
+  centerNote('Midnight rage awakened!', 1800);
+  const boostedLoan = clampLoanBalance(player.loanBalance * 1000);
+  player.loanBalance = boostedLoan;
+  player.damageMultiplier = 1.5;
+  unlockWeapon('machineGun');
+  evaluateWeaponUnlocks();
+  player.machineGun.ammo = Math.max(player.machineGun.ammo, player.machineGun.mag || player.machineGun.ammo);
+  player.machineGun.reserve = Math.max(player.machineGun.reserve, (player.machineGun.mag || 90) * 4);
+  setWeapon('machineGun');
+  showRageModal('Savings wiped at midnight. Loan balance inflated and rage boosts your damage by 50%. Machine gun only.');
+}
+function reloadWeapon(){
+  if(player.weapon==='pistol' || player.weapon==='silenced'){
+    const stats = player.weapon==='pistol' ? player.pistol : player.silenced;
+    const mag = stats.mag || player.pistol.mag || GAME_PARAMS.player.pistol.magazine;
+    const need = mag - stats.ammo;
+    if(need<=0) return false;
+    const take = Math.min(need, player.pistol.reserve);
+    if(take<=0) return false;
+    stats.ammo += take;
+    player.pistol.reserve -= take;
+    beep({freq:420});
+    return true;
+  }
+  if(player.weapon==='machineGun'){
+    const stats = player.machineGun;
+    const mag = stats.mag || 90;
+    const need = mag - stats.ammo;
+    if(need<=0) return false;
+    const take = Math.min(need, stats.reserve||0);
+    if(take<=0) return false;
+    stats.ammo += take;
+    stats.reserve -= take;
+    beep({freq:360});
+    return true;
+  }
+  if(player.weapon==='grenade'){
+    const stats = player.grenade;
+    const mag = stats.mag || 1;
+    if(stats.ammo >= mag) return false;
+    if((stats.reserve||0)<=0) return false;
+    stats.ammo += 1;
+    stats.reserve -= 1;
+    beep({freq:300});
+    return true;
+  }
+  return false;
+}
+function detonateGrenade(grenade){
+  if(!grenade || grenade.detonated) return;
+  grenade.detonated = true;
+  const blast = {x:grenade.x-50, y:grenade.y-40, w:100, h:100};
+  const dmg = scaledPlayerDamage(PLAYER_BULLET_DAMAGE * 3);
+  if(!inSub){
+    for(const guard of guards){
+      if(!guard || guard.hp<=0) continue;
+      const box={x:guard.x,y:guard.y,w:guard.w,h:guard.h};
+      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
+        const fell = applyGuardDamage(guard, dmg);
+        if(fell){ guard.hp=0; }
+        guard.hitFlashUntil = now()+200;
+      }
+    }
+    for(const worker of workers){
+      if(!worker || !worker.alive) continue;
+      const box={x:worker.x,y:worker.y,w:worker.w,h:worker.h};
+      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
+        damageWorker(worker, dmg);
+      }
+    }
+    if(ecoBossActive && ecoBoss && ecoBoss.hp>0){
+      const bossBox={x:ecoBoss.x,y:ecoBoss.y,w:ecoBoss.w,h:ecoBoss.h};
+      if(rect2(blast.x,blast.y,blast.w,blast.h,bossBox)){
+        ecoBoss.hp = Math.max(0, ecoBoss.hp - Math.round(dmg*0.8));
+        ecoBoss.hitFlashUntil = now()+220;
+      }
+    }
+  } else if(sub){
+    for(const guard of sub.guards){
+      if(!guard || guard.hp<=0) continue;
+      const box={x:guard.x,y:guard.y,w:guard.w,h:guard.h};
+      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
+        const fell = applyGuardDamage(guard, dmg);
+        if(fell){ guard.hp=0; }
+        guard.hitFlashUntil = now()+200;
+      }
+    }
+    for(const boss of sub.bosses){
+      if(!boss || boss.hp<=0) continue;
+      const box={x:boss.x,y:boss.y,w:boss.w,h:boss.h};
+      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
+        boss.hp = Math.max(0, boss.hp - dmg);
+        boss.hitFlashUntil = now()+200;
+      }
+    }
+  }
+  boom();
+  grenade.life = 0;
+}
 function setWeapon(w){
   if(ninjaRound && w!=='melee'){
     centerNote('Investor ninjas demand melee only.', 1400);
     notify('Melee-only round active.');
     return;
   }
+  if(state.midnightRage && w!=='machineGun'){
+    centerNote('Midnight rage demands the machine gun.', 1400);
+    notify('Rage keeps you locked to the machine gun.');
+    return;
+  }
+  if(!weaponIsUnlocked(w)){
+    const req = weaponRequirements[w];
+    const msg = req ? `${req.label} required.` : 'Weapon locked.';
+    centerNote(msg, 1400);
+    notify('Weapon not yet unlocked.');
+    return;
+  }
   player.weapon=w;
-  btnP.classList.toggle('active', w==='pistol');
-  btnF.classList.toggle('active', w==='flame');
-  btnM.classList.toggle('active', w==='melee');
-  beep({freq: w==='pistol'?600:w==='flame'?500:440,dur:0.06});
+  updateWeaponButtons();
+  let freq=520;
+  if(w==='pistol' || w==='silenced') freq=600;
+  else if(w==='flame') freq=500;
+  else if(w==='melee' || w==='saber') freq=440;
+  else if(w==='grenade') freq=420;
+  else if(w==='machineGun') freq=660;
+  beep({freq,dur:0.06});
 }
 btnP.onclick=()=>setWeapon('pistol');
+btnSilenced.onclick=()=>setWeapon('silenced');
 btnF.onclick=()=>setWeapon('flame');
 btnM.onclick=()=>setWeapon('melee');
+btnGrenade.onclick=()=>setWeapon('grenade');
+btnSaber.onclick=()=>setWeapon('saber');
+btnMachine.onclick=()=>setWeapon('machineGun');
+if(rageContinue){ rageContinue.onclick=()=>hideRageModal(); }
 
 const boardFloorOrder = [...BOARD_FLOORS].sort((a,b)=>a-b);
 
@@ -1724,15 +1964,27 @@ function resetPlayerState(){
   player.hasScrew=false; player.hasCharges=true;
   player.hasFeather=false; player.featherEnergy=0; player.featherMax=100; player.featherRecharge=12; player.lastFlap=0; player.flapCooldown=120;
   player.files=0; player.intel=0; player.specialFiles=0; player.codexUnlocked=false; player.weapon='pistol';
+  player.weaponsUnlocked = { pistol:true, silenced:true, flame:true, melee:true, grenade:false, saber:false, machineGun:false };
+  player.pistol.mag=GAME_PARAMS.player.pistol.magazine;
   player.pistol.ammo=GAME_PARAMS.player.pistol.magazine;
   player.pistol.reserve=GAME_PARAMS.player.pistol.reserve;
   player.pistol.cooldown=GAME_PARAMS.player.pistol.cooldownMs;
   player.pistol.last=0; player.pistol.muzzleUntil=0;
+  player.silenced.mag=GAME_PARAMS.player.pistol.magazine;
+  player.silenced.ammo=GAME_PARAMS.player.pistol.magazine;
+  player.silenced.cooldown=Math.round(GAME_PARAMS.player.pistol.cooldownMs*0.9);
+  player.silenced.last=0; player.silenced.muzzleUntil=0;
   player.flame.fuel=GAME_PARAMS.player.flame.fuel;
   player.flame.cooldown=GAME_PARAMS.player.flame.cooldownMs;
   player.flame.last=0;
   player.melee.cooldown=GAME_PARAMS.player.meleeCooldownMs;
   player.melee.last=0;
+  player.grenade.ammo=0; player.grenade.reserve=0; player.grenade.last=0;
+  player.grenade.cooldown=520;
+  player.saber.cooldown=Math.max(140, Math.round(GAME_PARAMS.player.meleeCooldownMs*0.75));
+  player.saber.last=0;
+  player.machineGun.mag=90; player.machineGun.ammo=90; player.machineGun.reserve=360; player.machineGun.cooldown=80; player.machineGun.last=0; player.machineGun.muzzleUntil=0;
+  player.damageMultiplier=1;
   player.hurtUntil=0;
   player.speedBoostUntil=0;
   player.hopeBuffUntil=0;
@@ -1758,6 +2010,12 @@ function resetPlayerState(){
   player.stepPhase = 0;
   player.stepStride = 0;
   updateSpecialFileUI();
+  state.midnightRage = false;
+}
+
+function scaledPlayerDamage(base){
+  const mult = player && Number.isFinite(player.damageMultiplier) ? player.damageMultiplier : 1;
+  return Math.max(1, Math.round(base * mult));
 }
 
 function resetHostageState(){
@@ -1834,6 +2092,7 @@ function startNewRun(name){
   scheduleManagerFloor();
   resetPlayerState();
   bullets.length = 0;
+  updateWeaponButtons();
   setMode(testMode? 'test' : 'normal');
   setWeapon('pistol');
   toggleCodex(false);
@@ -1966,6 +2225,7 @@ function endGame(mode){
 }
 
 function handleFloorStart(floor){
+  clearFeather();
   state.ceoPassive = false;
   state.playerWeaponsDisabled = false;
   if(floor === ECO_BOSS_FLOOR && getActiveHostages().length){
@@ -2007,6 +2267,7 @@ function handleDeath(){
 function damage(){
   const t=now();
   loseChecking(GUARD_BASE_DAMAGE);
+  clearFeather('damage');
   player.hurtUntil = t+120;
 }
 
@@ -2084,13 +2345,30 @@ function addChecking(n){
     player.checking = clamp(player.checking + n, 0, max);
   }
 }
-function addAmmo(n){ player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999); }
+function addAmmo(n){
+  if(!Number.isFinite(n) || n<=0) return;
+  player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999);
+  if(player.weaponsUnlocked && player.weaponsUnlocked.machineGun){
+    const mgGain = Math.max(0, Math.round(n*2));
+    player.machineGun.reserve = clamp((player.machineGun.reserve||0) + mgGain, 0, 999);
+  }
+  if(player.weaponsUnlocked && player.weaponsUnlocked.grenade){
+    const grenadeGain = Math.max(0, Math.floor(n/6));
+    if(grenadeGain>0){ player.grenade.reserve = clamp((player.grenade.reserve||0) + grenadeGain, 0, 30); }
+    else if(player.grenade.ammo===0 && player.grenade.reserve===0){
+      player.grenade.reserve = clamp((player.grenade.reserve||0) + 1, 0, 30);
+    }
+  }
+}
 function addFuel(n){ player.flame.fuel = clamp(player.flame.fuel+n, 0, 200); }
 function grantWeaponUpgrade(){
   player.weaponUpgrades = (player.weaponUpgrades||0) + 1;
   player.pistol.cooldown = Math.max(70, Math.round(player.pistol.cooldown * 0.92));
+  player.silenced.cooldown = Math.max(60, Math.round(player.silenced.cooldown * 0.9));
   player.flame.cooldown = Math.max(40, Math.round(player.flame.cooldown * 0.94));
   player.melee.cooldown = Math.max(80, Math.round(player.melee.cooldown * 0.9));
+  player.saber.cooldown = Math.max(100, Math.round(player.saber.cooldown * 0.9));
+  player.machineGun.cooldown = Math.max(40, Math.round(player.machineGun.cooldown * 0.94));
 }
 
 function rewardWorker(worker){
@@ -2161,11 +2439,12 @@ window.addEventListener('keydown', e=>{
     }
   }
   keys[k]=true;
-  if(k==='r'){ // reload pistol
-    if(player.weapon==='pistol'){
-      const need = 9 - player.pistol.ammo;
-      const take = Math.min(need, player.pistol.reserve);
-      if(take>0){ player.pistol.ammo += take; player.pistol.reserve -= take; }
+  if(k==='r'){
+    const couldReload = reloadWeapon();
+    if(!couldReload){
+      if(player.weapon==='machineGun'){ centerNote('No reserve rounds for the machine gun.', 1400); beep({freq:280}); }
+      else if(player.weapon==='grenade'){ centerNote('No grenades in reserve.', 1400); beep({freq:260}); }
+      else if(player.weapon==='pistol' || player.weapon==='silenced'){ centerNote('No spare ammo.', 1200); beep({freq:300}); }
     }
   }
   if(k==='1') setWeapon('pistol');
@@ -2431,16 +2710,6 @@ function makeLevel(i){
     }
   }
 
-  if(Math.random()<0.45 && !bonusFloorActive){
-    const featherY = yBase - 320;
-    walls.push({x:1.5*W-70, y:featherY, w:140, h:10, isPlatform:true, featherOnly:true});
-    if(Math.random()<0.6){
-      pickups.push({type:'feather', x:1.5*W-20, y:featherY-24, w:20, h:20});
-    } else {
-      pickups.push({type:'intel', x:1.5*W-20, y:featherY-24, w:20, h:20});
-    }
-  }
-
   const deskCount = 6 + Math.floor(i/4) + (floorTheme && floorTheme.guard && floorTheme.guard.countMod ? Math.max(0, Math.round(-floorTheme.guard.countMod)) : 0);
   for(let d=0; d<deskCount; d++){
     const x=120 + d* ( (3*W-240)/Math.max(1, deskCount) );
@@ -2478,7 +2747,6 @@ function makeLevel(i){
   const pickCount = bonusFloorActive ? 20 : 14;
   for(let k=0;k<pickCount;k++){
     const ptypePool = bonusFloorActive ? ['cash'] : ['file','intel','ammo','cash','cash','ammo'];
-    if(!bonusFloorActive && Math.random()<0.12) ptypePool.push('feather');
     const type = ptypePool[Math.floor(Math.random()*ptypePool.length)];
     const onPlatform = layerYs.length>0 && Math.random()<0.6;
     const platformY = layerYs.length>0 ? layerYs[Math.floor(Math.random()*layerYs.length)] : yBase;
@@ -2492,6 +2760,7 @@ function makeLevel(i){
     if(type==='ammo'){ amount = bonusFloorActive ? 24 : 18; }
     pickups.push({type, x, y, w:18, h:18, amount});
   }
+  placeFloorFeather(layerYs, yBase);
   if(i%2===1 && !player.hasScrew){ pickups.push({type:'screw', x: 0.35*W, y: yBase-24, w:18, h:18}); }
 
   const serverPool=[];
@@ -2951,6 +3220,7 @@ function makeBoardRoomLevel(floor, yBase){
   pickups.push({type:'special', x:tableX+tableWidth/2-20, y:tableTop-52, w:24, h:24});
   pickups.push({type:'cash', x:tableX+100, y:tableTop-40, w:20, h:20, amount:120});
   pickups.push({type:'intel', x:tableX+tableWidth-180, y:tableTop-40, w:20, h:20});
+  pickups.push({type:'feather', x:tableX + tableWidth/2 - 10, y:tableTop - 90, w:20, h:20});
 
   door = { x: tableX+tableWidth+60, y: tableTop-180, w:140, h:180, unlocked:false, open:false, lift:0, glowUntil:0 };
 
@@ -3191,8 +3461,8 @@ function interact(){
         if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
         if(it.type==='ammo'){ addAmmo(it.amount||18); it.type=null; centerNote("Ammo +"+(it.amount||18)); beep({freq:520}); notify("Ammo restocked."); }
         if(it.type==='cash'){ addChecking(it.amount||15); it.type=null; centerNote("Checking +$"+(it.amount||15)); beep({freq:600}); notify("Found cash."); }
-        if(it.type==='file'){ player.files++; it.type=null; centerNote("Collected file."); beep({freq:700}); notify("File collected."); }
-        if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Collected intel."); beep({freq:820}); notify("Intel collected."); }
+        if(it.type==='file'){ player.files++; it.type=null; centerNote("Collected file."); beep({freq:700}); notify("File collected."); evaluateWeaponUnlocks(); }
+        if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Collected intel."); beep({freq:820}); notify("Intel collected."); evaluateWeaponUnlocks(); }
         if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); }
         if(it.type==='special'){
           player.specialFiles = (player.specialFiles||0) + 1;
@@ -3265,6 +3535,7 @@ function interact(){
             centerNote('Drawer intel +1', 1400);
             notify('Hidden intel recovered.');
             beep({freq:780});
+            evaluateWeaponUnlocks();
           } else if(reward==='feather'){
             player.hasFeather=true;
             player.featherEnergy=player.featherMax;
@@ -3360,6 +3631,7 @@ function interact(){
       else if(!door.unlocked){ centerNote("Door locked."); lockedBuzz(); notify("Door locked."); }
       else {
         if(!door.open){
+          clearFeather('elevator');
           door.open=true;
           doorOpenSFX();
           setTimeout(()=>{
@@ -3404,7 +3676,7 @@ function interact(){
       if(it.type && rect(p,it)){
         if(it.type==='cash'){ addChecking(it.amount||20); it.type=null; centerNote("Found checking +"+(it.amount||20)); beep({freq:600}); notify("Cash found."); }
         if(it.type==='ammo'){ addAmmo(it.amount||18); it.type=null; centerNote("Found ammo +"+(it.amount||18)); beep({freq:520}); notify("Ammo found."); }
-        if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Intel +1"); beep({freq:820}); notify("Intel collected."); }
+        if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Intel +1"); beep({freq:820}); notify("Intel collected."); evaluateWeaponUnlocks(); }
       }
     }
   }
@@ -3414,27 +3686,32 @@ function interact(){
 function attack(){
   if(pause) return;
   if(state.playerWeaponsDisabled) return;
-  if(ninjaRound && player.weapon!=='melee'){
+  if(ninjaRound && !['melee','saber'].includes(player.weapon)){
     centerNote('Melee only during ninja round!', 1200);
     notify('Switch to melee.');
     beep({freq:360});
     return;
   }
   const t=now();
-  if(player.weapon==='pistol'){
-    const pistolCooldown = now()<player.hopeBuffUntil ? Math.max(40, Math.round(player.pistol.cooldown * 0.85)) : player.pistol.cooldown;
-    if(t - player.pistol.last < pistolCooldown) return;
-    if(player.pistol.ammo<=0){ centerNote("Reload (R)"); beep({freq:320}); notify("Out of ammo."); return; }
-    player.pistol.last=t;
-    player.pistol.ammo--;
+  if(player.weapon==='pistol' || player.weapon==='silenced'){
+    const stats = player.weapon==='pistol' ? player.pistol : player.silenced;
+    const baseCooldown = stats.cooldown || player.pistol.cooldown;
+    const weaponCooldown = now()<player.hopeBuffUntil ? Math.max(40, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    if(t - (stats.last||0) < weaponCooldown) return;
+    if(stats.ammo<=0){ centerNote('Reload (R)'); beep({freq:320}); notify('Out of ammo.'); return; }
+    stats.last=t;
+    stats.ammo--;
     const dir = player.facing>0 ? 1 : -1;
     const bx = player.x + (dir>0?player.w:0);
     const by = player.y + 16;
-    bullets.push({type:'bullet', x:bx, y:by, vx: dir*12, vy:0, life:1000, from:'player'});
-    player.pistol.muzzleUntil = t + 80;
-    if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
+    const speed = player.weapon==='silenced' ? 11 : 12;
+    const bullet = {type:'bullet', x:bx, y:by, vx: dir*speed, vy:0, life:1000, from:'player'};
+    if(player.weapon==='silenced'){ bullet.silent=true; }
+    bullets.push(bullet);
+    stats.muzzleUntil = t + 80;
+    if(player.weapon==='pistol' && !player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
   } else if(player.weapon==='flame'){
-    if(player.flame.fuel<=0) { notify("Out of fuel."); return; }
+    if(player.flame.fuel<=0) { notify('Out of fuel.'); return; }
     const flameCooldown = now()<player.hopeBuffUntil ? Math.max(30, Math.round(player.flame.cooldown * 0.85)) : player.flame.cooldown;
     if(t - player.flame.last < flameCooldown) return;
     player.flame.last=t; player.flame.fuel = Math.max(0, player.flame.fuel-1);
@@ -3445,10 +3722,38 @@ function attack(){
       bullets.push({type:'flame', x:bx, y:by+(Math.random()*10-5), vx: dir*(6+Math.random()*2), vy:(Math.random()*2-1), life:220, from:'player'});
     }
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+3000; }
-  } else if(player.weapon==='melee'){
-    if(t - player.melee.last < player.melee.cooldown) return;
-    player.melee.last=t;
-    const range=36;
+  } else if(player.weapon==='machineGun'){
+    const stats = player.machineGun;
+    const baseCooldown = stats.cooldown || 80;
+    const weaponCooldown = now()<player.hopeBuffUntil ? Math.max(24, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    if(t - (stats.last||0) < weaponCooldown) return;
+    if(stats.ammo<=0){ centerNote('Machine gun empty — reload (R)'); beep({freq:300}); notify('Reload the machine gun.'); return; }
+    stats.last=t;
+    stats.ammo--;
+    const dir = player.facing>0 ? 1 : -1;
+    const bx = player.x + (dir>0?player.w:0);
+    const by = player.y + 18;
+    bullets.push({type:'bullet', x:bx, y:by, vx: dir*14, vy:0, life:900, from:'player', rapid:true});
+    stats.muzzleUntil = t + 60;
+    if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+5000; }
+  } else if(player.weapon==='grenade'){
+    const stats = player.grenade;
+    const baseCooldown = stats.cooldown || 520;
+    if(t - (stats.last||0) < baseCooldown) return;
+    if(stats.ammo<=0){ centerNote('No grenades — restock needed.', 1400); beep({freq:280}); notify('Grenade launcher empty.'); return; }
+    stats.last=t;
+    stats.ammo--;
+    const dir = player.facing>0 ? 1 : -1;
+    const bx = player.x + (dir>0?player.w:0);
+    const by = player.y + 12;
+    bullets.push({type:'grenade', x:bx, y:by, vx: dir*6, vy:-3, life:1100, from:'player'});
+    if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+6000; }
+  } else if(player.weapon==='melee' || player.weapon==='saber'){
+    const stats = player.weapon==='saber' ? player.saber : player.melee;
+    if(t - (stats.last||0) < stats.cooldown) return;
+    stats.last=t;
+    const range = player.weapon==='saber' ? 48 : 36;
+    const dmgValue = player.weapon==='saber' ? scaledPlayerDamage(PLAYER_MELEE_DAMAGE*1.4) : scaledPlayerDamage(PLAYER_MELEE_DAMAGE);
     const px = player.x + (player.facing>0 ? player.w : -range);
     const hitBox={x:px, y:player.y, w:range, h:player.h};
     let hits=0;
@@ -3456,7 +3761,7 @@ function attack(){
     for(const g of list){
       if(g.hp <= 0) continue;
       if(rect(hitBox,g)){
-        const defeated = applyGuardDamage(g, PLAYER_MELEE_DAMAGE);
+        const defeated = applyGuardDamage(g, dmgValue);
         if(defeated){ g.hp = 0; }
         g.hitFlashUntil = now() + 160;
         hits++;
@@ -3466,7 +3771,7 @@ function attack(){
       for(const worker of workers){
         if(!worker.alive) continue;
         if(rect(hitBox, worker)){
-          if(damageWorker(worker, PLAYER_MELEE_DAMAGE)){
+          if(damageWorker(worker, dmgValue)){
             hits++;
           }
         }
@@ -3475,12 +3780,15 @@ function attack(){
     if(ecoBossActive && ecoBoss && ecoBoss.hp>0){
       const bossBox = {x:ecoBoss.x, y:ecoBoss.y, w:ecoBoss.w, h:ecoBoss.h};
       if(rect(hitBox, bossBox)){
-        ecoBoss.hp = Math.max(0, ecoBoss.hp - PLAYER_MELEE_DAMAGE);
+        ecoBoss.hp = Math.max(0, ecoBoss.hp - dmgValue);
         ecoBoss.hitFlashUntil = now() + 160;
         hits++;
       }
     }
-    if(hits>0) beep({freq:520}); else beep({freq:380});
+    if(hits){
+      player.hopeBuffUntil = Math.max(player.hopeBuffUntil, now()+1000);
+      beep({freq: player.weapon==='saber'?520:480});
+    }
   }
 }
 
@@ -3565,10 +3873,10 @@ function update(dt){
   if(!seenDoor && (inViewport(door.x) || Math.abs(player.x - door.x) < W*0.4)){ seenDoor=true; }
 
   if(timeLeftMs()<=0){
-    player.savings=0;
-    notify("Savings drained at midnight.");
-    finishRun('timeout', { message:"Midnight hit — Savings auto-debited." });
-    return;
+    if(!state.midnightRage){
+      activateMidnightRage();
+      return;
+    }
   }
 
   if(player.interestRate>0 && now()-interestDrainTimer>1000){
@@ -3874,7 +4182,7 @@ function update(dt){
         const guardTop = g.y;
         const cameFromAbove = player.prevBottom <= guardTop + 6 && player.prevVy > 0.5;
         if(cameFromAbove){
-          const landed = g.takeDamage(STOMP_DAMAGE);
+          const landed = g.takeDamage(scaledPlayerDamage(STOMP_DAMAGE));
           if(landed){ g.hp = 0; }
           g.hitFlashUntil = now() + 180;
           player.vy = -Math.max(JUMP*0.55, 7);
@@ -3978,10 +4286,10 @@ function update(dt){
           const cameFromAbove = player.prevBottom <= m.y + 6 && player.prevVy > 0.5;
           if(cameFromAbove){
             if(typeof m.takeDamage === 'function'){
-              const fell = m.takeDamage(STOMP_DAMAGE);
+              const fell = m.takeDamage(scaledPlayerDamage(STOMP_DAMAGE));
               if(fell){ m.hp = 0; }
             } else if(typeof m.hp === 'number'){
-              m.hp = Math.max(0, m.hp - STOMP_DAMAGE);
+              m.hp = Math.max(0, m.hp - scaledPlayerDamage(STOMP_DAMAGE));
             }
             if('hitFlashUntil' in m){ m.hitFlashUntil = now() + 180; }
             player.vy = -Math.max(JUMP*0.55, 7);
@@ -4035,6 +4343,10 @@ function update(dt){
       b.vx = (dx/len)*speed;
       b.vy = (dy/len)*speed;
       b.x += b.vx; b.y += b.vy; b.life -= 10;
+    } else if(b.type==='grenade'){
+      b.x += b.vx; b.y += b.vy; b.vy += 0.28; b.life -= 12;
+      const groundY = inSub ? ((sub && sub.floor) ? sub.floor.y : H-120) : (floorSlab ? floorSlab.y : H-60);
+      if(b.y >= groundY || b.life<=0){ detonateGrenade(b); }
     } else {
       b.x += b.vx; b.y += b.vy; b.life -= 16;
     }
@@ -4044,9 +4356,10 @@ function update(dt){
         for(const g of guards){
           const box={x:g.x,y:g.y,w:g.w,h:g.h};
           if(rect2(b.x-3,b.y-3,6,6,box)){
+            if(b.type==='grenade'){ detonateGrenade(b); break; }
             if(g.hp > 0){
               const dmgBase = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
-              const fell = applyGuardDamage(g, dmgBase);
+              const fell = applyGuardDamage(g, scaledPlayerDamage(dmgBase));
               if(fell){ g.hp = 0; }
               g.hitFlashUntil = now() + 140;
             }
@@ -4059,7 +4372,8 @@ function update(dt){
             if(!worker.alive) continue;
             const box={x:worker.x,y:worker.y,w:worker.w,h:worker.h};
             if(rect2(b.x-3,b.y-3,6,6,box)){
-              damageWorker(worker, b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE);
+              if(b.type==='grenade'){ detonateGrenade(b); break; }
+              damageWorker(worker, scaledPlayerDamage(b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE));
               b.life=0;
               break;
             }
@@ -4067,15 +4381,26 @@ function update(dt){
         }
         for(const s of servers){
           const box={x:s.x,y:s.y,w:s.w,h:s.h};
-          if(rect2(b.x-3,b.y-3,6,6,box)){ s.hp-= (b.type==='flame'? 3 : 2); if(s.hp<=0){ s.destroyed=true; } b.life=0; break; }
+          if(rect2(b.x-3,b.y-3,6,6,box)){
+            if(b.type==='grenade'){ detonateGrenade(b); break; }
+            const serverDamage = b.type==='flame' ? scaledPlayerDamage(3) : scaledPlayerDamage(2);
+            s.hp -= Math.max(1, Math.round(serverDamage));
+            if(s.hp<=0){ s.destroyed=true; }
+            b.life=0;
+            break;
+          }
         }
         if(b.life>0 && ecoBossActive && ecoBoss && ecoBoss.hp>0){
           const bossBox = {x:ecoBoss.x, y:ecoBoss.y, w:ecoBoss.w, h:ecoBoss.h};
           if(rect2(b.x-3, b.y-3, 6, 6, bossBox)){
-            const dmgBase = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
-            ecoBoss.hp = Math.max(0, ecoBoss.hp - dmgBase);
-            ecoBoss.hitFlashUntil = now() + 160;
-            b.life = 0;
+            if(b.type==='grenade'){
+              detonateGrenade(b);
+            } else {
+              const dmgBase = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
+              ecoBoss.hp = Math.max(0, ecoBoss.hp - scaledPlayerDamage(dmgBase));
+              ecoBoss.hitFlashUntil = now() + 160;
+              b.life = 0;
+            }
           }
         }
       } else {
@@ -4108,9 +4433,10 @@ function update(dt){
         for(const g of sub.guards){
           const box={x:g.x,y:g.y,w:g.w,h:g.h};
           if(rect2(b.x-3,b.y-3,6,6,box)){
+            if(b.type==='grenade'){ detonateGrenade(b); break; }
             if(g.hp > 0){
               const dmgBase = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
-              const fell = applyGuardDamage(g, dmgBase);
+              const fell = applyGuardDamage(g, scaledPlayerDamage(dmgBase));
               if(fell){ g.hp = 0; }
               g.hitFlashUntil = now() + 140;
             }
@@ -4120,9 +4446,10 @@ function update(dt){
         for(const boss of sub.bosses){
           const box={x:boss.x,y:boss.y,w:boss.w,h:boss.h};
           if(rect2(b.x-3,b.y-3,6,6,box)){
+            if(b.type==='grenade'){ detonateGrenade(b); break; }
             if(boss.hp > 0){
               const dmg = b.type==='flame' ? PLAYER_FLAME_DAMAGE : PLAYER_BULLET_DAMAGE;
-              boss.hp = Math.max(0, boss.hp - dmg);
+              boss.hp = Math.max(0, boss.hp - scaledPlayerDamage(dmg));
               boss.hitFlashUntil = now() + 140;
             }
             b.life=0;
@@ -4164,8 +4491,16 @@ function update(dt){
         ? `+$${fmtCurrency(Math.abs(debt))}`
         : '$0';
   }
-  const weaponOrder = ['pistol','flame','melee'];
-  const weaponNames = { pistol:'Pistol', flame:'Flamethrower', melee:'Melee' };
+  const weaponOrder = ['pistol','silenced','flame','melee','grenade','saber','machineGun'];
+  const weaponNames = {
+    pistol:'Pistol',
+    silenced:'Silenced Pistol',
+    flame:'Flamethrower',
+    melee:'Melee',
+    grenade:'Grenade Launcher',
+    saber:'Saber',
+    machineGun:'Machine Gun'
+  };
   const weaponIdx = weaponOrder.indexOf(player.weapon);
   if(weaponNameEl){
     const label = weaponNames[player.weapon] || player.weapon;
@@ -4174,9 +4509,23 @@ function update(dt){
   }
   if(weaponAmmoEl){
     let ammoText = '';
-    if(player.weapon==='pistol') ammoText = `Ammo ${player.pistol.ammo}/${player.pistol.reserve}`;
-    else if(player.weapon==='flame') ammoText = `Fuel ${player.flame.fuel}`;
-    else ammoText = `Melee ready${now()-player.melee.last<player.melee.cooldown?' (cooling)':''}`;
+    if(player.weapon==='pistol'){
+      ammoText = `Ammo ${player.pistol.ammo}/${player.pistol.reserve}`;
+    } else if(player.weapon==='silenced'){
+      ammoText = `Ammo ${player.silenced.ammo}/${player.pistol.reserve}`;
+    } else if(player.weapon==='flame'){
+      ammoText = `Fuel ${player.flame.fuel}`;
+    } else if(player.weapon==='machineGun'){
+      ammoText = `Ammo ${player.machineGun.ammo}/${player.machineGun.reserve}`;
+    } else if(player.weapon==='grenade'){
+      ammoText = `Grenades ${player.grenade.ammo}/${player.grenade.reserve}`;
+    } else if(player.weapon==='saber'){
+      const cooling = now()-player.saber.last < player.saber.cooldown;
+      ammoText = `Saber ready${cooling?' (cooling)':''}`;
+    } else {
+      const cooling = now()-player.melee.last < player.melee.cooldown;
+      ammoText = `Melee ready${cooling?' (cooling)':''}`;
+    }
     weaponAmmoEl.textContent = ammoText;
   }
   if(featherTimerEl) featherTimerEl.textContent = player.hasFeather ? `Feather ${Math.round(player.featherEnergy)}` : 'Feather —';

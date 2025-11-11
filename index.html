@@ -49,6 +49,16 @@
   .center { position:fixed; left:0; right:0; top:40%; text-align:center; color:#fff; font:20px monospace; text-shadow:0 2px 6px #000; display:none; }
   .btn { padding:4px 10px; border:1px solid rgba(255,255,255,0.25); border-radius:8px; background:rgba(255,255,255,0.08); cursor:pointer; font-size:11px; letter-spacing:1px; text-transform:uppercase; color:#f7fbff; }
   .btn.active { background:rgba(120,255,160,0.25); border-color:rgba(120,255,160,0.6); }
+  .btn.locked { opacity:0.45; cursor:not-allowed; position:relative; }
+  .btn.locked::after {
+    content:attr(data-lock);
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px; letter-spacing:1px; text-transform:uppercase;
+    color:rgba(240,250,255,0.85);
+    background:rgba(10,14,20,0.75);
+    pointer-events:none;
+  }
   .btn.map { background:rgba(120,160,255,0.22); border-color:rgba(160,200,255,0.45); }
   .btn.map.locked { opacity:0.4; cursor:not-allowed; }
   .btn.deck { background:rgba(200,160,255,0.18); border-color:rgba(210,170,255,0.38); }
@@ -280,8 +290,12 @@
     <div class="btnGroup" id="weaponGroup">
       <span class="small">Weapon:</span>
       <button class="btn active" data-weapon="pistol" id="btnPistol">Pistol (1)</button>
-      <button class="btn" data-weapon="flame" id="btnFlame">Flame (2)</button>
-      <button class="btn" data-weapon="melee" id="btnMelee">Melee (3)</button>
+      <button class="btn" data-weapon="silenced" id="btnSilenced">Silenced (2)</button>
+      <button class="btn" data-weapon="flame" id="btnFlame">Flame (3)</button>
+      <button class="btn" data-weapon="melee" id="btnMelee">Melee (4)</button>
+      <button class="btn locked" data-weapon="grenade" id="btnGrenade" data-lock="Intel 20">Grenade (5)</button>
+      <button class="btn locked" data-weapon="saber" id="btnSaber" data-lock="Files 25">Saber (6)</button>
+      <button class="btn locked" data-weapon="machineGun" id="btnMachine" data-lock="Intel 40">Machine Gun (7)</button>
     </div>
   </div>
   <div class="hud-line">
@@ -334,6 +348,12 @@
 </div>
 
 <div id="floorBanner" class="floor-banner hidden"><span id="floorBannerText">LEVEL —</span></div>
+
+<div id="rageModal" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="rageTitle">
+  <h2 id="rageTitle">Midnight Rage</h2>
+  <p id="rageMessage">Your savings were wiped at midnight. Rage fuels your fire.</p>
+  <button type="button" id="rageContinue">Continue</button>
+</div>
 
 <div id="deckOverlay" class="deck-overlay hidden" role="dialog" aria-modal="true">
   <div class="deck-panel">
