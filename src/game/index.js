@@ -92,6 +92,7 @@ const RUN_LOAN_START = GAME_PARAMS.economy.startingLoanBalance;
 const GUARD_BASE_DAMAGE = GAME_PARAMS.enemies.guardBaseDamage;
 const CHECKING_HUD_MAX = Math.max(1, GAME_PARAMS.player.checkingHudMax);
 const SAVINGS_HUD_MAX = Math.max(1, GAME_PARAMS.player.savingsHudMax);
+const GUARD_CONTACT_DELAY_MS = 500;
 
 (()=>{
 // ===== Color utilities & palettes =====
@@ -716,7 +717,14 @@ const player = {
   prevBottom: GAME_PARAMS.player.height,
   prevVy: 0,
   dropThroughUntil: 0,
-  dropThroughFloor: null
+  dropThroughFloor: null,
+  contactDamagePending:false,
+  contactDamageApplyAt:0,
+  contactInterferenceStart:0,
+  contactInterferenceUntil:0,
+  contactInterferencePhase:0,
+  stepPhase:0,
+  stepStride:0
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -739,7 +747,7 @@ function fmtClock(ms){
 
 // Level arrays
 let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[];
-let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[];
+let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[], boardMembers=[];
 let destroyedOnFloor=0, totalServersOnFloor=0;
 let alarm=false, alarmUntil=0;
 let inSub=false; // vent sub-level
@@ -1115,6 +1123,13 @@ function resetPlayerState(){
   player.prevVy = 0;
   player.dropThroughUntil = 0;
   player.dropThroughFloor = null;
+  player.contactDamagePending = false;
+  player.contactDamageApplyAt = 0;
+  player.contactInterferenceStart = 0;
+  player.contactInterferenceUntil = 0;
+  player.contactInterferencePhase = 0;
+  player.stepPhase = 0;
+  player.stepStride = 0;
   updateSpecialFileUI();
 }
 
@@ -1210,6 +1225,19 @@ function damage(){
   player.checking = Math.max(0, player.checking - GUARD_BASE_DAMAGE);
   player.hurtUntil = t+120;
   if(player.checking===0){ handleDeath(); }
+}
+
+function scheduleGuardContactDamage(){
+  const t = now();
+  if(player.contactDamagePending){
+    return true;
+  }
+  player.contactDamagePending = true;
+  player.contactDamageApplyAt = t + GUARD_CONTACT_DELAY_MS;
+  player.contactInterferenceStart = t;
+  player.contactInterferenceUntil = player.contactDamageApplyAt;
+  player.contactInterferencePhase = (player.contactInterferencePhase || 0) + 1;
+  return true;
 }
 function addChecking(n){ player.checking = clamp(player.checking+n,0,9999); }
 function addAmmo(n){ player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999); }
@@ -1418,6 +1446,7 @@ function makeLevel(i){
   workers=[]; coffeeMachines=[]; vendingMachines=[]; printers=[]; serverTerminals=[];
   deskDrawers=[]; hazards=[]; stealthZones=[]; backgroundFX=[]; floatingPapers=[];
   billboardScreens=[]; boardTables=[]; merchants=[]; sprinklers=[];
+  boardMembers=[];
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
@@ -1800,6 +1829,24 @@ function makeBoardRoomLevel(floor, yBase){
     legs,
     runner: {x: tableX + 30, y: tableTop - tableHeight + 6, w: tableWidth - 60, h:10}
   });
+  const boardSeats = Math.min(8, 5 + Math.floor(Math.max(0, floor-8)/8));
+  const seatSpacing = boardSeats>1 ? (tableWidth - 120) / (boardSeats - 1) : 0;
+  for(let s=0; s<boardSeats; s++){
+    const seatX = tableX + 60 + seatSpacing * s;
+    boardMembers.push({
+      x: seatX - 16,
+      y: tableTop - tableHeight - 48,
+      w: 32,
+      h: 46,
+      facing: 1,
+      focus: player.x + player.w/2,
+      tracker: 0.5,
+      bob: Math.random() * Math.PI * 2,
+      blink: Math.random() * Math.PI * 2,
+      seed: Math.random() * Math.PI * 2,
+      seatX
+    });
+  }
   deskDrawers.push({x: tableX + tableWidth/2 - 24, y: tableTop - 32, w:48, h:18, used:false});
 
   coffeeMachines.push({x: tableX + 48, y: tableTop - 58, w:32, h:58, used:false});
@@ -2412,6 +2459,13 @@ function guardFire(g){
 // ========= Update =========
 function update(dt){
   if(!runActive) return;
+  if(player.contactDamagePending && now() >= player.contactDamageApplyAt){
+    player.contactDamagePending = false;
+    player.contactDamageApplyAt = 0;
+    player.contactInterferenceStart = 0;
+    player.contactInterferenceUntil = 0;
+    damage();
+  }
   lightingPhase += dt;
   if(activeHack && now()>activeHack.deadline){
     failHack('Sequence timed out.');
@@ -2671,6 +2725,24 @@ function update(dt){
     if(powerSurgeUntil && now()>powerSurgeUntil){ powerSurgeUntil=0; }
     if(sprinklersActiveUntil && now()>sprinklersActiveUntil){ sprinklersActiveUntil=0; sprinklers.length=0; }
 
+    if(boardMembers.length){
+      const table = boardTables && boardTables.length ? boardTables[0] : null;
+      const playerCenterX = player.x + player.w/2;
+      const normalized = table ? clamp((playerCenterX - table.x) / Math.max(1, table.w), 0, 1) : 0.5;
+      for(const member of boardMembers){
+        member.bob = (member.bob || 0) + dt * 2.2;
+        const focus = member.focus ?? playerCenterX;
+        const nextFocus = focus + (playerCenterX - focus) * 0.18;
+        member.focus = nextFocus;
+        const center = member.x + (member.w || 0) / 2;
+        member.facing = nextFocus >= center ? 1 : -1;
+        const tracker = member.tracker ?? normalized;
+        member.tracker = tracker + (normalized - tracker) * 0.25;
+        member.blink = (member.blink || 0) + dt * 1.6;
+        if(member.blink > Math.PI * 4){ member.blink -= Math.PI * 4; }
+      }
+    }
+
     // Guards
     const yGround = floorSlab.y;
     const blockReinforce = (destroyedOnFloor===totalServersOnFloor) && seenDoor;
@@ -2726,17 +2798,21 @@ function update(dt){
       if(inCone){
         alarm=true; alarmUntil=now()+7000;
         if(Math.abs(dx)<40 && Math.abs(dy)<20){
-          if(!stomped){ damage(); inflicted = true; }
+          if(!stomped){
+            if(scheduleGuardContactDamage()){ inflicted = true; }
+          }
         } else if(g.type!=='ninja') {
           guardFire(g);
         }
       }
       if(g.type==='ninja' && !inflicted){
         const close = Math.abs(px - (g.x+g.w/2))<90 && Math.abs(py - (g.y+g.h/2))<40;
-        if(close && overlapping && !stomped && !shielded){ damage(); inflicted = true; }
+        if(close && overlapping && !stomped && !shielded){
+          if(scheduleGuardContactDamage()){ inflicted = true; }
+        }
       }
       if(overlapping && !stomped && !inflicted && !shielded){
-        damage();
+        if(scheduleGuardContactDamage()){ inflicted = true; }
       }
     }
     // kills + reward
@@ -2794,22 +2870,22 @@ function update(dt){
       m.x += (m.vx||0);
       if(m.x<120 || m.x>W-200) m.vx*=-1;
       if(Math.random()<0.02){ guardFire(m); }
-      if(rect(player,m)){
-        const cameFromAbove = player.prevBottom <= m.y + 6 && player.prevVy > 0.5;
-        if(cameFromAbove){
-          if(typeof m.takeDamage === 'function'){
-            const fell = m.takeDamage(STOMP_DAMAGE);
-            if(fell){ m.hp = 0; }
-          } else if(typeof m.hp === 'number'){
-            m.hp = Math.max(0, m.hp - STOMP_DAMAGE);
+        if(rect(player,m)){
+          const cameFromAbove = player.prevBottom <= m.y + 6 && player.prevVy > 0.5;
+          if(cameFromAbove){
+            if(typeof m.takeDamage === 'function'){
+              const fell = m.takeDamage(STOMP_DAMAGE);
+              if(fell){ m.hp = 0; }
+            } else if(typeof m.hp === 'number'){
+              m.hp = Math.max(0, m.hp - STOMP_DAMAGE);
+            }
+            if('hitFlashUntil' in m){ m.hitFlashUntil = now() + 180; }
+            player.vy = -Math.max(JUMP*0.55, 7);
+            player.onGround = false;
+          } else {
+          scheduleGuardContactDamage();
           }
-          if('hitFlashUntil' in m){ m.hitFlashUntil = now() + 180; }
-          player.vy = -Math.max(JUMP*0.55, 7);
-          player.onGround = false;
-        } else {
-          damage();
         }
-      }
     }
     // removals
     for(let i=sub.guards.length-1;i>=0;i--){
@@ -2819,6 +2895,12 @@ function update(dt){
       if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (boss)"); checkVentForMinimapUnlock(); }
     }
   }
+
+  const moveSpeed = Math.abs(player.vx);
+  const desiredStride = clamp(moveSpeed / Math.max(1, RUN * 1.2), 0, 1);
+  player.stepStride = (player.stepStride || 0) + (desiredStride - (player.stepStride || 0)) * 0.2;
+  player.stepPhase = (player.stepPhase || 0) + dt * (4 + moveSpeed * 0.7 + (player.sprint ? 2.2 : 0));
+  if(player.stepPhase > Math.PI * 2){ player.stepPhase -= Math.PI * 2; }
 
   // Projectiles
   for(const b of bullets){
@@ -2986,6 +3068,189 @@ function update(dt){
 }
 
 // ========= Draw =========
+function drawNinjaPlayer(ctx, px, py, state){
+  if(!state) return;
+  const width = state.w;
+  const height = state.h;
+  const facing = state.facing >= 0 ? 1 : -1;
+  const crouch = !!state.crouch;
+  const stride = clamp(state.stepStride || 0, 0, 1);
+  const phase = state.stepPhase || 0;
+  const swing = Math.sin(phase) * stride;
+  const top = py + 2;
+  const hoodHeight = 12;
+  const torsoHeight = crouch ? 16 : 18;
+  const legBase = top + hoodHeight + torsoHeight;
+  const rawLegHeight = height - (legBase - py);
+  const legHeight = Math.max(6, rawLegHeight - (crouch ? 4 : 0));
+  const leftLift = Math.max(0, swing) * (crouch ? 1.8 : 4.2);
+  const rightLift = Math.max(0, -swing) * (crouch ? 1.8 : 4.2);
+  const hoodColor = '#101722';
+  const armorColor = '#161d2b';
+  const trimColor = '#2b3547';
+  const clothColor = '#232d3f';
+  const accentColor = '#c13c3c';
+  const beltColor = '#2a1a1d';
+  const gloveColor = '#a73636';
+  const strapColor = '#3a4660';
+  const bladeColor = '#cdd6f6';
+  const shadowY = py + height - 3;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(px + 3, shadowY, Math.max(6, width-6), 3);
+
+  ctx.save();
+  ctx.translate(px + width/2, py);
+  ctx.scale(facing, 1);
+  ctx.translate(-width/2, 0);
+
+  const t = performance.now();
+  const scarfWave = Math.sin(phase * 2 + t / 180);
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(width - 7, top + 5 + scarfWave, 6, 3);
+  ctx.fillRect(width - 9, top + 7 + scarfWave, 5, 3);
+
+  ctx.fillStyle = strapColor;
+  ctx.fillRect(width - 7, top + 6, 3, torsoHeight + 6);
+  ctx.fillStyle = bladeColor;
+  ctx.fillRect(width - 6, top + 2, 2, 16);
+
+  const leftLegX = 4 + (crouch ? -1 : 0);
+  const rightLegX = width - 10 + (crouch ? 1 : 0);
+  ctx.fillStyle = armorColor;
+  ctx.fillRect(leftLegX, legBase, 6, Math.max(3, legHeight - leftLift));
+  ctx.fillRect(rightLegX, legBase, 6, Math.max(3, legHeight - rightLift));
+  ctx.fillStyle = '#0a0f18';
+  ctx.fillRect(leftLegX, legBase + Math.max(0, legHeight - leftLift), 6, 2);
+  ctx.fillRect(rightLegX, legBase + Math.max(0, legHeight - rightLift), 6, 2);
+
+  ctx.fillStyle = armorColor;
+  ctx.fillRect(3, top + hoodHeight, width - 6, torsoHeight);
+  ctx.fillStyle = trimColor;
+  ctx.fillRect(3, top + hoodHeight, 4, torsoHeight);
+  ctx.fillRect(width - 7, top + hoodHeight, 4, torsoHeight);
+  ctx.fillStyle = clothColor;
+  ctx.fillRect(6, top + hoodHeight + 2, width - 12, torsoHeight - 4);
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(4, top + hoodHeight + torsoHeight - 7, width - 8, 4);
+  ctx.fillStyle = beltColor;
+  ctx.fillRect(4, top + hoodHeight + torsoHeight - 3, width - 8, 3);
+
+  const armSwing = swing * (crouch ? 1.4 : 2.4);
+  const armTop = top + hoodHeight + 3 - (crouch ? 1 : 0);
+  const armHeight = torsoHeight - 3;
+  ctx.fillStyle = armorColor;
+  ctx.fillRect(-1 - armSwing, armTop, 4, armHeight);
+  ctx.fillRect(width - 3 + armSwing, armTop, 4, armHeight);
+  ctx.fillStyle = gloveColor;
+  ctx.fillRect(-1 - armSwing, armTop + armHeight - 2, 4, 3);
+  ctx.fillRect(width - 3 + armSwing, armTop + armHeight - 2, 4, 3);
+
+  ctx.fillStyle = hoodColor;
+  ctx.fillRect(3, top, width - 6, hoodHeight);
+  ctx.fillStyle = trimColor;
+  ctx.fillRect(4, top + 1, width - 8, hoodHeight - 2);
+  const maskY = top + 4;
+  ctx.fillStyle = clothColor;
+  ctx.fillRect(5, maskY, width - 10, 5);
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(5, maskY + 3, width - 10, 2);
+  ctx.fillStyle = '#05070c';
+  ctx.fillRect(5, maskY - 1, width - 10, 1);
+  ctx.fillStyle = '#f7f2c8';
+  ctx.fillRect(7, maskY + 1, 3, 1);
+  ctx.fillRect(width - 10, maskY + 1, 3, 1);
+  ctx.fillStyle = '#07090f';
+  ctx.fillRect(7, maskY + 1, 1, 1);
+  ctx.fillRect(width - 10, maskY + 1, 1, 1);
+
+  ctx.fillStyle = strapColor;
+  ctx.fillRect(8, top + hoodHeight + 3, 3, torsoHeight - 6);
+  ctx.fillRect(width - 11, top + hoodHeight + 3, 3, torsoHeight - 6);
+
+  ctx.restore();
+}
+
+function drawBoardMembers(ctx, ox){
+  if(!boardMembers.length) return;
+  const table = boardTables && boardTables.length ? boardTables[0] : null;
+  const tableTop = table ? table.y : 0;
+  const tableWidth = table ? table.w : 1;
+  const playerCenter = player.x + player.w/2;
+  const normalized = table ? clamp((playerCenter - table.x) / Math.max(1, tableWidth), 0, 1) : 0.5;
+  const t = performance.now();
+  for(const member of boardMembers){
+    const width = member.w || 28;
+    const height = member.h || 44;
+    const baseX = member.x + ox;
+    const baseY = member.y + Math.sin(member.bob || 0) * 1.2;
+    const facing = member.facing >= 0 ? 1 : -1;
+    const tracker = clamp(member.tracker ?? normalized, 0, 1);
+    const glow = 0.35 + 0.25*Math.sin((member.seed||0) + t/420);
+    if(table){
+      const worldTrack = table.x + tracker * tableWidth;
+      ctx.strokeStyle = `rgba(120,200,255,${0.18 + glow*0.4})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(baseX + width/2, baseY + height - 18);
+      ctx.lineTo(worldTrack + ox, player.y + player.h/2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(110,200,255,${0.16 + glow*0.3})`;
+      ctx.fillRect(worldTrack + ox - 3, tableTop - 10, 6, 10);
+      ctx.fillRect(worldTrack + ox - 1, tableTop - 42, 2, 32);
+    }
+    ctx.save();
+    ctx.translate(baseX + width/2, baseY);
+    ctx.scale(facing, 1);
+    ctx.translate(-width/2, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(4, height-6, width-8, 4);
+    ctx.fillStyle = '#1c2534';
+    ctx.fillRect(3, 10, width-6, 24);
+    ctx.fillStyle = '#273247';
+    ctx.fillRect(5, 12, width-10, 12);
+    ctx.fillStyle = '#141a28';
+    ctx.fillRect(4, 30, width-8, 14);
+    ctx.fillStyle = '#101622';
+    ctx.fillRect(5, 0, width-10, 12);
+    ctx.fillStyle = '#070a11';
+    ctx.fillRect(5, 8, width-10, 4);
+    const blink = (member.blink || 0) % (Math.PI*4);
+    if(blink > 0.3 && blink < Math.PI*0.9){
+      ctx.fillStyle = '#e6f2ff';
+      ctx.fillRect(8, 6, 4, 1);
+      ctx.fillRect(width-12, 6, 4, 1);
+    }
+    ctx.fillStyle = `rgba(100,180,255,${0.25 + glow*0.3})`;
+    ctx.fillRect(6, 18, width-12, 2);
+    ctx.restore();
+  }
+}
+
+function drawContactInterference(ctx){
+  if(!player.contactInterferenceUntil || now() >= player.contactInterferenceUntil) return;
+  const end = player.contactDamageApplyAt || player.contactInterferenceUntil;
+  const start = player.contactInterferenceStart || (end ? end - GUARD_CONTACT_DELAY_MS : now());
+  const total = Math.max(1, end - start);
+  const elapsed = now() - start;
+  const progress = clamp(elapsed / total, 0, 1);
+  const baseAlpha = 0.28 + 0.25 * Math.sin(progress * Math.PI);
+  ctx.save();
+  ctx.fillStyle = `rgba(16,18,32,${baseAlpha})`;
+  ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'lighter';
+  const lineAlpha = 0.12 + 0.08*Math.sin(now()/40 + (player.contactInterferencePhase||0));
+  ctx.fillStyle = `rgba(120,200,255,${lineAlpha})`;
+  const offset = Math.floor((now()/22 + (player.contactInterferencePhase||0)*13) % 5);
+  for(let y=offset; y<H; y+=5){ ctx.fillRect(0,y,W,2); }
+  ctx.globalAlpha = 0.16 + 0.1*Math.sin(now()/70 + (player.contactInterferencePhase||0));
+  for(let i=0;i<36;i++){
+    const nx = (i*73 + Math.floor(now()/18)) % W;
+    const ny = (i*97 + Math.floor(now()/14)) % H;
+    ctx.fillRect(nx, ny, 2, 2);
+  }
+  ctx.restore();
+}
+
 function draw(){
   ctx.fillStyle = activePalette.background; ctx.fillRect(0,0,W,H);
 
@@ -3160,6 +3425,8 @@ function draw(){
         ctx.fillRect(table.runner.x+ox, table.runner.y, table.runner.w, table.runner.h);
       }
     }
+
+    drawBoardMembers(ctx, ox);
 
     for(const hz of hazards){
       if(hz.type==='electric'){
@@ -3414,21 +3681,19 @@ function draw(){
     // player
     const px=player.x+ox, py=player.y + player.crouchOffset;
     if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,py-2,player.w+4,player.h+4); }
-    ctx.fillStyle='#f0D2b6'; ctx.fillRect(px+6, py+2, 10, 10);
-    ctx.fillStyle='#d14d4d'; ctx.fillRect(px+4, py+12, player.w-8, player.crouch?18:22);
-    ctx.fillStyle='#3a3a3a'; if(!player.crouch){ ctx.fillRect(px+4, py+34, 6, 12); ctx.fillRect(px+player.w-10, py+34, 6, 12); } else { ctx.fillRect(px+5, py+30, 12, 8); }
+    drawNinjaPlayer(ctx, px, py, player);
     if(now() < player.pistol.muzzleUntil && player.weapon==='pistol'){
       ctx.fillStyle='rgba(255,220,120,0.9)';
       const mx = px + (player.facing>0 ? player.w+2 : -8);
-      ctx.fillRect(mx, py+16, 8, 4);
+      ctx.fillRect(mx, py+24, 8, 4);
     }
     if(player.weapon==='flame' && attackHeld){
-      ctx.fillStyle='rgba(255,160,60,0.15)';
+      ctx.fillStyle='rgba(255,160,60,0.18)';
       const dir = player.facing>0?1:-1;
       ctx.beginPath();
-      ctx.moveTo(px + (dir>0?player.w:0), py+18);
-      ctx.lineTo(px + (dir>0?player.w+90:-90), py+4);
-      ctx.lineTo(px + (dir>0?player.w+90:-90), py+32);
+      ctx.moveTo(px + (dir>0?player.w-2:2), py+22);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), py+10);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), py+36);
       ctx.closePath(); ctx.fill();
     }
 
@@ -3533,9 +3798,21 @@ function draw(){
     }
     const px=player.x, py=player.y + player.crouchOffset;
     if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,py-2,player.w+4,player.h+4); }
-    ctx.fillStyle='#f0d2b6'; ctx.fillRect(px+6, py+2, 10, 10);
-    ctx.fillStyle='#d14d4d'; ctx.fillRect(px+4, py+12, player.w-8, player.crouch?18:22);
-    ctx.fillStyle='#3a3a3a'; if(!player.crouch){ ctx.fillRect(px+4, py+34, 6, 12); ctx.fillRect(px+player.w-10, py+34, 6, 12); } else { ctx.fillRect(px+5, py+30, 12, 8); }
+    drawNinjaPlayer(ctx, px, py, player);
+    if(now() < player.pistol.muzzleUntil && player.weapon==='pistol'){
+      ctx.fillStyle='rgba(255,220,120,0.9)';
+      const mx = px + (player.facing>0 ? player.w+2 : -8);
+      ctx.fillRect(mx, py+24, 8, 4);
+    }
+    if(player.weapon==='flame' && attackHeld){
+      ctx.fillStyle='rgba(255,160,60,0.18)';
+      const dir = player.facing>0?1:-1;
+      ctx.beginPath();
+      ctx.moveTo(px + (dir>0?player.w-2:2), py+22);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), py+10);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), py+36);
+      ctx.closePath(); ctx.fill();
+    }
   }
   if(activeHack){
     const hack = activeHack;
@@ -3561,6 +3838,8 @@ function draw(){
     ctx.restore();
     ctx.textAlign='left';
   }
+
+  drawContactInterference(ctx);
 }
 
 // ===== Loop =====
