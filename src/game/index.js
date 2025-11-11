@@ -1563,7 +1563,7 @@ function boardRoomLetter(floor){
 
 function formatFloorLabel(floor){
   if(!Number.isFinite(floor)) return 'LEVEL —';
-  if(floor === OUTSIDE_FLOOR) return 'OUTSIDE – SCOPE ENTRY';
+  if(floor === OUTSIDE_FLOOR) return 'INFILTRATE - GROUND FLOOR. ELIMINATE TARGETS. BREACH ENTRANCE.';
   if(floor === FLOORS) return `LEVEL ${floor} – CEO PENTHOUSE`;
   if(isBoardFloor(floor)){
     const letter = boardRoomLetter(floor);
@@ -2228,8 +2228,8 @@ function initOutsideRound(){
   if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(OUTSIDE_FLOOR);
   showFloorBanner(OUTSIDE_FLOOR);
   updateMinimapHighlight();
-  notify('Outside perimeter: eliminate 20 guards to breach the lobby.');
-  centerNote('Outside — eliminate 20 guards.', 2000);
+  notify('Outside perimeter: use arrow keys to aim and eliminate 20 guards.');
+  centerNote('Arrow keys to aim. Eliminate 20 guards.', 2000);
   updateHudForOutside();
 }
 
@@ -2263,6 +2263,14 @@ function fireOutsideShot(){
 }
 
 function updateOutside(dt){
+  const aimInputX = (keys['arrowleft'] ? -1 : 0) + (keys['arrowright'] ? 1 : 0);
+  const aimInputY = (keys['arrowup'] ? -1 : 0) + (keys['arrowdown'] ? 1 : 0);
+  if(aimInputX !== 0 || aimInputY !== 0){
+    const length = Math.hypot(aimInputX, aimInputY) || 1;
+    const aimSpeed = 380;
+    outsideAim.x = clamp(outsideAim.x + (aimInputX / length) * aimSpeed * dt, 0, W);
+    outsideAim.y = clamp(outsideAim.y + (aimInputY / length) * aimSpeed * dt, 0, H);
+  }
   outsideScope.x += (outsideAim.x - outsideScope.x) * 0.2;
   outsideScope.y += (outsideAim.y - outsideScope.y) * 0.2;
   outsideSpawnTimer += dt;
@@ -3128,6 +3136,33 @@ function makeLevel(i){
     const gx = pickGuardSpawn([...initialSpawns]);
     initialSpawns.push(gx);
     guards.push(makeGuard(gx, yBase-42, i));
+  }
+
+  if(i === FLOORS){
+    const ceoWidth = 80;
+    const ceoHeight = 168;
+    const ceoX = Math.max(60, 1.5*W - ceoWidth/2);
+    const ceo = new Agent({
+      x: ceoX,
+      y: yBase - ceoHeight,
+      w: ceoWidth,
+      h: ceoHeight,
+      vx: 0.24,
+      hp: 480,
+      maxHp: 480,
+      dmg: Math.round(GUARD_BASE_DAMAGE * 1.5),
+      type: 'ceo',
+      weapon: 'launcher',
+      shotInterval: 2200,
+      attackInterval: 1600,
+      speed: 0.24,
+      direction: -1
+    });
+    ceo.spawnOrigin = ceoX;
+    ceo.boss = true;
+    ceo.damageReduction = 0.35;
+    ceo.ceo = true;
+    guards.push(ceo);
   }
 
   if(!managerDefeated && managerCheckFloor && i===managerCheckFloor){
@@ -4124,6 +4159,11 @@ function guardFire(g){
     g.lastShot = t;
     const dir = (player.x > g.x ? 1 : -1);
     bullets.push({type:'enemy', x:g.x + (dir>0?g.w:0), y:g.y+12, vx: dir*(7+Math.random()*1.5), vy:(Math.random()*0.8-0.4), life:800, from:'guard'});
+  } else if(g.type==='ceo'){
+    if(t - g.lastShot < 2200) return;
+    g.lastShot = t;
+    const dir = (player.x > g.x ? 1 : -1);
+    bullets.push({type:'rocket', x:g.x + (dir>0?g.w:0), y:g.y + Math.max(20, g.h*0.3), vx: dir*4, vy:0, life:1500, from:'guard', blast:true});
   } else if(g.type==='ninja'){
     // no ranged; close collision handled elsewhere
   }
@@ -4446,8 +4486,17 @@ function update(dt){
         g.vx = dir * base * evacBoost;
       }
       g.x += g.vx;
-      if(g.x<40){ g.x=40; g.vx=Math.abs(g.vx); }
-      if(g.x>3*W-60){ g.x=3*W-60; g.vx=-Math.abs(g.vx); }
+      const guardLeftBound = 40;
+      const guardRightBound = 3*W - (g.w || 20) - 40;
+      const baseMove = Math.max(0.1, g.speed || Math.abs(g.vx) || 0.6);
+      if(g.x < guardLeftBound){
+        g.x = guardLeftBound;
+        g.vx = Math.abs(baseMove);
+      }
+      if(g.x > guardRightBound){
+        g.x = guardRightBound;
+        g.vx = -Math.abs(baseMove);
+      }
 
       const coneDir = (g.vx>=0?1:-1);
       const gx = coneDir>0 ? g.x+g.w : g.x;
@@ -5110,6 +5159,13 @@ function drawOutside(){
   ctx.fillStyle = '#22324c';
   ctx.fillRect(doorX + doorWidth/2 - 4, doorY + doorHeight - 26, 8, 26);
 
+  ctx.save();
+  ctx.fillStyle = 'rgba(240,248,255,0.92)';
+  ctx.font = '24px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Loan Tower', doorX + doorWidth/2, doorY - 18);
+  ctx.restore();
+
   ctx.fillStyle = '#101821';
   ctx.fillRect(0, OUTSIDE_FRONT_WALK - 10, W, 10);
   ctx.fillStyle = '#070b12';
@@ -5139,16 +5195,20 @@ function drawOutside(){
     const gx = guard.renderX - width/2;
     const gy = guard.renderY - height;
     const flashing = guard.hitUntil && guard.hitUntil > nowTs;
-    ctx.fillStyle = flashing ? '#ffd1d1' : '#c3d0ff';
+    const baseColor = flashing ? '#ffe8a6' : '#ff6666';
+    ctx.fillStyle = baseColor;
     ctx.fillRect(gx, gy, width, height);
-    ctx.fillStyle = '#1b2232';
-    ctx.fillRect(gx+6, gy+6, width-12, height-18);
+    ctx.fillStyle = '#2f1a1a';
+    ctx.fillRect(gx+5, gy+8, width-10, height-20);
     ctx.fillStyle = '#0b0f18';
     ctx.fillRect(gx+4, gy+height-12, width-8, 12);
-    ctx.fillStyle = '#0f1724';
-    ctx.fillRect(gx+width/2-6, gy-6, 12, 6);
-    ctx.fillStyle = '#252f46';
-    ctx.fillRect(gx+width/2-3, gy+height-20, 6, 14);
+    ctx.strokeStyle = '#140909';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(gx+1, gy+1, width-2, height-2);
+    ctx.fillStyle = '#fbeede';
+    ctx.beginPath();
+    ctx.arc(guard.renderX, gy + height*0.42, Math.max(4, width*0.18), 0, Math.PI*2);
+    ctx.fill();
   }
 
   ctx.save();
@@ -5624,22 +5684,64 @@ function draw(){
 
     // guards with flashlight cone
     for(const g of guards){
-      ctx.fillStyle = activePalette.flashlightCone;
-      const coneDir = (g.vx>=0?1:-1);
-      ctx.beginPath();
-      ctx.moveTo(g.x + (coneDir>0?g.w:0)+ox, g.y+10);
-      ctx.lineTo(g.x + (coneDir>0?g.w+FLASH_DIST:-FLASH_DIST)+ox, g.y-10 + Math.sin(g.t)*20);
-      ctx.lineTo(g.x + (coneDir>0?g.w+FLASH_DIST:-FLASH_DIST)+ox, g.y+30 + Math.cos(g.t)*20);
-      ctx.closePath(); ctx.fill();
+      const isCEO = g.type==='ceo' || g.ceo;
+      if(!isCEO){
+        ctx.fillStyle = activePalette.flashlightCone;
+        const coneDir = (g.vx>=0?1:-1);
+        ctx.beginPath();
+        ctx.moveTo(g.x + (coneDir>0?g.w:0)+ox, g.y+10);
+        ctx.lineTo(g.x + (coneDir>0?g.w+FLASH_DIST:-FLASH_DIST)+ox, g.y-10 + Math.sin(g.t)*20);
+        ctx.lineTo(g.x + (coneDir>0?g.w+FLASH_DIST:-FLASH_DIST)+ox, g.y+30 + Math.cos(g.t)*20);
+        ctx.closePath();
+        ctx.fill();
+      }
       const flashing = g.hitFlashUntil && g.hitFlashUntil > now();
+      if(isCEO){
+        const baseX = g.x + ox;
+        const baseY = g.y;
+        const width = g.w;
+        const height = g.h;
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(baseX + width*0.18, baseY + height - 10, width*0.64, 8);
+        ctx.fillStyle = flashing ? '#ffe0b5' : '#1c283c';
+        ctx.fillRect(baseX, baseY, width, height);
+        ctx.fillStyle = '#0f1726';
+        ctx.fillRect(baseX + width*0.12, baseY + height*0.22, width*0.76, height*0.72);
+        ctx.fillStyle = '#e9efff';
+        ctx.fillRect(baseX + width/2 - 12, baseY + height*0.24, 24, height*0.32);
+        ctx.fillStyle = '#0a111e';
+        ctx.fillRect(baseX + width/2 - 24, baseY + 12, 48, 30);
+        ctx.fillStyle = '#141b2b';
+        ctx.fillRect(baseX + width*0.22, baseY + height*0.82, width*0.2, height*0.12);
+        ctx.fillRect(baseX + width*0.58, baseY + height*0.82, width*0.2, height*0.12);
+        ctx.fillStyle = '#f8d9b4';
+        ctx.fillRect(baseX + width/2 - 20, baseY - 2, 40, 34);
+        ctx.fillStyle = '#0d141f';
+        ctx.fillRect(baseX + width/2 - 18, baseY + 18, 36, 6);
+        ctx.fillStyle = flashing ? 'rgba(255,220,160,0.6)' : 'rgba(120,200,255,0.25)';
+        ctx.fillRect(baseX - 8, baseY + 8, width + 16, height - 16);
+        if(g.maxHp){
+          const ratio = Math.max(0, Math.min(1, g.hp / g.maxHp));
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillRect(baseX, baseY - 14, width, 6);
+          ctx.fillStyle = flashing ? '#ff9f80' : '#ff4f4f';
+          ctx.fillRect(baseX, baseY - 14, width * ratio, 6);
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+          ctx.strokeRect(baseX, baseY - 14, width, 6);
+        }
+        continue;
+      }
       let tint = '#2f6fa2';
       if(g.type==='auto') tint='#3c8a3c';
       if(g.type==='launcher') tint='#8a3c3c';
       if(g.type==='ninja') tint='#2f2f2f';
       ctx.fillStyle = flashing ? '#ff9c9c' : tint;
       ctx.fillRect(g.x+2+ox,g.y+10,g.w-4,22);
-      ctx.fillStyle='#1d1d1d'; ctx.fillRect(g.x+3+ox,g.y+32,6,10); ctx.fillRect(g.x+g.w-9+ox,g.y+32,6,10);
-      ctx.fillStyle='#1d3b56'; ctx.fillRect(g.x+4+ox,g.y, g.w-8, 10);
+      ctx.fillStyle='#1d1d1d';
+      ctx.fillRect(g.x+3+ox,g.y+32,6,10);
+      ctx.fillRect(g.x+g.w-9+ox,g.y+32,6,10);
+      ctx.fillStyle='#1d3b56';
+      ctx.fillRect(g.x+4+ox,g.y, g.w-8, 10);
       if(g.maxHp){
         const ratio = Math.max(0, Math.min(1, g.hp / g.maxHp));
         ctx.fillStyle='rgba(20,20,20,0.7)';
