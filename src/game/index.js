@@ -361,6 +361,294 @@ function motor({startFreq=120,endFreq=70,dur=0.6,gain=0.09}={}){
   }catch(e){}
 }
 
+const NOTE_INDEX = {
+  'C':-9, 'C#':-8, 'DB':-8,
+  'D':-7, 'D#':-6, 'EB':-6,
+  'E':-5,
+  'F':-4, 'F#':-3, 'GB':-3,
+  'G':-2, 'G#':-1, 'AB':-1,
+  'A':0, 'A#':1, 'BB':1,
+  'B':2
+};
+
+function noteToFrequency(note){
+  if(!note && note!==0) return 0;
+  if(typeof note === 'number') return note;
+  const text = `${note}`.trim();
+  const match = text.match(/^([A-Ga-g])([#b]?)(-?\d)$/);
+  if(!match) return 0;
+  const letter = match[1].toUpperCase();
+  const accidental = match[2] ? match[2].toUpperCase() : '';
+  const octave = parseInt(match[3], 10);
+  const key = `${letter}${accidental}`;
+  const offset = NOTE_INDEX[key];
+  if(offset===undefined || !Number.isFinite(octave)) return 0;
+  const semitone = offset + (octave - 4) * 12;
+  return 440 * Math.pow(2, semitone/12);
+}
+
+const MUSIC_TRACKS = {
+  level: {
+    tempo: 128,
+    voices: [
+      {
+        wave: 'square',
+        gain: 0.12,
+        release: 0.22,
+        sequence: [
+          { note: 'A4', beats: 0.5 },
+          { note: 'C5', beats: 0.5 },
+          { note: 'E5', beats: 0.5 },
+          { note: 'C5', beats: 0.5 },
+          { note: 'D5', beats: 0.5 },
+          { note: 'F5', beats: 0.5 },
+          { note: 'E5', beats: 1 },
+          { note: 'B4', beats: 0.5 },
+          { note: 'D5', beats: 0.5 },
+          { note: 'F5', beats: 0.5 },
+          { note: 'D5', beats: 0.5 },
+          { note: 'C5', beats: 1 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.09,
+        release: 0.35,
+        sequence: [
+          { note: 'A2', beats: 1 },
+          { note: 'E3', beats: 1 },
+          { note: 'F2', beats: 1 },
+          { note: 'C3', beats: 1 },
+          { note: 'D2', beats: 1 },
+          { note: 'E3', beats: 1 },
+          { note: 'C2', beats: 1 },
+          { note: 'G2', beats: 1 }
+        ]
+      },
+      {
+        wave: 'square',
+        gain: 0.05,
+        release: 0.12,
+        sequence: [
+          { note: 'E5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'E5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'G5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'A5', beats: 0.25 },
+          { rest: true, beats: 0.25 }
+        ]
+      }
+    ]
+  },
+  vent: {
+    tempo: 92,
+    voices: [
+      {
+        wave: 'square',
+        gain: 0.11,
+        release: 0.45,
+        sequence: [
+          { note: 'D4', beats: 1 },
+          { note: 'F4', beats: 1 },
+          { note: 'A4', beats: 1 },
+          { note: 'C5', beats: 1 },
+          { note: 'Bb4', beats: 2 },
+          { note: 'A4', beats: 2 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.08,
+        release: 0.55,
+        sequence: [
+          { note: 'D2', beats: 2 },
+          { note: 'A1', beats: 2 },
+          { note: 'C2', beats: 2 },
+          { note: 'G1', beats: 2 }
+        ]
+      },
+      {
+        wave: 'square',
+        gain: 0.04,
+        release: 0.2,
+        sequence: [
+          { note: 'A5', beats: 0.5 },
+          { rest: true, beats: 0.5 },
+          { note: 'G5', beats: 0.5 },
+          { rest: true, beats: 0.5 },
+          { note: 'F5', beats: 0.5 },
+          { rest: true, beats: 0.5 },
+          { note: 'D5', beats: 0.5 },
+          { rest: true, beats: 0.5 }
+        ]
+      }
+    ]
+  },
+  boss: {
+    tempo: 152,
+    voices: [
+      {
+        wave: 'square',
+        gain: 0.14,
+        release: 0.18,
+        sequence: [
+          { note: 'E5', beats: 0.5 },
+          { note: 'F5', beats: 0.5 },
+          { note: 'G5', beats: 0.5 },
+          { note: 'B5', beats: 0.5 },
+          { note: 'A5', beats: 0.5 },
+          { note: 'G5', beats: 0.5 },
+          { note: 'E5', beats: 0.5 },
+          { note: 'D5', beats: 0.5 }
+        ]
+      },
+      {
+        wave: 'square',
+        gain: 0.11,
+        release: 0.16,
+        sequence: [
+          { note: 'E4', beats: 0.25 },
+          { note: 'G4', beats: 0.25 },
+          { note: 'A4', beats: 0.25 },
+          { note: 'C5', beats: 0.25 },
+          { note: 'B4', beats: 0.25 },
+          { note: 'A4', beats: 0.25 },
+          { note: 'G4', beats: 0.25 },
+          { note: 'E4', beats: 0.25 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.1,
+        release: 0.28,
+        sequence: [
+          { note: 'E2', beats: 1 },
+          { note: 'B1', beats: 1 },
+          { note: 'D2', beats: 1 },
+          { note: 'A1', beats: 1 },
+          { note: 'C2', beats: 1 },
+          { note: 'B1', beats: 1 },
+          { note: 'G1', beats: 1 },
+          { note: 'A1', beats: 1 }
+        ]
+      },
+      {
+        wave: 'sawtooth',
+        gain: 0.05,
+        release: 0.12,
+        sequence: [
+          { note: 'E6', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'E6', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'G6', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'B6', beats: 0.25 },
+          { rest: true, beats: 0.25 }
+        ]
+      }
+    ]
+  }
+};
+
+const musicState = { current:null, stopFns:[] };
+
+function stopMusic(){
+  if(musicState.stopFns){
+    for(const stop of musicState.stopFns){
+      try{ if(typeof stop==='function') stop(); }catch(e){}
+    }
+  }
+  musicState.stopFns = [];
+  musicState.current = null;
+}
+
+function startVoiceLoop(ctx, voice, tempo){
+  const sequence = voice && voice.sequence;
+  if(!sequence || !sequence.length) return null;
+  let cancelled=false;
+  const activeNodes = new Set();
+  const secsPerBeat = 60 / (voice.tempo || tempo || 120);
+  let step=0;
+  let timerId=null;
+
+  const scheduleNext = ()=>{
+    if(cancelled) return;
+    const stepData = sequence[step % sequence.length];
+    step++;
+    const beats = stepData && Number.isFinite(stepData.beats) ? Math.max(0.125, stepData.beats) : 1;
+    const duration = Math.max(0.05, beats * secsPerBeat);
+    if(stepData && !stepData.rest){
+      const freq = stepData.freq || noteToFrequency(stepData.note);
+      if(freq > 0){
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const wave = stepData.wave || voice.wave || 'square';
+        const gainValue = Math.max(0.0001, stepData.gain ?? voice.gain ?? 0.1);
+        const attack = Math.max(0.002, stepData.attack ?? voice.attack ?? 0.01);
+        const release = Math.max(0.02, stepData.release ?? voice.release ?? Math.min(0.3, duration*0.6));
+        const startTime = ctx.currentTime + (stepData.offset ?? voice.offset ?? 0.02);
+        osc.type = wave;
+        try{ osc.frequency.setValueAtTime(freq, startTime); }catch(e){ osc.frequency.value = freq; }
+        if(Number.isFinite(stepData.detune)){ osc.detune.setValueAtTime(stepData.detune, startTime); }
+        gain.gain.setValueAtTime(0.0001, startTime);
+        gain.gain.exponentialRampToValueAtTime(gainValue, startTime + attack);
+        gain.gain.setTargetAtTime(0.0001, startTime + duration - release, release);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const node = { osc, gain };
+        activeNodes.add(node);
+        osc.onended = ()=>{
+          try{ gain.disconnect(); }catch(e){}
+          activeNodes.delete(node);
+        };
+        try{ osc.start(startTime); }catch(e){ osc.start(); }
+        try{ osc.stop(startTime + duration + release + 0.05); }catch(e){ osc.stop(ctx.currentTime + duration + release + 0.05); }
+      }
+    }
+    timerId = setTimeout(scheduleNext, duration * 1000);
+  };
+
+  scheduleNext();
+
+  return ()=>{
+    cancelled=true;
+    if(timerId) clearTimeout(timerId);
+    for(const node of activeNodes){
+      try{ node.osc.stop(); }catch(e){}
+      try{ node.gain.disconnect(); }catch(e){}
+    }
+    activeNodes.clear();
+  };
+}
+
+async function startMusic(type){
+  if(musicState.current === type) return;
+  stopMusic();
+  if(!type) return;
+  const track = MUSIC_TRACKS[type];
+  if(!track) return;
+  try{
+    const ctx = getAC();
+    if(ctx.state === 'suspended' && ctx.resume){
+      try{ await ctx.resume(); }catch(e){}
+    }
+    const tempo = track.tempo || 120;
+    const stops=[];
+    for(const voice of track.voices || []){
+      const stop = startVoiceLoop(ctx, voice, tempo);
+      if(stop) stops.push(stop);
+    }
+    musicState.stopFns = stops;
+    musicState.current = type;
+  }catch(e){
+    musicState.stopFns = [];
+    musicState.current = null;
+  }
+}
+
 function stopAmbientLoop(){
   if(ambientInterval){
     clearInterval(ambientInterval);
@@ -765,6 +1053,17 @@ let ambientInterval=null, ambientCurrent=null;
 let managerCheckFloor=null, managerDefeated=false;
 let minimapUnlocked=false, minimapVisible=false;
 let floorBannerTimeout=null;
+
+function desiredMusicMode(){
+  if(inSub) return 'vent';
+  if(boardRoomActive) return 'boss';
+  return 'level';
+}
+
+function updateMusicForState(){
+  const desired = desiredMusicMode();
+  startMusic(desired);
+}
 
 // Projectiles
 const bullets=[];
@@ -1180,6 +1479,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   hideFloorBanner();
   runActive=false;
   pause=true;
+  stopMusic();
   setAmbient(null);
   if(outcome==='death') runStats.deaths = (runStats.deaths||0) + 1;
   const endTime = performance.now();
@@ -1460,6 +1760,7 @@ function makeLevel(i){
   serverObjective = isServerFloor(i);
   inflationActive = isInflationFloor(i);
   bonusFloorActive = !!(scheduledBonusFloor && scheduledBonusFloor===i && !boardRoomActive && i < FLOORS);
+  updateMusicForState();
   evacuationActive=false; evacuationUntil=0;
   powerSurgeUntil=0;
   spotlightDetection=0; elevatorLockedUntil=0;
@@ -1976,6 +2277,7 @@ function updateNinjaMovement(guard, dt, playerCenterX, playerCenterY, groundY){
 function makeSubLevel(fromVent){
   inSub=true;
   entryVentWorld = {x:fromVent.x, y:fromVent.y};
+  updateMusicForState();
 
   const twoBosses = Math.random() < 0.5;
   sub = {
@@ -2307,7 +2609,7 @@ function interact(){
     // Sub-level exit vent (same vent back)
     for(const v of sub.vents){
       if(v.exit && rect(p,{x:v.x-10,y:v.y-10,w:v.w+20,h:v.h+20})){
-        inSub=false; 
+        inSub=false;
         player.vx=player.vy=0;
         const targetX = (entryVentWorld? entryVentWorld.x : 0.6*W+40);
         const targetY = (entryVentWorld? entryVentWorld.y : floorSlab.y-160);
@@ -2316,6 +2618,7 @@ function interact(){
         player.prevBottom = player.y + player.h;
         player.prevVy = 0;
         sub=null; entryVentWorld=null;
+        updateMusicForState();
         centerNote("Exited vents", 700); chime(); notify("Returned from vents.");
         if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
       }
@@ -3077,23 +3380,24 @@ function drawNinjaPlayer(ctx, px, py, state){
   const stride = clamp(state.stepStride || 0, 0, 1);
   const phase = state.stepPhase || 0;
   const swing = Math.sin(phase) * stride;
-  const top = py + 2;
+  const top = 2;
   const hoodHeight = 12;
   const torsoHeight = crouch ? 16 : 18;
   const legBase = top + hoodHeight + torsoHeight;
-  const rawLegHeight = height - (legBase - py);
+  const rawLegHeight = height - (legBase - top) - 2;
   const legHeight = Math.max(6, rawLegHeight - (crouch ? 4 : 0));
   const leftLift = Math.max(0, swing) * (crouch ? 1.8 : 4.2);
   const rightLift = Math.max(0, -swing) * (crouch ? 1.8 : 4.2);
-  const hoodColor = '#101722';
-  const armorColor = '#161d2b';
-  const trimColor = '#2b3547';
-  const clothColor = '#232d3f';
-  const accentColor = '#c13c3c';
-  const beltColor = '#2a1a1d';
-  const gloveColor = '#a73636';
-  const strapColor = '#3a4660';
-  const bladeColor = '#cdd6f6';
+  const hoodColor = '#1b2c46';
+  const armorColor = '#233552';
+  const trimColor = '#3b4f7c';
+  const clothColor = '#152133';
+  const accentColor = '#ff4d6a';
+  const beltColor = '#1c2438';
+  const gloveColor = '#ff7f7f';
+  const strapColor = '#2e3f65';
+  const bladeColor = '#e2ecff';
+  const eyeGlow = '#9ef7ff';
   const shadowY = py + height - 3;
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.fillRect(px + 3, shadowY, Math.max(6, width-6), 3);
@@ -3156,10 +3460,10 @@ function drawNinjaPlayer(ctx, px, py, state){
   ctx.fillRect(5, maskY + 3, width - 10, 2);
   ctx.fillStyle = '#05070c';
   ctx.fillRect(5, maskY - 1, width - 10, 1);
-  ctx.fillStyle = '#f7f2c8';
+  ctx.fillStyle = eyeGlow;
   ctx.fillRect(7, maskY + 1, 3, 1);
   ctx.fillRect(width - 10, maskY + 1, 3, 1);
-  ctx.fillStyle = '#07090f';
+  ctx.fillStyle = '#07101a';
   ctx.fillRect(7, maskY + 1, 1, 1);
   ctx.fillRect(width - 10, maskY + 1, 1, 1);
 
