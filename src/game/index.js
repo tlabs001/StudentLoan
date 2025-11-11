@@ -3397,6 +3397,8 @@ function drawNinjaPlayer(ctx, px, py, state){
   const gloveColor = '#ff7f7f';
   const strapColor = '#2e3f65';
   const bladeColor = '#e2ecff';
+  const outlineGlow = 'rgba(90,200,255,0.45)';
+  const innerGlow = 'rgba(40,120,220,0.25)';
   const eyeGlow = '#9ef7ff';
   const shadowY = py + height - 3;
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -3406,6 +3408,12 @@ function drawNinjaPlayer(ctx, px, py, state){
   ctx.translate(px + width/2, py);
   ctx.scale(facing, 1);
   ctx.translate(-width/2, 0);
+
+  ctx.fillStyle = innerGlow;
+  ctx.fillRect(2, top + 1, width - 4, height - 2);
+  ctx.strokeStyle = outlineGlow;
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(1.5, top - 0.5, width - 3, height + 1);
 
   const t = performance.now();
   const scarfWave = Math.sin(phase * 2 + t / 180);
