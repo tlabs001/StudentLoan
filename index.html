@@ -19,6 +19,12 @@
   .hud-meter .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; opacity:0.85; }
   .track { position:relative; flex:1 1 auto; height:12px; background:#1c1f25; border:1px solid rgba(255,255,255,0.12); border-radius:999px; overflow:hidden; }
   .fill { position:absolute; left:0; top:0; bottom:0; width:0%; background:linear-gradient(90deg,#73ffa6,#39d17e); transition:width 0.18s ease-out; }
+  .fill-checking { background:linear-gradient(90deg,#73ffa6,#39d17e); }
+  .fill-savings { background:linear-gradient(90deg,#76caff,#3c8bff); }
+  .fill-loan { background:linear-gradient(90deg,#ff7a7a,#ff3b3b); }
+  .hud-meter.loan .track { border-color:rgba(255,120,120,0.35); }
+  .hud-meter.loan .label { color:#ff9b9b; }
+  .hud-hostages { flex:1 1 auto; font-size:12px; letter-spacing:1px; text-transform:uppercase; opacity:0.9; display:flex; align-items:center; gap:6px; }
   .hud-meter .value { min-width:42px; text-align:right; font-size:12px; }
   .hud-money { display:flex; align-items:center; gap:6px; }
   .hud-money .label { font-size:11px; letter-spacing:1px; opacity:0.85; }
@@ -280,14 +286,23 @@
   </div>
   <div class="hud-line">
     <div class="hud-meter">
-      <span class="label">HP</span>
-      <div class="track"><div id="hpFill" class="fill" style="width:0%"></div></div>
+      <span class="label">Checking</span>
+      <div class="track"><div id="hpFill" class="fill fill-checking" style="width:0%"></div></div>
       <span id="hpText" class="value">0</span>
     </div>
-    <div class="hud-money">
-      <span class="label">$</span>
-      <span id="cashVal" class="value">$0</span>
+    <div class="hud-meter">
+      <span class="label">Savings</span>
+      <div class="track"><div id="savingsFill" class="fill fill-savings" style="width:0%"></div></div>
+      <span id="savingsText" class="value">$0</span>
     </div>
+    <div class="hud-meter loan">
+      <span class="label">Loan</span>
+      <div class="track"><div id="loanFill" class="fill fill-loan" style="width:0%"></div></div>
+      <span id="loanText" class="value">-$0</span>
+    </div>
+  </div>
+  <div class="hud-line">
+    <div id="hostageInfo" class="hud-hostages" title="No hostages captured.">Hostages: 0</div>
     <div class="hud-weapon">
       <div id="weaponName" class="name">1 • Pistol</div>
       <div id="weaponAmmo" class="ammo">Ammo 0/0</div>
