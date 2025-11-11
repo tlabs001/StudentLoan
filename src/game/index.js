@@ -738,7 +738,7 @@ function fmtClock(ms){
 }
 
 // Level arrays
-let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers[];
+let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[];
 let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[];
 let destroyedOnFloor=0, totalServersOnFloor=0;
 let alarm=false, alarmUntil=0;
