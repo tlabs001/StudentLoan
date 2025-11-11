@@ -1140,6 +1140,7 @@ function boardRoomLetter(floor){
 
 function formatFloorLabel(floor){
   if(!Number.isFinite(floor)) return 'LEVEL —';
+  if(floor === FLOORS) return `LEVEL ${floor} – CEO PENTHOUSE`;
   if(isBoardFloor(floor)){
     const letter = boardRoomLetter(floor);
     return `LEVEL ${floor} – BOARD ROOM ${letter || ''}`.trim();
@@ -1148,6 +1149,7 @@ function formatFloorLabel(floor){
 }
 
 function formatFloorSecondaryLabel(floor){
+  if(floor === FLOORS) return 'PH';
   if(isBoardFloor(floor)){
     const letter = boardRoomLetter(floor);
     return letter ? `BR ${letter}` : 'BOARD';
@@ -3397,23 +3399,16 @@ function drawNinjaPlayer(ctx, px, py, state){
   const gloveColor = '#ff7f7f';
   const strapColor = '#2e3f65';
   const bladeColor = '#e2ecff';
-  const outlineGlow = 'rgba(90,200,255,0.45)';
-  const innerGlow = 'rgba(40,120,220,0.25)';
   const eyeGlow = '#9ef7ff';
-  const shadowY = py + height - 3;
+  const baseY = py - height;
+  const shadowY = py - 3;
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.fillRect(px + 3, shadowY, Math.max(6, width-6), 3);
 
   ctx.save();
-  ctx.translate(px + width/2, py);
+  ctx.translate(px + width/2, baseY);
   ctx.scale(facing, 1);
   ctx.translate(-width/2, 0);
-
-  ctx.fillStyle = innerGlow;
-  ctx.fillRect(2, top + 1, width - 4, height - 2);
-  ctx.strokeStyle = outlineGlow;
-  ctx.lineWidth = 1.2;
-  ctx.strokeRect(1.5, top - 0.5, width - 3, height + 1);
 
   const t = performance.now();
   const scarfWave = Math.sin(phase * 2 + t / 180);
@@ -3991,21 +3986,22 @@ function draw(){
     }
 
     // player
-    const px=player.x+ox, py=player.y + player.crouchOffset;
-    if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,py-2,player.w+4,player.h+4); }
+    const spriteTop = player.y + player.crouchOffset;
+    const px=player.x+ox, py=spriteTop + player.h;
+    if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,spriteTop-2,player.w+4,player.h+4); }
     drawNinjaPlayer(ctx, px, py, player);
     if(now() < player.pistol.muzzleUntil && player.weapon==='pistol'){
       ctx.fillStyle='rgba(255,220,120,0.9)';
       const mx = px + (player.facing>0 ? player.w+2 : -8);
-      ctx.fillRect(mx, py+24, 8, 4);
+      ctx.fillRect(mx, spriteTop + 24, 8, 4);
     }
     if(player.weapon==='flame' && attackHeld){
       ctx.fillStyle='rgba(255,160,60,0.18)';
       const dir = player.facing>0?1:-1;
       ctx.beginPath();
-      ctx.moveTo(px + (dir>0?player.w-2:2), py+22);
-      ctx.lineTo(px + (dir>0?player.w+100:-100), py+10);
-      ctx.lineTo(px + (dir>0?player.w+100:-100), py+36);
+      ctx.moveTo(px + (dir>0?player.w-2:2), spriteTop+22);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+10);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+36);
       ctx.closePath(); ctx.fill();
     }
 
@@ -4108,21 +4104,22 @@ function draw(){
         ctx.fillRect(b.x-2,b.y-2,4,4);
       }
     }
-    const px=player.x, py=player.y + player.crouchOffset;
-    if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,py-2,player.w+4,player.h+4); }
+    const spriteTop = player.y + player.crouchOffset;
+    const px=player.x, py=spriteTop + player.h;
+    if(now()<player.hurtUntil){ ctx.fillStyle='rgba(255,120,120,0.8)'; ctx.fillRect(px-2,spriteTop-2,player.w+4,player.h+4); }
     drawNinjaPlayer(ctx, px, py, player);
     if(now() < player.pistol.muzzleUntil && player.weapon==='pistol'){
       ctx.fillStyle='rgba(255,220,120,0.9)';
       const mx = px + (player.facing>0 ? player.w+2 : -8);
-      ctx.fillRect(mx, py+24, 8, 4);
+      ctx.fillRect(mx, spriteTop + 24, 8, 4);
     }
     if(player.weapon==='flame' && attackHeld){
       ctx.fillStyle='rgba(255,160,60,0.18)';
       const dir = player.facing>0?1:-1;
       ctx.beginPath();
-      ctx.moveTo(px + (dir>0?player.w-2:2), py+22);
-      ctx.lineTo(px + (dir>0?player.w+100:-100), py+10);
-      ctx.lineTo(px + (dir>0?player.w+100:-100), py+36);
+      ctx.moveTo(px + (dir>0?player.w-2:2), spriteTop+22);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+10);
+      ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+36);
       ctx.closePath(); ctx.fill();
     }
   }
