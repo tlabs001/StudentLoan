@@ -96,6 +96,43 @@ const CHECKING_MAX = Math.max(1, GAME_PARAMS.player.checkingMax || GAME_PARAMS.p
 const SAVINGS_MAX = Math.max(1, GAME_PARAMS.player.savingsMax || GAME_PARAMS.player.savingsHudMax);
 const LOAN_CAP = 999999999;
 const GUARD_CONTACT_DELAY_MS = 500;
+const OUTSIDE_FLOOR = 0;
+const OUTSIDE_KILL_TARGET = 20;
+const OUTSIDE_MAX_ACTIVE_GUARDS = 6;
+const OUTSIDE_SCOPE_RADIUS = Math.floor(Math.min(W, H) * 0.36);
+const OUTSIDE_BUILDING = (()=>{
+  const width = 520;
+  const x = Math.floor((W - width) / 2);
+  const y = Math.max(60, Math.floor(H * 0.22));
+  const height = 360;
+  return { x, y, width, height, roofY: y, groundY: y + height };
+})();
+const OUTSIDE_FRONT_WALK = OUTSIDE_BUILDING.groundY + 42;
+const OUTSIDE_PLATFORM_SPANS = [
+  { x: OUTSIDE_BUILDING.x + 50, y: OUTSIDE_BUILDING.y + 110, w: OUTSIDE_BUILDING.width - 100 },
+  { x: OUTSIDE_BUILDING.x + 80, y: OUTSIDE_BUILDING.y + 170, w: OUTSIDE_BUILDING.width - 160 },
+  { x: OUTSIDE_BUILDING.x + 60, y: OUTSIDE_BUILDING.y + 230, w: OUTSIDE_BUILDING.width - 120 },
+  { x: OUTSIDE_BUILDING.x + 80, y: OUTSIDE_BUILDING.y + 290, w: OUTSIDE_BUILDING.width - 160 }
+];
+const OUTSIDE_GUARD_SLOTS = [
+  { id:'roof-left', x: OUTSIDE_BUILDING.x + 90, y: OUTSIDE_BUILDING.roofY + 28, swing: 16, bob: 5 },
+  { id:'roof-mid', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width/2, y: OUTSIDE_BUILDING.roofY + 26, swing: 22, bob: 6 },
+  { id:'roof-right', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width - 90, y: OUTSIDE_BUILDING.roofY + 28, swing: 16, bob: 5 },
+  { id:'span1-left', x: OUTSIDE_PLATFORM_SPANS[0].x + 50, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 18, bob: 6 },
+  { id:'span1-mid', x: OUTSIDE_PLATFORM_SPANS[0].x + OUTSIDE_PLATFORM_SPANS[0].w/2, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 24, bob: 7 },
+  { id:'span1-right', x: OUTSIDE_PLATFORM_SPANS[0].x + OUTSIDE_PLATFORM_SPANS[0].w - 50, y: OUTSIDE_PLATFORM_SPANS[0].y, swing: 18, bob: 6 },
+  { id:'span2-left', x: OUTSIDE_PLATFORM_SPANS[1].x + 40, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 20, bob: 6 },
+  { id:'span2-mid', x: OUTSIDE_PLATFORM_SPANS[1].x + OUTSIDE_PLATFORM_SPANS[1].w/2, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 24, bob: 7 },
+  { id:'span2-right', x: OUTSIDE_PLATFORM_SPANS[1].x + OUTSIDE_PLATFORM_SPANS[1].w - 40, y: OUTSIDE_PLATFORM_SPANS[1].y, swing: 20, bob: 6 },
+  { id:'span3-left', x: OUTSIDE_PLATFORM_SPANS[2].x + 50, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 18, bob: 5 },
+  { id:'span3-mid', x: OUTSIDE_PLATFORM_SPANS[2].x + OUTSIDE_PLATFORM_SPANS[2].w/2, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 22, bob: 6 },
+  { id:'span3-right', x: OUTSIDE_PLATFORM_SPANS[2].x + OUTSIDE_PLATFORM_SPANS[2].w - 50, y: OUTSIDE_PLATFORM_SPANS[2].y, swing: 18, bob: 5 },
+  { id:'span4-left', x: OUTSIDE_PLATFORM_SPANS[3].x + 40, y: OUTSIDE_PLATFORM_SPANS[3].y, swing: 20, bob: 5 },
+  { id:'span4-right', x: OUTSIDE_PLATFORM_SPANS[3].x + OUTSIDE_PLATFORM_SPANS[3].w - 40, y: OUTSIDE_PLATFORM_SPANS[3].y, swing: 20, bob: 5 },
+  { id:'ground-left', x: OUTSIDE_BUILDING.x + 110, y: OUTSIDE_FRONT_WALK, swing: 24, bob: 4 },
+  { id:'ground-mid', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width/2, y: OUTSIDE_FRONT_WALK, swing: 28, bob: 4 },
+  { id:'ground-right', x: OUTSIDE_BUILDING.x + OUTSIDE_BUILDING.width - 110, y: OUTSIDE_FRONT_WALK, swing: 24, bob: 4 }
+];
 
 (()=>{
 // ===== Color utilities & palettes =====
@@ -1045,6 +1082,18 @@ const block = new Set([' ', 'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Spac
 window.addEventListener('keydown',(e)=>{ if(block.has(e.key) || block.has(e.code)) e.preventDefault(); },{passive:false});
 const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); canvas.focus();
 window.addEventListener('click', ()=>{ canvas.focus(); getAC(); });
+function updateOutsideAimFromEvent(event){
+  if(!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width ? canvas.width / rect.width : 1;
+  const scaleY = rect.height ? canvas.height / rect.height : 1;
+  const x = (event.clientX - rect.left) * scaleX;
+  const y = (event.clientY - rect.top) * scaleY;
+  outsideAim.x = Math.max(0, Math.min(W, x));
+  outsideAim.y = Math.max(0, Math.min(H, y));
+}
+canvas.addEventListener('mousemove', updateOutsideAimFromEvent);
+canvas.addEventListener('mousedown', updateOutsideAimFromEvent);
 
 // ===== Canvas & Timing =====
 let last=performance.now();
@@ -1060,6 +1109,16 @@ let lastResult=null;
 function makeRunStats(){ return { kills:0, deaths:0, refinances:0, start:0 }; }
 let runStats = makeRunStats();
 const codexState = { open:false };
+let outsideMode = false;
+let outsideKillCount = 0;
+let outsideGuards = [];
+let outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
+let outsideAim = { x: W/2, y: H/2 };
+let outsideLastShot = 0;
+let outsideCrosshairFlashUntil = 0;
+let outsideShotPulseUntil = 0;
+let outsideSpawnTimer = 0;
+const outsideOccupiedSlots = new Set();
 
 // Camera
 let camX=0, seenDoor=false;
@@ -1295,6 +1354,7 @@ function setMode(m){
   btnTest.classList.toggle('active', testMode);
   btnNormal.classList.toggle('active', !testMode);
   notify(testMode? "TEST mode: revive on death." : "NORMAL mode: restart on death.");
+  updateMapButtonState();
 }
 btnTest.onclick=()=>setMode('test');
 btnNormal.onclick=()=>setMode('normal');
@@ -1503,6 +1563,7 @@ function boardRoomLetter(floor){
 
 function formatFloorLabel(floor){
   if(!Number.isFinite(floor)) return 'LEVEL —';
+  if(floor === OUTSIDE_FLOOR) return 'OUTSIDE – SCOPE ENTRY';
   if(floor === FLOORS) return `LEVEL ${floor} – CEO PENTHOUSE`;
   if(isBoardFloor(floor)){
     const letter = boardRoomLetter(floor);
@@ -1512,6 +1573,7 @@ function formatFloorLabel(floor){
 }
 
 function formatFloorSecondaryLabel(floor){
+  if(floor === OUTSIDE_FLOOR) return 'OUT';
   if(floor === FLOORS) return 'PH';
   if(isBoardFloor(floor)){
     const letter = boardRoomLetter(floor);
@@ -1535,7 +1597,7 @@ if(minimapTower){
 if(mapBtn){
   mapBtn.addEventListener('click', ()=>{
     if(minimapVisible){ toggleMinimap(false); return; }
-    if(!minimapUnlocked){
+    if(!canAccessMinimap()){
       centerNote('Clear a vent to access the map.', 1400);
       lockedBuzz();
       return;
@@ -1573,7 +1635,16 @@ if(minimapTower){
     if(!cell) return;
     const floor = Number(cell.dataset.floor);
     if(!Number.isFinite(floor)) return;
-    centerNote(formatFloorLabel(floor), 1100);
+    if(testMode && runActive){
+      const changed = jumpToFloor(floor);
+      if(changed){
+        toggleMinimap(false);
+      } else {
+        centerNote(formatFloorLabel(floor), 1100);
+      }
+    } else {
+      centerNote(formatFloorLabel(floor), 1100);
+    }
   });
 }
 
@@ -1677,11 +1748,16 @@ function showFloorBanner(floor){
   }, 2200);
 }
 
+function canAccessMinimap(){
+  return minimapUnlocked || (testMode && runActive);
+}
+
 function updateMapButtonState(){
   if(!mapBtn) return;
-  mapBtn.classList.toggle('locked', !minimapUnlocked);
-  mapBtn.disabled = !minimapUnlocked;
-  if(!minimapUnlocked){ mapBtn.classList.remove('active'); }
+  const accessible = canAccessMinimap();
+  mapBtn.classList.toggle('locked', !accessible);
+  mapBtn.disabled = !accessible;
+  if(!accessible){ mapBtn.classList.remove('active'); }
 }
 
 function updateMinimapHighlight(){
@@ -1695,7 +1771,7 @@ function updateMinimapHighlight(){
 function toggleMinimap(force){
   if(!minimapOverlay) return;
   const target = force !== undefined ? force : !minimapVisible;
-  if(target && !minimapUnlocked){
+  if(target && !canAccessMinimap()){
     centerNote('Clear a vent to access the map.', 1400);
     lockedBuzz();
     return;
@@ -1708,6 +1784,13 @@ function toggleMinimap(force){
     minimapOverlay.classList.add('hidden');
   }
   if(mapBtn){ mapBtn.classList.toggle('active', target); }
+}
+
+function jumpToFloor(targetFloor){
+  if(!runActive) return false;
+  if(!Number.isFinite(targetFloor)) return false;
+  const floor = Math.min(Math.max(1, Math.round(targetFloor)), FLOORS);
+  return enterFloor(floor, { viaTest:true });
 }
 
 function updateDeckProgress(){
@@ -2069,10 +2152,203 @@ function updateHostageHud(){
 
 function ensureLoop(){ if(!loopStarted){ loopStarted=true; requestAnimationFrame(loop); } }
 
+function updateHudForOutside(){
+  if(timeEl) timeEl.textContent = `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
+  if(serversEl) serversEl.textContent = 'Servers: —';
+  if(alarmsEl) alarmsEl.textContent = 'Alarms: —';
+  if(invEl) invEl.textContent = 'Inv: —';
+  const hpRatio = Math.min(1, Math.max(0, player.checking / (player.checkingMax || CHECKING_MAX)));
+  if(hpFill) hpFill.style.width = `${hpRatio*100}%`;
+  if(hpText) hpText.textContent = Math.max(0, Math.round(player.checking));
+  if(savingsFill){
+    const savingsRatio = Math.min(1, Math.max(0, player.savings / (player.savingsMax || SAVINGS_MAX)));
+    savingsFill.style.width = `${savingsRatio*100}%`;
+  }
+  if(savingsText) savingsText.textContent = `$${fmtCurrency(player.savings)}`;
+  if(loanFill){
+    const debt = player.loanBalance;
+    const progress = RUN_LOAN_START>0 ? Math.min(1, Math.max(0, 1 - Math.max(0, debt) / RUN_LOAN_START)) : 1;
+    loanFill.style.width = `${progress*100}%`;
+  }
+  if(loanText){
+    const debt = player.loanBalance;
+    loanText.textContent = debt > 0
+      ? `-$${fmtCurrency(debt)}`
+      : debt < 0
+        ? `+$${fmtCurrency(Math.abs(debt))}`
+        : '$0';
+  }
+  if(weaponNameEl) weaponNameEl.textContent = 'Sniper Rifle';
+  if(weaponAmmoEl) weaponAmmoEl.textContent = 'Ammo ∞';
+  if(miniBossEl) miniBossEl.textContent = 'Mini-Bosses: 0';
+  if(filesPill) filesPill.textContent = `Files: ${player.files}`;
+  if(intelPill) intelPill.textContent = `Intel: ${player.intel}`;
+  if(featherPill) featherPill.textContent = 'Feather: —';
+  if(featherTimerEl) featherTimerEl.textContent = 'Feather —';
+}
+
+function spawnOutsideGuard(){
+  const available = OUTSIDE_GUARD_SLOTS.filter(slot => !outsideOccupiedSlots.has(slot.id));
+  if(available.length===0) return;
+  const slot = available[Math.floor(Math.random()*available.length)];
+  outsideOccupiedSlots.add(slot.id);
+  const width = 30;
+  const height = 44;
+  outsideGuards.push({
+    slot: slot.id,
+    baseX: slot.x,
+    baseY: slot.y,
+    renderX: slot.x,
+    renderY: slot.y,
+    width,
+    height,
+    swing: slot.swing ?? 18,
+    bob: slot.bob ?? 6,
+    phase: Math.random()*Math.PI*2,
+    speed: 0.8 + Math.random()*0.9,
+    dead: false,
+    removeAt: 0,
+    hitUntil: 0
+  });
+}
+
+function initOutsideRound(){
+  outsideMode = true;
+  outsideKillCount = 0;
+  outsideGuards.length = 0;
+  outsideOccupiedSlots.clear();
+  outsideSpawnTimer = 0;
+  outsideLastShot = 0;
+  outsideCrosshairFlashUntil = 0;
+  outsideShotPulseUntil = 0;
+  outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
+  outsideAim = { x: W/2, y: H/2 };
+  const initialGuards = Math.min(OUTSIDE_MAX_ACTIVE_GUARDS, 4);
+  for(let i=0; i<initialGuards; i++){ spawnOutsideGuard(); }
+  if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(OUTSIDE_FLOOR);
+  showFloorBanner(OUTSIDE_FLOOR);
+  updateMinimapHighlight();
+  notify('Outside perimeter: eliminate 20 guards to breach the lobby.');
+  centerNote('Outside — eliminate 20 guards.', 2000);
+  updateHudForOutside();
+}
+
+function fireOutsideShot(){
+  const t = now();
+  if(t - outsideLastShot < 140) return;
+  outsideLastShot = t;
+  outsideCrosshairFlashUntil = t + 140;
+  outsideShotPulseUntil = t + 200;
+  const aimX = outsideScope.x;
+  const aimY = outsideScope.y;
+  let hit = false;
+  for(const guard of outsideGuards){
+    if(guard.dead) continue;
+    const halfW = (guard.width || 30) / 2;
+    const top = guard.renderY - (guard.height || 44);
+    if(aimX >= guard.renderX - halfW && aimX <= guard.renderX + halfW && aimY >= top && aimY <= guard.renderY){
+      guard.dead = true;
+      guard.hitUntil = t + 160;
+      guard.removeAt = t + 260;
+      outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
+      hit = true;
+      break;
+    }
+  }
+  if(hit){
+    beep({freq:720,dur:0.08});
+  } else {
+    beep({freq:260,dur:0.05});
+  }
+}
+
+function updateOutside(dt){
+  outsideScope.x += (outsideAim.x - outsideScope.x) * 0.2;
+  outsideScope.y += (outsideAim.y - outsideScope.y) * 0.2;
+  outsideSpawnTimer += dt;
+  const desired = Math.min(OUTSIDE_MAX_ACTIVE_GUARDS, 3 + Math.floor(outsideKillCount/4));
+  if(outsideGuards.length < desired && outsideSpawnTimer > 0.25){
+    spawnOutsideGuard();
+    outsideSpawnTimer = 0;
+  }
+  const t = now();
+  for(let i=outsideGuards.length-1; i>=0; i--){
+    const guard = outsideGuards[i];
+    guard.phase += dt * guard.speed;
+    guard.renderX = guard.baseX + Math.sin(guard.phase) * guard.swing;
+    guard.renderY = guard.baseY + Math.cos(guard.phase * 0.9) * guard.bob;
+    if(guard.hitUntil && t > guard.hitUntil){ guard.hitUntil = 0; }
+    if(guard.dead && t > guard.removeAt){
+      outsideOccupiedSlots.delete(guard.slot);
+      outsideGuards.splice(i,1);
+      outsideSpawnTimer = 0;
+    }
+  }
+  if(outsideKillCount >= OUTSIDE_KILL_TARGET && outsideMode){
+    completeOutsideRound();
+    return;
+  }
+  updateHudForOutside();
+}
+
+function completeOutsideRound(){
+  if(!outsideMode) return;
+  outsideMode = false;
+  outsideGuards.length = 0;
+  outsideOccupiedSlots.clear();
+  outsideSpawnTimer = 0;
+  outsideLastShot = 0;
+  outsideCrosshairFlashUntil = 0;
+  outsideShotPulseUntil = 0;
+  enterFloor(1, { fromOutside:true });
+}
+
+function enterFloor(targetFloor, options={}){
+  if(!Number.isFinite(targetFloor)) return false;
+  const floor = Math.min(Math.max(1, Math.round(targetFloor)), FLOORS);
+  const previous = currentFloor;
+  outsideMode = false;
+  outsideGuards.length = 0;
+  outsideOccupiedSlots.clear();
+  outsideSpawnTimer = 0;
+  outsideLastShot = 0;
+  outsideCrosshairFlashUntil = 0;
+  outsideShotPulseUntil = 0;
+  outsideKillCount = 0;
+  currentFloor = floor;
+  camX = 0;
+  seenDoor = false;
+  player.x = initialSpawnX;
+  player.y = 0;
+  player.vx = 0;
+  player.vy = 0;
+  makeLevel(currentFloor);
+  handleFloorStart(currentFloor);
+  player.y = floorSlab.y - player.h;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
+  updateMinimapHighlight();
+  if(options.showBanner !== false){
+    showFloorBanner(currentFloor);
+  }
+  if(options.fromOutside){
+    setWeapon('pistol');
+  }
+  if(options.viaTest){
+    notify(`Test warp ➜ ${formatFloorLabel(currentFloor)}.`);
+    centerNote(`Test ➜ ${formatFloorLabel(currentFloor)}`, 1400);
+  } else if(options.fromOutside){
+    notify('Outside perimeter cleared. Level 1 ready.');
+    centerNote('Level 1 — Breach the lobby.', 1600);
+  }
+  return previous !== currentFloor;
+}
+
 function startNewRun(name){
   if(runActive) return;
   currentPlayerName = name || 'Player';
-  currentFloor = 1;
+  currentFloor = OUTSIDE_FLOOR;
   runStats = makeRunStats();
   runStats.start = performance.now();
   runStats.kills = 0; runStats.deaths = 0; runStats.refinances = 0;
@@ -2101,17 +2377,8 @@ function startNewRun(name){
   minimapVisible=false;
   updateMapButtonState();
   toggleMinimap(false);
-  makeLevel(currentFloor);
-  handleFloorStart(currentFloor);
-  player.y = floorSlab.y - player.h;
-  player.prevBottom = player.y + player.h;
-  player.prevVy = 0;
-  notify("Evening infiltration. New intel & loot on each floor.");
-  centerNote("Infiltration begins.", 1600);
-  showFloorBanner(currentFloor);
-  if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
+  initOutsideRound();
   if(timeEl) timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ ${fmtClock(0)}`;
-  updateMinimapHighlight();
   ensureLoop();
   canvas.focus();
 }
@@ -2122,6 +2389,9 @@ function finishRun(outcome, { message=null, note=null }={}){
   toggleMinimap(false);
   toggleDeck(false);
   hideFloorBanner();
+  outsideMode = false;
+  outsideGuards.length = 0;
+  outsideOccupiedSlots.clear();
   runActive=false;
   pause=true;
   stopMusic();
@@ -2145,6 +2415,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   if(note) notify(note);
   if(message) centerNote(message, 2400);
   window.dispatchEvent(new CustomEvent('loanTower:end', { detail }));
+  updateMapButtonState();
 }
 function reviveAfterRefinance(){
   player.checking = player.checkingMax || CHECKING_MAX;
@@ -3685,6 +3956,10 @@ function interact(){
 // Attacks / weapons
 function attack(){
   if(pause) return;
+  if(outsideMode){
+    fireOutsideShot();
+    return;
+  }
   if(state.playerWeaponsDisabled) return;
   if(ninjaRound && !['melee','saber'].includes(player.weapon)){
     centerNote('Melee only during ninja round!', 1200);
@@ -3857,6 +4132,10 @@ function guardFire(g){
 // ========= Update =========
 function update(dt){
   if(!runActive) return;
+  if(outsideMode){
+    updateOutside(dt);
+    return;
+  }
   if(player.contactDamagePending && now() >= player.contactDamageApplyAt){
     player.contactDamagePending = false;
     player.contactDamageApplyAt = 0;
@@ -4764,7 +5043,164 @@ function drawContactInterference(ctx){
   ctx.restore();
 }
 
+function drawOutside(){
+  const building = OUTSIDE_BUILDING;
+  const nowTs = now();
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#050910');
+  sky.addColorStop(0.4,'#0a1424');
+  sky.addColorStop(1,'#070910');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0,0,W,H);
+
+  const skylinePositions = [40, 180, 320, 460, 620, 780, 940, 1100];
+  skylinePositions.forEach((sx, idx)=>{
+    const width = 90 + (idx%3)*34;
+    const height = 220 + (idx%2)*70;
+    const baseY = building.roofY + 20;
+    ctx.fillStyle = 'rgba(20,32,54,0.55)';
+    ctx.fillRect(sx, baseY - height, width, height);
+    ctx.fillStyle = 'rgba(40,60,90,0.32)';
+    ctx.fillRect(sx+8, baseY - height + 20, width-16, height-32);
+  });
+
+  ctx.fillStyle = '#1b2639';
+  ctx.fillRect(building.x, building.y, building.width, building.height);
+  ctx.fillStyle = '#23324a';
+  ctx.fillRect(building.x+8, building.y+12, building.width-16, building.height-16);
+  ctx.fillStyle = '#0f1828';
+  ctx.fillRect(building.x-12, building.y+building.height-12, building.width+24, 12);
+  ctx.fillRect(building.x, building.y-6, building.width, 6);
+
+  const winCols = 6;
+  const winRows = 6;
+  const winWidth = 30;
+  const winHeight = 36;
+  const winGapX = (building.width - winCols * winWidth) / (winCols + 1);
+  const winGapY = (building.height - 140 - winRows * winHeight) / (winRows + 1);
+  for(let r=0; r<winRows; r++){
+    for(let c=0; c<winCols; c++){
+      const winX = building.x + winGapX + c * (winWidth + winGapX);
+      const winY = building.y + 46 + winGapY + r * (winHeight + winGapY);
+      ctx.fillStyle = 'rgba(90,140,220,0.38)';
+      ctx.fillRect(winX, winY, winWidth, winHeight);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(winX+4, winY+4, winWidth-8, 10);
+    }
+  }
+
+  ctx.fillStyle = '#2b3a55';
+  for(const span of OUTSIDE_PLATFORM_SPANS){
+    ctx.fillRect(span.x, span.y, span.w, 6);
+    ctx.fillStyle = 'rgba(80,110,170,0.35)';
+    ctx.fillRect(span.x, span.y-2, span.w, 2);
+    ctx.fillStyle = '#2b3a55';
+  }
+
+  const doorWidth = 120;
+  const doorHeight = 86;
+  const doorX = building.x + building.width/2 - doorWidth/2;
+  const doorY = building.groundY - doorHeight;
+  ctx.fillStyle = '#0a121f';
+  ctx.fillRect(doorX, doorY, doorWidth, doorHeight);
+  ctx.fillStyle = '#1c2b43';
+  ctx.fillRect(doorX+8, doorY+8, doorWidth-16, doorHeight-16);
+  ctx.fillStyle = 'rgba(120,180,255,0.35)';
+  ctx.fillRect(doorX+16, doorY+18, doorWidth-32, doorHeight-34);
+  ctx.fillStyle = '#22324c';
+  ctx.fillRect(doorX + doorWidth/2 - 4, doorY + doorHeight - 26, 8, 26);
+
+  ctx.fillStyle = '#101821';
+  ctx.fillRect(0, OUTSIDE_FRONT_WALK - 10, W, 10);
+  ctx.fillStyle = '#070b12';
+  ctx.fillRect(0, OUTSIDE_FRONT_WALK, W, H - OUTSIDE_FRONT_WALK);
+  const carBaseY = OUTSIDE_FRONT_WALK - 14;
+  const carHeight = 22;
+  const cars = [
+    { x: building.x - 150, color:'#3b4f7c' },
+    { x: building.x + building.width + 40, color:'#65385f' }
+  ];
+  for(const car of cars){
+    const carWidth = 110;
+    ctx.fillStyle = car.color;
+    ctx.fillRect(car.x, carBaseY, carWidth, carHeight);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(car.x+12, carBaseY+4, carWidth-24, 8);
+    ctx.fillStyle = '#0b0f18';
+    ctx.fillRect(car.x+8, carBaseY+carHeight-6, carWidth-16, 6);
+    ctx.fillStyle = '#c7cad9';
+    ctx.fillRect(car.x+10, carBaseY+carHeight-4, 8, 4);
+    ctx.fillRect(car.x+carWidth-18, carBaseY+carHeight-4, 8, 4);
+  }
+
+  for(const guard of outsideGuards){
+    const width = guard.width || 30;
+    const height = guard.height || 44;
+    const gx = guard.renderX - width/2;
+    const gy = guard.renderY - height;
+    const flashing = guard.hitUntil && guard.hitUntil > nowTs;
+    ctx.fillStyle = flashing ? '#ffd1d1' : '#c3d0ff';
+    ctx.fillRect(gx, gy, width, height);
+    ctx.fillStyle = '#1b2232';
+    ctx.fillRect(gx+6, gy+6, width-12, height-18);
+    ctx.fillStyle = '#0b0f18';
+    ctx.fillRect(gx+4, gy+height-12, width-8, 12);
+    ctx.fillStyle = '#0f1724';
+    ctx.fillRect(gx+width/2-6, gy-6, 12, 6);
+    ctx.fillStyle = '#252f46';
+    ctx.fillRect(gx+width/2-3, gy+height-20, 6, 14);
+  }
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.97)';
+  ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.strokeStyle = 'rgba(220,228,255,0.85)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(outsideScope.x, outsideScope.y, outsideScope.radius+1.5, 0, Math.PI*2);
+  ctx.stroke();
+
+  const crossStyle = (outsideCrosshairFlashUntil > nowTs) ? 'rgba(255,240,150,0.9)' : 'rgba(0,0,0,0.82)';
+  ctx.strokeStyle = crossStyle;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(outsideScope.x - outsideScope.radius + 16, outsideScope.y);
+  ctx.lineTo(outsideScope.x + outsideScope.radius - 16, outsideScope.y);
+  ctx.moveTo(outsideScope.x, outsideScope.y - outsideScope.radius + 16);
+  ctx.lineTo(outsideScope.x, outsideScope.y + outsideScope.radius - 16);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(outsideScope.x, outsideScope.y, 8, 0, Math.PI*2);
+  ctx.stroke();
+
+  if(outsideShotPulseUntil > nowTs){
+    const elapsed = 1 - Math.min(1, Math.max(0, (outsideShotPulseUntil - nowTs) / 200));
+    const radius = 10 + elapsed * 24;
+    ctx.strokeStyle = `rgba(255,240,180,${Math.max(0, 1 - elapsed)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(outsideScope.x, outsideScope.y, radius, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = '#f1f4ff';
+  ctx.font = '16px monospace';
+  ctx.fillText(`Outside Kills: ${outsideKillCount}/${OUTSIDE_KILL_TARGET}`, 24, 32);
+  ctx.font = '13px monospace';
+  ctx.fillText('Eliminate 20 guards to breach the lobby.', 24, 52);
+}
+
 function draw(){
+  if(outsideMode){
+    drawOutside();
+    return;
+  }
   ctx.fillStyle = activePalette.background; ctx.fillRect(0,0,W,H);
 
   if(!inSub){
