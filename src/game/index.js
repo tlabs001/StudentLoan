@@ -89,6 +89,11 @@ const PLAYER_BULLET_DAMAGE = GAME_PARAMS.player.damages.bullet;
 const PLAYER_FLAME_DAMAGE = GAME_PARAMS.player.damages.flame;
 const PLAYER_MELEE_DAMAGE = GAME_PARAMS.player.damages.melee;
 const STOMP_DAMAGE = GAME_PARAMS.player.damages.stomp;
+const GRENADE_BASE_DAMAGE = 250;
+const SABER_BASE_DAMAGE = 250;
+const FLAMETHROWER_MAX_HEAT_MS = 10000;
+const GRENADE_MAG_CAPACITY = 12;
+const GRENADE_RESERVE_MAX = 120;
 const GUARD_WIDTH = 20;
 const GUARD_HEIGHT = 42;
 const initialSpawnX = GAME_PARAMS.player.spawnX;
@@ -1217,11 +1222,11 @@ const player = {
   weaponsUnlocked:{ pistol:true, silenced:true, flame:true, melee:true, grenade:false, saber:false, machineGun:false },
   pistol:{ammo:GAME_PARAMS.player.pistol.magazine, reserve:GAME_PARAMS.player.pistol.reserve, cooldown:GAME_PARAMS.player.pistol.cooldownMs, last:0, muzzleUntil:0, mag:GAME_PARAMS.player.pistol.magazine},
   silenced:{ammo:GAME_PARAMS.player.pistol.magazine, cooldown:Math.round(GAME_PARAMS.player.pistol.cooldownMs*0.9), last:0, muzzleUntil:0, mag:GAME_PARAMS.player.pistol.magazine},
-  flame:{fuel:GAME_PARAMS.player.flame.fuel, cooldown:GAME_PARAMS.player.flame.cooldownMs, last:0}, // "ammo" for flamethrower
+  flame:{cooldown:GAME_PARAMS.player.flame.cooldownMs, last:0, heat:0, maxHeat:FLAMETHROWER_MAX_HEAT_MS, lockedUntil:0, lastHeatTick:0, overheated:false, cooldownNoticeUntil:0, overheatNotifiedUntil:0},
   melee:{cooldown:GAME_PARAMS.player.meleeCooldownMs, last:0},
-  grenade:{ammo:0, reserve:0, cooldown:520, last:0, mag:1},
+  grenade:{ammo:GRENADE_MAG_CAPACITY, reserve:GRENADE_RESERVE_MAX, cooldown:520, last:0, mag:GRENADE_MAG_CAPACITY, maxReserve:GRENADE_RESERVE_MAX},
   saber:{cooldown:Math.max(140, Math.round(GAME_PARAMS.player.meleeCooldownMs*0.75)), last:0},
-  machineGun:{ammo:90, reserve:360, cooldown:80, last:0, muzzleUntil:0, mag:90},
+  machineGun:{ammo:900, reserve:3600, cooldown:20, last:0, muzzleUntil:0, mag:900, maxReserve:3600},
   damageMultiplier:1,
   hurtUntil:0,
   speedBoostUntil:0,
@@ -1331,6 +1336,7 @@ let sub = null;
 let entryVentWorld = null;
 let lightingCondition='normal', lightingPulse=0, lightingPhase=0;
 let floorTheme=null, boardRoomActive=false, ninjaRound=false, serverObjective=false, inflationActive=false, bonusFloorActive=false;
+let boardMemberDefeated=false;
 let arcadeBeatdownActive=false, arcadePixelOverlay=false, arcadeRampage=null;
 let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0, sprinklersActiveUntil=0;
 let spotlightDetection=0, elevatorLockedUntil=0;
@@ -1584,11 +1590,14 @@ function reloadWeapon(){
   }
   if(player.weapon==='grenade'){
     const stats = player.grenade;
-    const mag = stats.mag || 1;
+    const mag = stats.mag || GRENADE_MAG_CAPACITY;
     if(stats.ammo >= mag) return false;
-    if((stats.reserve||0)<=0) return false;
-    stats.ammo += 1;
-    stats.reserve -= 1;
+    const reserve = stats.reserve || 0;
+    if(reserve<=0) return false;
+    const need = mag - stats.ammo;
+    const take = Math.min(need, reserve);
+    stats.ammo += take;
+    stats.reserve -= take;
     beep({freq:300});
     return true;
   }
@@ -1598,7 +1607,7 @@ function detonateGrenade(grenade){
   if(!grenade || grenade.detonated) return;
   grenade.detonated = true;
   const blast = {x:grenade.x-50, y:grenade.y-40, w:100, h:100};
-  const dmg = scaledPlayerDamage(PLAYER_BULLET_DAMAGE * 3);
+  const dmg = scaledPlayerDamage(GRENADE_BASE_DAMAGE);
   if(!inSub){
     for(const guard of guards){
       if(!guard || guard.hp<=0) continue;
@@ -2185,16 +2194,32 @@ function resetPlayerState(){
   player.silenced.ammo=GAME_PARAMS.player.pistol.magazine;
   player.silenced.cooldown=Math.round(GAME_PARAMS.player.pistol.cooldownMs*0.9);
   player.silenced.last=0; player.silenced.muzzleUntil=0;
-  player.flame.fuel=GAME_PARAMS.player.flame.fuel;
   player.flame.cooldown=GAME_PARAMS.player.flame.cooldownMs;
   player.flame.last=0;
+  player.flame.heat=0;
+  player.flame.maxHeat=FLAMETHROWER_MAX_HEAT_MS;
+  player.flame.lockedUntil=0;
+  player.flame.lastHeatTick=0;
+  player.flame.overheated=false;
+  player.flame.cooldownNoticeUntil=0;
+  player.flame.overheatNotifiedUntil=0;
   player.melee.cooldown=GAME_PARAMS.player.meleeCooldownMs;
   player.melee.last=0;
-  player.grenade.ammo=0; player.grenade.reserve=0; player.grenade.last=0;
+  player.grenade.mag=GRENADE_MAG_CAPACITY;
+  player.grenade.maxReserve=GRENADE_RESERVE_MAX;
+  player.grenade.ammo=GRENADE_MAG_CAPACITY;
+  player.grenade.reserve=GRENADE_RESERVE_MAX;
+  player.grenade.last=0;
   player.grenade.cooldown=520;
   player.saber.cooldown=Math.max(140, Math.round(GAME_PARAMS.player.meleeCooldownMs*0.75));
   player.saber.last=0;
-  player.machineGun.mag=90; player.machineGun.ammo=90; player.machineGun.reserve=360; player.machineGun.cooldown=80; player.machineGun.last=0; player.machineGun.muzzleUntil=0;
+  player.machineGun.mag=900;
+  player.machineGun.maxReserve=3600;
+  player.machineGun.ammo=900;
+  player.machineGun.reserve=3600;
+  player.machineGun.cooldown=20;
+  player.machineGun.last=0;
+  player.machineGun.muzzleUntil=0;
   player.damageMultiplier=1;
   player.hurtUntil=0;
   player.speedBoostUntil=0;
@@ -2877,17 +2902,35 @@ function addAmmo(n){
   player.pistol.reserve = clamp(player.pistol.reserve+n, 0, 999);
   if(player.weaponsUnlocked && player.weaponsUnlocked.machineGun){
     const mgGain = Math.max(0, Math.round(n*2));
-    player.machineGun.reserve = clamp((player.machineGun.reserve||0) + mgGain, 0, 999);
+    const mgMax = player.machineGun.maxReserve || 3600;
+    player.machineGun.reserve = clamp((player.machineGun.reserve||0) + mgGain, 0, mgMax);
   }
   if(player.weaponsUnlocked && player.weaponsUnlocked.grenade){
     const grenadeGain = Math.max(0, Math.floor(n/6));
-    if(grenadeGain>0){ player.grenade.reserve = clamp((player.grenade.reserve||0) + grenadeGain, 0, 30); }
+    const maxReserve = player.grenade.maxReserve || GRENADE_RESERVE_MAX;
+    if(grenadeGain>0){ player.grenade.reserve = clamp((player.grenade.reserve||0) + grenadeGain, 0, maxReserve); }
     else if(player.grenade.ammo===0 && player.grenade.reserve===0){
-      player.grenade.reserve = clamp((player.grenade.reserve||0) + 1, 0, 30);
+      player.grenade.reserve = clamp((player.grenade.reserve||0) + 1, 0, maxReserve);
     }
   }
 }
-function addFuel(n){ player.flame.fuel = clamp(player.flame.fuel+n, 0, 200); }
+function addFuel(n){
+  if(!Number.isFinite(n) || n<=0) return;
+  const stats = player.flame;
+  if(!stats) return;
+  const reduction = Math.max(0, n*40);
+  stats.heat = Math.max(0, (stats.heat||0) - reduction);
+  const current = now();
+  if(stats.lockedUntil && current < stats.lockedUntil){
+    stats.lockedUntil = Math.max(current, stats.lockedUntil - reduction);
+    if(stats.lockedUntil <= current){
+      stats.lockedUntil = 0;
+      stats.overheated = false;
+      stats.overheatNotifiedUntil = 0;
+      stats.cooldownNoticeUntil = 0;
+    }
+  }
+}
 function grantWeaponUpgrade(){
   player.weaponUpgrades = (player.weaponUpgrades||0) + 1;
   player.pistol.cooldown = Math.max(70, Math.round(player.pistol.cooldown * 0.92));
@@ -2895,7 +2938,7 @@ function grantWeaponUpgrade(){
   player.flame.cooldown = Math.max(40, Math.round(player.flame.cooldown * 0.94));
   player.melee.cooldown = Math.max(80, Math.round(player.melee.cooldown * 0.9));
   player.saber.cooldown = Math.max(100, Math.round(player.saber.cooldown * 0.9));
-  player.machineGun.cooldown = Math.max(40, Math.round(player.machineGun.cooldown * 0.94));
+  player.machineGun.cooldown = Math.max(10, Math.round(player.machineGun.cooldown * 0.94));
 }
 
 function rewardWorker(worker){
@@ -2975,8 +3018,12 @@ window.addEventListener('keydown', e=>{
     }
   }
   if(k==='1') setWeapon('pistol');
-  if(k==='2') setWeapon('flame');
-  if(k==='3') setWeapon('melee');
+  if(k==='2') setWeapon('silenced');
+  if(k==='3') setWeapon('flame');
+  if(k==='4') setWeapon('melee');
+  if(k==='5') setWeapon('grenade');
+  if(k==='6') setWeapon('saber');
+  if(k==='7') setWeapon('machineGun');
   if(k==='e'){ attackHeld=true; attack(); }
   if(k===' '){ interact(); }
 },{passive:false});
@@ -3536,6 +3583,7 @@ function makeLevel(i){
   deskDrawers=[]; hazards=[]; stealthZones=[]; backgroundFX=[]; floatingPapers=[];
   billboardScreens=[]; boardTables=[]; merchants=[]; sprinklers=[];
   boardMembers=[];
+  boardMemberDefeated=false;
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
@@ -4858,7 +4906,25 @@ function interact(){
     // Door → next level
     if(nearDoor()){
       if(now() < elevatorLockedUntil){ centerNote('Elevator locked — security sweep.', 1400); lockedBuzz(); notify('Elevator temporarily offline.'); }
-      else if(!door.unlocked){ centerNote("Door locked."); lockedBuzz(); notify("Door locked."); }
+      else if(!door.unlocked){
+        if(currentFloor === FLOORS && ceoArenaState && !ceoArenaState.completed){
+          centerNote('Defeat the CEO to unlock the elevator.', 1600);
+          lockedBuzz();
+          notify('CEO still active.');
+        } else if(boardRoomActive && (!boardMemberDefeated || guards.some(g=>g && g.hp>0))){
+          centerNote('Clear the board room before using the elevator.', 1600);
+          lockedBuzz();
+          notify('Board room still contested.');
+        } else if(totalServersOnFloor > 0 && destroyedOnFloor < totalServersOnFloor){
+          centerNote('Destroy remaining servers to unlock the elevator.', 1600);
+          lockedBuzz();
+          notify('Server objective incomplete.');
+        } else {
+          centerNote('Door locked.');
+          lockedBuzz();
+          notify('Door locked.');
+        }
+      }
       else {
         if(!door.open){
           clearFeather('elevator');
@@ -4949,10 +5015,20 @@ function attack(){
     stats.muzzleUntil = t + 80;
     if(player.weapon==='pistol' && !player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
   } else if(player.weapon==='flame'){
-    if(player.flame.fuel<=0) { notify('Out of fuel.'); return; }
+    const stats = player.flame;
+    if(stats.lockedUntil && t < stats.lockedUntil){
+      if(!stats.cooldownNoticeUntil || t >= stats.cooldownNoticeUntil){
+        centerNote('Flamethrower cooling down!', 1400);
+        notify('Flamethrower overheated — wait for cooldown.');
+        lockedBuzz();
+        stats.cooldownNoticeUntil = t + 900;
+      }
+      return;
+    }
     const flameCooldown = now()<player.hopeBuffUntil ? Math.max(30, Math.round(player.flame.cooldown * 0.85)) : player.flame.cooldown;
-    if(t - player.flame.last < flameCooldown) return;
-    player.flame.last=t; player.flame.fuel = Math.max(0, player.flame.fuel-1);
+    if(t - stats.last < flameCooldown) return;
+    stats.last = t;
+    stats.lastFiredAt = t;
     const dir = player.facing>0 ? 1 : -1;
     const bx = player.x + (dir>0?player.w:0);
     const by = player.y + 18;
@@ -4991,7 +5067,7 @@ function attack(){
     if(t - (stats.last||0) < stats.cooldown) return;
     stats.last=t;
     const range = player.weapon==='saber' ? 48 : 36;
-    const dmgValue = player.weapon==='saber' ? scaledPlayerDamage(PLAYER_MELEE_DAMAGE*1.4) : scaledPlayerDamage(PLAYER_MELEE_DAMAGE);
+    const dmgValue = player.weapon==='saber' ? scaledPlayerDamage(SABER_BASE_DAMAGE) : scaledPlayerDamage(PLAYER_MELEE_DAMAGE);
     const px = player.x + (player.facing>0 ? player.w : -range);
     const hitBox={x:px, y:player.y, w:range, h:player.h};
     let hits=0;
@@ -5106,9 +5182,80 @@ function guardFire(g){
   }
 }
 
+function manageFlamethrowerHeat(frameTime){
+  const stats = player.flame;
+  if(!stats) return;
+  if(!Number.isFinite(stats.maxHeat) || stats.maxHeat <= 0){
+    stats.maxHeat = FLAMETHROWER_MAX_HEAT_MS;
+  }
+  if(!stats.lastHeatTick){
+    stats.lastHeatTick = frameTime;
+    return;
+  }
+  let delta = frameTime - stats.lastHeatTick;
+  stats.lastHeatTick = frameTime;
+  if(!Number.isFinite(delta) || delta <= 0){
+    return;
+  }
+  if(stats.lockedUntil && frameTime >= stats.lockedUntil){
+    stats.lockedUntil = 0;
+    stats.heat = 0;
+    stats.overheated = false;
+    stats.overheatNotifiedUntil = 0;
+    stats.cooldownNoticeUntil = 0;
+  }
+  if(stats.lockedUntil && frameTime < stats.lockedUntil){
+    stats.heat = stats.maxHeat;
+    return;
+  }
+  const firing = (player.weapon==='flame' && attackHeld && !pause && !state.playerWeaponsDisabled && stats.last && frameTime - stats.last <= Math.max(120, (stats.cooldown||60)*2));
+  if(firing){
+    stats.heat = Math.min(stats.maxHeat, (stats.heat||0) + delta);
+    if(stats.heat >= stats.maxHeat){
+      stats.heat = stats.maxHeat;
+      if(!stats.overheated){
+        stats.lockedUntil = frameTime + stats.maxHeat;
+        centerNote('Flamethrower overheated! Cooling for 10s.', 1800);
+        notify('Flamethrower overheated — wait for cooldown.');
+        lockedBuzz();
+        stats.overheatNotifiedUntil = frameTime + 1500;
+      }
+      stats.overheated = true;
+      return;
+    }
+    stats.overheated = false;
+  } else {
+    stats.heat = Math.max(0, (stats.heat||0) - delta);
+    if(stats.heat <= 0){
+      stats.heat = 0;
+      stats.overheated = false;
+    }
+  }
+}
+
+function canUnlockElevator(){
+  if(!door) return false;
+  if(currentFloor === FLOORS){
+    return !!(ceoArenaState && ceoArenaState.completed);
+  }
+  const serversCleared = totalServersOnFloor <= 0 || destroyedOnFloor >= totalServersOnFloor;
+  if(boardRoomActive){
+    const guardsRemaining = guards.some(g => g && g.hp>0);
+    if(guardsRemaining) return false;
+    if(!boardMemberDefeated) return false;
+    return serversCleared;
+  }
+  if(totalServersOnFloor < 0){
+    return false;
+  }
+  return serversCleared;
+}
+
 // ========= Update =========
 function update(dt){
   if(!runActive) return;
+  const frameNow = now();
+  manageFlamethrowerHeat(frameNow);
   if(outsideMode){
     updateOutside(dt);
     return;
@@ -5401,7 +5548,7 @@ function update(dt){
     if(!spotlightHit){ spotlightDetection = Math.max(0, spotlightDetection - dt*0.5); }
     if(now()>alarmUntil) alarm=false;
     const arenaElevatorLocked = (currentFloor === FLOORS && ceoArenaState && !ceoArenaState.completed);
-    if(now()>elevatorLockedUntil && destroyedOnFloor===totalServersOnFloor && !door.unlocked && !arenaElevatorLocked){
+    if(now()>elevatorLockedUntil && !door.unlocked && !arenaElevatorLocked && canUnlockElevator()){
       door.unlocked=true; door.glowUntil = now()+2000;
     }
     if(evacuationActive && now()>evacuationUntil){ evacuationActive=false; }
@@ -5546,6 +5693,11 @@ function update(dt){
         }
         if(defeated.boss){
           unlockDeckCardForFloor(currentFloor);
+          if(boardRoomActive){
+            boardMemberDefeated = true;
+            notify('Board member neutralized.');
+            centerNote('Board member defeated!', 2000);
+          }
         }
       }
     }
@@ -5567,9 +5719,23 @@ function update(dt){
       }
     }
     destroyedOnFloor = servers.filter(x=>x.destroyed).length;
-    if(destroyedOnFloor===totalServersOnFloor && !door.unlocked){
-      door.unlocked=true; door.glowUntil = now()+2000; chime(); notify("All servers down. Elevator unlocked.");
-      smokeActive=true;
+    if(!door.unlocked && canUnlockElevator()){
+      door.unlocked=true;
+      door.glowUntil = now()+2000;
+      chime();
+      if(boardRoomActive){
+        centerNote('Board room cleared! Elevator unlocked.', 2000);
+        notify('Board room secure — elevator unlocked.');
+      } else if(totalServersOnFloor > 0){
+        centerNote('All servers down. Elevator unlocked.', 1800);
+        notify('All servers down. Elevator unlocked.');
+      } else {
+        centerNote('Elevator unlocked.', 1600);
+        notify('Elevator unlocked.');
+      }
+      if(serverObjective && destroyedOnFloor===totalServersOnFloor){
+        smokeActive=true;
+      }
     }
     if(serverObjective && destroyedOnFloor===totalServersOnFloor){
       player.interestRate = Math.max(0, player.interestRate-1);
@@ -5822,22 +5988,29 @@ function update(dt){
     weaponNameEl.textContent = `${prefix}${label}`;
   }
   if(weaponAmmoEl){
+    const hudNow = now();
     let ammoText = '';
     if(player.weapon==='pistol'){
       ammoText = `Ammo ${player.pistol.ammo}/${player.pistol.reserve}`;
     } else if(player.weapon==='silenced'){
       ammoText = `Ammo ${player.silenced.ammo}/${player.pistol.reserve}`;
     } else if(player.weapon==='flame'){
-      ammoText = `Fuel ${player.flame.fuel}`;
+      if(player.flame.lockedUntil && hudNow < player.flame.lockedUntil){
+        const remaining = Math.max(0, Math.ceil((player.flame.lockedUntil - hudNow)/1000));
+        ammoText = `Cooling ${remaining}s`;
+      } else {
+        const percent = player.flame.maxHeat ? Math.round(((player.flame.heat||0) / player.flame.maxHeat) * 100) : 0;
+        ammoText = `Heat ${Math.max(0, Math.min(100, percent))}%`;
+      }
     } else if(player.weapon==='machineGun'){
       ammoText = `Ammo ${player.machineGun.ammo}/${player.machineGun.reserve}`;
     } else if(player.weapon==='grenade'){
       ammoText = `Grenades ${player.grenade.ammo}/${player.grenade.reserve}`;
     } else if(player.weapon==='saber'){
-      const cooling = now()-player.saber.last < player.saber.cooldown;
+      const cooling = hudNow-player.saber.last < player.saber.cooldown;
       ammoText = `Saber ready${cooling?' (cooling)':''}`;
     } else {
-      const cooling = now()-player.melee.last < player.melee.cooldown;
+      const cooling = hudNow-player.melee.last < player.melee.cooldown;
       ammoText = `Melee ready${cooling?' (cooling)':''}`;
     }
     weaponAmmoEl.textContent = ammoText;
