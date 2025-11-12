@@ -149,6 +149,9 @@ const OUTSIDE_WINDOW_GUARD_SLOTS = [
   { row: 3, col: 4, id: 'window-se' }
 ];
 
+const ARCADE_BEATDOWN_FLOORS = new Set([13, 14, 23]);
+const ARCADE_RAMPAGE_TARGET_DEFAULT = 26;
+
 (()=>{
 // ===== Color utilities & palettes =====
 function clamp01(v){ return Math.min(1, Math.max(0, v)); }
@@ -318,6 +321,7 @@ function getFloorTheme(floor){
 function isBoardFloor(floor){ return BOARD_FLOORS.has(floor); }
 function isServerFloor(floor){ return SERVER_FLOORS.has(floor); }
 function isInflationFloor(floor){ return INFLATION_FLOORS.has(floor); }
+function isArcadeBeatdownFloor(floor){ return ARCADE_BEATDOWN_FLOORS.has(floor); }
 
 function computePaletteForFloor(floor){
   const hueShift = ((floor-1) * PALETTE_HUE_STEP) % 360;
@@ -1239,7 +1243,10 @@ const player = {
   contactInterferencePhase:0,
   stepPhase:0,
   stepStride:0,
-  hopeBuffUntil:0
+  hopeBuffUntil:0,
+  punchAnimUntil:0,
+  punchCombo:0,
+  punchAnimSide:1
 };
 
 const HOSTAGE_SEQUENCE = ['Grandpa','Mom','Dad','Grandma','Brother','Sister',
@@ -1315,7 +1322,7 @@ function fmtClock(ms){
 }
 
 // Level arrays
-let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[];
+let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[], arcadeStations=[];
 let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[], boardMembers=[];
 let destroyedOnFloor=0, totalServersOnFloor=0;
 let alarm=false, alarmUntil=0;
@@ -1324,6 +1331,7 @@ let sub = null;
 let entryVentWorld = null;
 let lightingCondition='normal', lightingPulse=0, lightingPhase=0;
 let floorTheme=null, boardRoomActive=false, ninjaRound=false, serverObjective=false, inflationActive=false, bonusFloorActive=false;
+let arcadeBeatdownActive=false, arcadePixelOverlay=false, arcadeRampage=null;
 let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0, sprinklersActiveUntil=0;
 let spotlightDetection=0, elevatorLockedUntil=0;
 let interestDrainTimer=0;
@@ -2985,6 +2993,7 @@ window.addEventListener('blur', ()=>{ attackHeld=false; });
 
 // ==== Level generation ====
 function guardArchetypeForFloor(i){
+  if(isArcadeBeatdownFloor(i)) return 'thug';
   const theme = getFloorTheme(i);
   const basePool = ['pistol'];
   if(i>=5) basePool.push('policy');
@@ -3028,6 +3037,7 @@ function makeGuard(x,y,i){
   if(type==='ad') baseHp=26, baseSpeed=1.05;
   if(type==='lawsuit') baseHp=28, baseSpeed=0.9;
   if(type==='heavy') baseHp=48, baseSpeed=0.65;
+  if(type==='thug') baseHp=32, baseSpeed=0.95;
   const hp = Math.round(baseHp * hpMultiplier);
   const speed = Math.max(0.35, baseSpeed * speedMultiplier);
   const guard = new Agent({
@@ -3053,6 +3063,18 @@ function makeGuard(x,y,i){
   if(type==='policy'){ guard.policyBinder = true; }
   if(type==='ad'){ guard.adCaster = true; }
   if(type==='lawsuit'){ guard.homing = true; }
+  if(type==='thug'){
+    guard.weapon = 'melee';
+    guard.shoot = false;
+    guard.attackInterval = 520;
+    guard.flashlight = false;
+    guard.speed = Math.max(0.55, guard.speed);
+    guard.vx = guard.direction > 0 ? Math.abs(guard.speed) : -Math.abs(guard.speed);
+    guard.w = 24;
+    guard.h = 48;
+    guard.dmg = Math.round(GUARD_BASE_DAMAGE * 1.2);
+    guard.puncher = true;
+  }
   if(type==='ninja'){
     guard.vy = 0;
     guard.onGround = true;
@@ -3517,9 +3539,15 @@ function makeLevel(i){
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
-  plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[];
+  plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
+  player.punchAnimUntil = 0;
+  player.punchCombo = 0;
+  player.punchAnimSide = 1;
+  arcadeBeatdownActive = false;
+  arcadePixelOverlay = false;
+  arcadeRampage = null;
   setAmbientForFloor(i);
   sprinklersActiveUntil = 0;
   resetCeoArenaState();
@@ -3594,6 +3622,12 @@ function makeLevel(i){
   if(i === FLOORS){
     makeCeoPenthouseArena(yBase);
     totalServersOnFloor = servers.length;
+    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    return;
+  }
+
+  if(isArcadeBeatdownFloor(i)){
+    makeArcadeBeatdownLevel(i, yBase);
     camX = clamp(player.x - W*0.45, 0, 3*W - W);
     return;
   }
@@ -3875,6 +3909,245 @@ function makeLevel(i){
   }
 
   camX = clamp(player.x - W*0.45, 0, 3*W - W);
+}
+
+function makeArcadeBeatdownLevel(floor, yBase){
+  arcadeBeatdownActive = true;
+  arcadePixelOverlay = true;
+  lightingCondition = 'neon';
+  backgroundFX.length = 0;
+  backgroundFX.push({type:'arcadeBackdrop'});
+  backgroundFX.push({type:'arcadeGrid'});
+
+  const cubicleBands = 9;
+  const cubicleWidth = (3*W - 180) / cubicleBands;
+  for(let i=0;i<cubicleBands;i++){
+    const cx = 90 + i * cubicleWidth;
+    backgroundFX.push({type:'arcadeCubicle', x:cx, y:yBase-150, w:cubicleWidth-24, h:92});
+  }
+
+  const chartCount = 4;
+  for(let i=0;i<chartCount;i++){
+    const ratio = chartCount===1 ? 0.5 : i/Math.max(1, chartCount-1);
+    const chartX = 160 + ratio * (3*W - 320);
+    backgroundFX.push({type:'arcadeChart', x:chartX, y:120, w:140, h:88, flip:i%2===0});
+  }
+
+  const deskCount = 9;
+  const deskWidth = 96;
+  const deskHeight = 38;
+  const laneStart = 100;
+  const laneEnd = 3*W - 320;
+  for(let d=0; d<deskCount; d++){
+    const t = deskCount===1 ? 0.5 : d/Math.max(1, deskCount-1);
+    const dx = laneStart + t * (laneEnd - laneStart);
+    const desk = { x: dx, y: yBase - deskHeight, w: deskWidth, h: deskHeight };
+    desks.push(desk);
+    stealthZones.push({ ...desk });
+    deskDrawers.push({ x: desk.x + 12, y: desk.y + 8, w: 18, h: 16, used:false });
+    if(d % 2 === 1){
+      pickups.push({ type:'cash', x: desk.x + desk.w/2 - 10, y: desk.y - 24, w:20, h:20, amount: 24 + Math.round(Math.random()*12) });
+    }
+  }
+
+  const plantSlots = [0.18*W, 1.4*W, 2.6*W];
+  for(const px of plantSlots){ plants.push({x:px, y:yBase-32, w:28, h:32}); }
+
+  waterCoolers.push({x:0.5*W, y:yBase-62, w:32, h:62});
+  vendingMachines.push({x:0.95*W, y:yBase-70, w:38, h:70, broken:false});
+  coffeeMachines.push({x:1.65*W, y:yBase-62, w:34, h:60, used:false});
+  printers.push({x:2.0*W, y:yBase-56, w:36, h:44, jammed:false});
+
+  const stationWidth = 150;
+  const stationHeight = 116;
+  const stationX = 2.35*W;
+  const stationY = yBase - stationHeight - 12;
+  const station = { x: stationX, y: stationY, w: stationWidth, h: stationHeight, used:false, promptShown:false };
+  arcadeStations.push(station);
+  backgroundFX.push({type:'arcadeGunMount', x: stationX, y: stationY, w: stationWidth, h: stationHeight});
+  pickups.push({type:'intel', x: stationX + stationWidth/2 - 10, y: stationY - 26, w:20, h:20});
+
+  windowsArr.length = 0;
+  const windowRows = 2;
+  const windowCols = 10;
+  const winWidth = 46;
+  const winHeight = 26;
+  const winStartX = 80;
+  const winGap = (3*W - winStartX*2 - winWidth) / Math.max(1, windowCols-1);
+  for(let r=0;r<windowRows;r++){
+    for(let c=0;c<windowCols;c++){
+      const wx = winStartX + c * winGap;
+      const wy = 80 + r * 44;
+      windowsArr.push({x:wx, y:wy, w:winWidth, h:winHeight});
+    }
+  }
+
+  const thugCount = 6 + Math.floor(floor/4);
+  for(let g=0; g<thugCount; g++){
+    const spread = thugCount<=1 ? 0.5 : g/Math.max(1, thugCount-1);
+    const gx = laneStart + spread * (laneEnd - laneStart) + 60;
+    const guard = makeGuard(gx, yBase-42, floor);
+    guard.x = gx;
+    guard.y = yBase - guard.h;
+    guard.vx = (Math.random()<0.5?-1:1) * Math.max(0.55, guard.speed||0.8);
+    guard.spawnOrigin = guard.x;
+    guards.push(guard);
+  }
+
+  const workerRows = 3;
+  for(let w=0; w<workerRows; w++){
+    const zoneDesk = desks[w*2] || desks[0];
+    if(!zoneDesk) break;
+    const appearance = createWorkerAppearance();
+    workers.push({
+      x: zoneDesk.x + zoneDesk.w/2 - 9,
+      y: yBase - 38,
+      w: 18,
+      h: 38,
+      vx: (Math.random()<0.5?-1:1) * 0.35,
+      minX: zoneDesk.x - 24,
+      maxX: zoneDesk.x + zoneDesk.w + 24,
+      bob: Math.random() * Math.PI * 2,
+      alive:true,
+      hp:10,
+      maxHp:10,
+      rewardClaimed:false,
+      hitFlashUntil:0,
+      facing:1,
+      appearance,
+      showTie:Math.random()<0.85,
+      hasBadge:Math.random()<0.4,
+      hasClipboard:false,
+      clipboardSide:1,
+      glasses:Math.random()<0.3
+    });
+  }
+
+  spotlights.push({x:0.6*W, y:yBase-150, w:90, h:18, range:240, t:0, speed:0.8});
+  spotlights.push({x:1.6*W, y:yBase-150, w:90, h:18, range:240, t:Math.PI/2, speed:0.7});
+
+  floorSlab = {x:0, y:yBase, w:3*W, h:18};
+  door = { x: 3*W-160, y: yBase-120, w:120, h:120, unlocked:false, open:false, lift:0, glowUntil:0 };
+  totalServersOnFloor = -1;
+  destroyedOnFloor = 0;
+}
+
+function startArcadeRampage(station){
+  if(!isArcadeBeatdownFloor(currentFloor)) return;
+  if(arcadeRampage && arcadeRampage.active) return;
+  if(station) station.used = true;
+  const target = currentFloor >= 23 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 12 : currentFloor >= 14 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 6 : ARCADE_RAMPAGE_TARGET_DEFAULT;
+  const maxSimultaneous = currentFloor >= 23 ? 7 : currentFloor >= 14 ? 6 : 5;
+  arcadeRampage = {
+    active:true,
+    station,
+    kills:0,
+    target,
+    thugs:[],
+    spawnTimer:0,
+    nextSpawn:0.5,
+    lastShot:0,
+    cooldown:90,
+    muzzleFlashUntil:0,
+    screenShake:0,
+    bgScroll:0,
+    maxSimultaneous,
+    completed:false
+  };
+  attackHeld = false;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.hidden = false;
+  player.crouch = false;
+  centerNote('Machine gun nest engaged! Hold E or mouse to fire.', 2200);
+  notify('Mounted the machine gun — office thugs approaching!');
+}
+
+function spawnArcadeRampageThug(){
+  if(!arcadeRampage || arcadeRampage.completed) return;
+  const laneOptions = [-1, 0, 1];
+  const lane = laneOptions[Math.floor(Math.random()*laneOptions.length)];
+  const difficulty = arcadeRampage.kills || 0;
+  const hp = 2 + Math.floor(Math.random()*2) + Math.floor(difficulty/12);
+  const speed = 0.32 + Math.random()*0.12 + Math.min(0.18, difficulty*0.01);
+  arcadeRampage.thugs.push({ lane, distance: 1.4 + Math.random()*0.35, speed, hp, maxHp:hp, wobble:Math.random()*Math.PI*2 });
+}
+
+function fireArcadeRampage(){
+  if(!arcadeRampage || !arcadeRampage.active) return;
+  const t = now();
+  const cooldown = arcadeRampage.cooldown || 90;
+  if(arcadeRampage.lastShot && t - arcadeRampage.lastShot < cooldown) return;
+  arcadeRampage.lastShot = t;
+  arcadeRampage.muzzleFlashUntil = t + 90;
+  arcadeRampage.screenShake = Math.min(0.65, (arcadeRampage.screenShake||0) + 0.18);
+  if(!arcadeRampage.thugs.length) return;
+  arcadeRampage.thugs.sort((a,b)=>a.distance-b.distance);
+  const target = arcadeRampage.thugs[0];
+  target.hp -= 1;
+  if(target.hp <= 0){
+    arcadeRampage.thugs.shift();
+    arcadeRampage.kills++;
+    if(arcadeRampage.kills >= arcadeRampage.target){
+      completeArcadeRampage();
+    }
+  }
+}
+
+function updateArcadeRampage(dt){
+  if(!arcadeRampage || !arcadeRampage.active) return;
+  arcadeRampage.bgScroll = (arcadeRampage.bgScroll || 0) + dt * 120;
+  arcadeRampage.spawnTimer += dt;
+  if(arcadeRampage.spawnTimer >= (arcadeRampage.nextSpawn || 0.6)){
+    arcadeRampage.spawnTimer = 0;
+    arcadeRampage.nextSpawn = Math.max(0.35, 0.55 - Math.min(0.2, (arcadeRampage.kills||0)*0.01)) + Math.random()*0.15;
+    if(arcadeRampage.thugs.length < (arcadeRampage.maxSimultaneous || 5)){
+      spawnArcadeRampageThug();
+    }
+  }
+  const nowTs = now();
+  for(const thug of arcadeRampage.thugs){
+    thug.distance -= dt * thug.speed;
+    thug.wobble = (thug.wobble || 0) + dt * 4.2;
+    if(thug.distance <= 0){
+      damage();
+      player.screenFlashUntil = Math.max(player.screenFlashUntil, nowTs + 240);
+      arcadeRampage.screenShake = Math.max(arcadeRampage.screenShake||0, 0.45);
+      thug.distance = 0;
+      thug.reached = true;
+    }
+  }
+  arcadeRampage.thugs = arcadeRampage.thugs.filter(t=>!t.reached && t.hp>0);
+  if(arcadeRampage.muzzleFlashUntil && nowTs > arcadeRampage.muzzleFlashUntil){
+    arcadeRampage.muzzleFlashUntil = 0;
+  }
+  if(arcadeRampage.screenShake){
+    arcadeRampage.screenShake = Math.max(0, arcadeRampage.screenShake - dt*1.6);
+  }
+}
+
+function completeArcadeRampage(){
+  if(!arcadeRampage || arcadeRampage.completed) return;
+  arcadeRampage.completed = true;
+  arcadeRampage.active = false;
+  arcadeRampage.thugs = [];
+  arcadeRampage.muzzleFlashUntil = 0;
+  arcadeRampage.screenShake = 0;
+  destroyedOnFloor = 0;
+  totalServersOnFloor = 0;
+  if(door){
+    door.unlocked = true;
+    door.glowUntil = now() + 4000;
+  }
+  if(arcadeRampage.station){
+    arcadeRampage.station.completed = true;
+  }
+  pickups.push({type:'ammo', x: floorSlab.x + floorSlab.w - 220, y: floorSlab.y-28, w:20, h:20, amount:36});
+  pickups.push({type:'cash', x: floorSlab.x + floorSlab.w - 260, y: floorSlab.y-28, w:20, h:20, amount:80});
+  centerNote('Office horde repelled! Elevator unlocked.', 2200);
+  notify('Machine gun nest cleared the office thugs. Elevator is open.');
+  attackHeld = false;
 }
 
 function spawnEcoBossRoom(floor){
@@ -4377,6 +4650,7 @@ function interact(){
   if(activeHack) return;
   if(pause) return;
   const p={x:player.x, y:player.y, w:player.w, h:player.h};
+  if(arcadeRampage && arcadeRampage.active) return;
 
   if(!inSub){
     if(ecoBossActive){
@@ -4389,6 +4663,16 @@ function interact(){
       }
     }
     // Pickups
+    for(const station of arcadeStations){
+      if(station && !station.used){
+        const bounds = { x: station.x-20, y: station.y-20, w: station.w+40, h: station.h+40 };
+        if(rect(p, bounds)){
+          startArcadeRampage(station);
+          return;
+        }
+      }
+    }
+
     for(const it of pickups){
       if(it.type && rect(p,it)){
         if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
@@ -4636,6 +4920,10 @@ function attack(){
     return;
   }
   if(state.playerWeaponsDisabled) return;
+  if(arcadeRampage && arcadeRampage.active){
+    fireArcadeRampage();
+    return;
+  }
   if(ninjaRound && !['melee','saber'].includes(player.weapon)){
     centerNote('Melee only during ninja round!', 1200);
     notify('Switch to melee.');
@@ -4738,6 +5026,11 @@ function attack(){
     if(hits){
       player.hopeBuffUntil = Math.max(player.hopeBuffUntil, now()+1000);
       beep({freq: player.weapon==='saber'?520:480});
+      if(arcadeBeatdownActive || isArcadeBeatdownFloor(currentFloor)){
+        player.punchAnimUntil = now()+260;
+        player.punchAnimSide = player.facing>=0 ? 1 : -1;
+        player.punchCombo = (player.punchCombo||0) + hits;
+      }
     }
   }
 }
@@ -4820,12 +5113,35 @@ function update(dt){
     updateOutside(dt);
     return;
   }
+  if((!arcadeRampage || !arcadeRampage.active) && arcadeStations.length){
+    const promptRangeX = 140;
+    const promptRangeY = 120;
+    for(const station of arcadeStations){
+      if(!station || station.used || station.promptShown) continue;
+      const sx = station.x + station.w/2;
+      const sy = station.y + station.h/2;
+      const dx = Math.abs((player.x + player.w/2) - sx);
+      const dy = Math.abs((player.y + player.h/2) - sy);
+      if(dx <= promptRangeX && dy <= promptRangeY){
+        station.promptShown = true;
+        notify('Press SPACE to mount the machine gun.');
+        centerNote('Press SPACE to mount the machine gun.', 1400);
+      }
+    }
+  }
+  if(arcadeRampage && arcadeRampage.active){
+    updateArcadeRampage(dt);
+    return;
+  }
   if(player.contactDamagePending && now() >= player.contactDamageApplyAt){
     player.contactDamagePending = false;
     player.contactDamageApplyAt = 0;
     player.contactInterferenceStart = 0;
     player.contactInterferenceUntil = 0;
     damage();
+  }
+  if(player.punchAnimUntil && now() > player.punchAnimUntil + 240){
+    player.punchCombo = 0;
   }
   lightingPhase += dt;
   if(activeHack && now()>activeHack.deadline){
@@ -5189,6 +5505,23 @@ function update(dt){
         const close = Math.abs(px - (g.x+g.w/2))<90 && Math.abs(py - (g.y+g.h/2))<40;
         if(close && overlapping && !stomped && !shielded){
           if(scheduleGuardContactDamage()){ inflicted = true; }
+        }
+      }
+      if(g.type==='thug' && !inflicted){
+        const centerX = g.x + g.w/2;
+        const horizontal = px - centerX;
+        const vertical = Math.abs(py - (g.y + g.h/2));
+        const chaseDir = Math.sign(horizontal);
+        if(chaseDir !== 0){
+          const chaseSpeed = Math.max(0.6, g.speed || Math.abs(g.vx) || 0.8);
+          g.vx = chaseDir * chaseSpeed;
+        }
+        if(Math.abs(horizontal) < 42 && vertical < 36){
+          if(g.readyToAttack(now())){
+            if(scheduleGuardContactDamage()){ inflicted = true; }
+            g.markAttack(now());
+            g.punchWindupUntil = now() + 220;
+          }
         }
       }
       if(overlapping && !stomped && !inflicted && !shielded){
@@ -5606,6 +5939,27 @@ function drawNinjaPlayer(ctx, px, py, state){
   ctx.fillStyle = gloveColor;
   ctx.fillRect(-1 - armSwing, armTop + armHeight - 2, 4, 3);
   ctx.fillRect(width - 3 + armSwing, armTop + armHeight - 2, 4, 3);
+  if(state.punchAnimUntil && now() < state.punchAnimUntil){
+    const punchDir = state.punchAnimSide >= 0 ? 1 : -1;
+    const reach = crouch ? 12 : 18 + Math.min(12, (state.punchCombo||0)*2);
+    const fistY = armTop + armHeight - 3;
+    ctx.fillStyle = gloveColor;
+    if(punchDir > 0){
+      ctx.fillRect(width - 3 + armSwing, fistY-1, reach, 4);
+      ctx.fillStyle = '#ffd2a8';
+      ctx.fillRect(width - 3 + armSwing + reach, fistY-3, 6, 6);
+      ctx.fillStyle = 'rgba(255,140,140,0.35)';
+      ctx.fillRect(width + armSwing + reach + 4, fistY-4, 4, 8);
+      ctx.fillRect(width + armSwing + reach + 10, fistY-3, 3, 6);
+    } else {
+      ctx.fillRect(-1 - armSwing - reach, fistY-1, reach, 4);
+      ctx.fillStyle = '#ffd2a8';
+      ctx.fillRect(-1 - armSwing - reach - 6, fistY-3, 6, 6);
+      ctx.fillStyle = 'rgba(255,140,140,0.35)';
+      ctx.fillRect(-armSwing - reach - 18, fistY-4, 4, 8);
+      ctx.fillRect(-armSwing - reach - 24, fistY-3, 3, 6);
+    }
+  }
 
   ctx.fillStyle = hoodColor;
   ctx.fillRect(3, top, width - 6, hoodHeight);
@@ -5663,6 +6017,136 @@ function drawPlatformBlock(ctx, x, y, width, height, palette){
   }
   ctx.restore();
 }
+
+function drawArcadeRampage(){
+  const state = arcadeRampage || {};
+  const nowTs = now();
+  const shake = state.screenShake || 0;
+  const shakeX = shake ? (Math.random()-0.5) * 12 * shake : 0;
+  const shakeY = shake ? (Math.random()-0.5) * 6 * shake : 0;
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
+
+  const gradient = ctx.createLinearGradient(0,0,0,H);
+  gradient.addColorStop(0, '#10192f');
+  gradient.addColorStop(1, '#05070f');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0,0,W,H);
+
+  const scroll = state.bgScroll || 0;
+  for(let band=0; band<3; band++){
+    const bandHeight = 70;
+    const y = H - 220 - band * bandHeight;
+    const depth = 0.35 - band * 0.08;
+    ctx.fillStyle = `rgba(38,52,92,${depth})`;
+    ctx.fillRect(0, y, W, bandHeight);
+    const offset = (scroll * (0.4 + band*0.12)) % 200;
+    for(let x=-offset; x<W+200; x+=200){
+      ctx.fillStyle = 'rgba(60,84,140,0.28)';
+      ctx.fillRect(x, y+10, 160, bandHeight-20);
+      ctx.fillStyle = 'rgba(24,36,70,0.35)';
+      ctx.fillRect(x+10, y+16, 140, bandHeight-32);
+      ctx.fillStyle = 'rgba(110,150,220,0.2)';
+      ctx.fillRect(x+10, y+16, 2, bandHeight-32);
+      ctx.fillRect(x+30, y+16, 2, bandHeight-32);
+      ctx.fillRect(x+120, y+16, 2, bandHeight-32);
+    }
+  }
+
+  for(let i=0;i<3;i++){
+    const chartX = 120 + i * 240;
+    ctx.fillStyle = 'rgba(255,210,120,0.24)';
+    ctx.fillRect(chartX, 86, 120, 90);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.strokeRect(chartX, 86, 120, 90);
+    ctx.beginPath();
+    ctx.moveTo(chartX+12, 160);
+    ctx.lineTo(chartX+40, 130);
+    ctx.lineTo(chartX+72, 148);
+    ctx.lineTo(chartX+108, 112);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,80,80,0.4)';
+    ctx.fillRect(chartX+40, 130, 6, 30);
+    ctx.fillStyle = 'rgba(90,200,255,0.35)';
+    ctx.fillRect(chartX+70, 148, 6, 12);
+  }
+
+  ctx.fillStyle = '#0b0f18';
+  ctx.fillRect(0, H-120, W, 140);
+  ctx.fillStyle = '#1a2438';
+  ctx.fillRect(0, H-138, W, 18);
+
+  for(const thug of state.thugs || []){
+    const progress = clamp(1 - (thug.distance || 1), 0, 1);
+    const scale = 0.6 + progress * 3.1;
+    const width = 42 * scale;
+    const height = 78 * scale;
+    const wobble = Math.sin((thug.wobble||0)) * (12 * (1-progress));
+    const laneOffset = thug.lane * 140 * (1 - progress * 0.4);
+    const x = W/2 + laneOffset + wobble - width/2;
+    const y = H - 160 - height + progress * 50;
+    ctx.fillStyle = '#3c2924';
+    ctx.fillRect(x, y, width, height);
+    ctx.fillStyle = '#7a4338';
+    ctx.fillRect(x+width/2 - width*0.18, y+height*0.2, width*0.36, height*0.4);
+    ctx.fillStyle = '#f3cda8';
+    ctx.fillRect(x+width/2 - width*0.12, y+height*0.08, width*0.24, height*0.22);
+    ctx.fillStyle = '#2b1c18';
+    ctx.fillRect(x+width/2 - width*0.15, y+height*0.05, width*0.3, height*0.04);
+    ctx.fillStyle = '#7a4338';
+    ctx.fillRect(x- width*0.18, y+height*0.28, width*0.2, height*0.32);
+    ctx.fillRect(x+width- width*0.02, y+height*0.28, width*0.2, height*0.32);
+    ctx.fillStyle = '#f3cda8';
+    ctx.fillRect(x- width*0.18, y+height*0.55, width*0.18, height*0.12);
+    ctx.fillRect(x+width, y+height*0.55, width*0.18, height*0.12);
+    if(thug.hp && thug.maxHp){
+      const ratio = Math.max(0, Math.min(1, thug.hp / thug.maxHp));
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(x, y-10, width, 4);
+      ctx.fillStyle = '#ff5656';
+      ctx.fillRect(x, y-10, width*ratio, 4);
+    }
+  }
+
+  if(state.muzzleFlashUntil && nowTs < state.muzzleFlashUntil){
+    ctx.fillStyle = 'rgba(255,230,180,0.45)';
+    ctx.fillRect(W/2-160, H-200, 320, 160);
+  }
+
+  ctx.fillStyle = '#1c232f';
+  ctx.fillRect(W/2-32, H-150, 64, 90);
+  ctx.fillStyle = '#0f141e';
+  ctx.fillRect(W/2-16, H-220, 32, 90);
+  ctx.fillStyle = '#3c4c66';
+  ctx.fillRect(W/2-6, H-220, 12, 60);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W/2-40, H/2);
+  ctx.lineTo(W/2+40, H/2);
+  ctx.moveTo(W/2, H/2-40);
+  ctx.lineTo(W/2, H/2+40);
+  ctx.stroke();
+
+  ctx.restore();
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#f0f6ff';
+  ctx.font = '20px monospace';
+  ctx.fillText(`Thugs down: ${state.kills||0}/${state.target||ARCADE_RAMPAGE_TARGET_DEFAULT}`, 24, 36);
+  ctx.font = '14px monospace';
+  ctx.fillText('Hold E or mouse to fire the machine gun', 24, 60);
+  ctx.fillText('Press SPACE to dismount after the horde is clear', 24, 80);
+  if(state.completed){
+    ctx.fillStyle = '#9ef7ff';
+    ctx.font = '18px monospace';
+    ctx.fillText('Horde cleared! Elevator unlocked.', W/2 - 160, H - 40);
+  }
+
+  drawArcadePixelOverlay(ctx);
+}
+
 
 function drawBoardMembers(ctx, ox){
   if(!boardMembers.length) return;
@@ -5742,6 +6226,19 @@ function drawContactInterference(ctx){
     const ny = (i*97 + Math.floor(now()/14)) % H;
     ctx.fillRect(nx, ny, 2, 2);
   }
+  ctx.restore();
+}
+
+function drawArcadePixelOverlay(ctx){
+  if(!arcadePixelOverlay) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(20,24,40,0.08)';
+  for(let y=0; y<H; y+=6){ ctx.fillRect(0, y, W, 2); }
+  ctx.fillStyle = 'rgba(36,52,92,0.06)';
+  for(let x=0; x<W; x+=6){ ctx.fillRect(x, 0, 2, H); }
+  ctx.globalAlpha = 0.1;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  for(let y=0; y<H; y+=14){ ctx.fillRect(0, y, W, 1); }
   ctx.restore();
 }
 
@@ -5856,6 +6353,75 @@ function drawWorkerSprite(ctx, worker, offsetX=0){
   ctx.fillStyle = appearance.mouth;
   ctx.fillRect(headX+3, faceY + headHeight - 3, headWidth-6, 1);
 }
+
+function drawArcadeThug(ctx, guard, offsetX=0){
+  const baseX = guard.x + offsetX;
+  const baseY = guard.y;
+  const width = guard.w || 24;
+  const height = guard.h || 48;
+  const flashing = guard.hitFlashUntil && guard.hitFlashUntil > now();
+  const punching = guard.punchWindupUntil && guard.punchWindupUntil > now();
+  const dir = guard.vx >= 0 ? 1 : -1;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(baseX + 4, baseY + height - 6, Math.max(6, width-8), 4);
+
+  ctx.fillStyle = flashing ? '#ff9c9c' : '#4a2f2a';
+  ctx.fillRect(baseX+2, baseY+10, width-4, height-16);
+  ctx.fillStyle = '#2d1d18';
+  ctx.fillRect(baseX+4, baseY+height-12, width-8, 10);
+
+  ctx.fillStyle = '#7a4338';
+  ctx.fillRect(baseX+4, baseY+2, width-8, 16);
+  ctx.fillStyle = '#1f1412';
+  ctx.fillRect(baseX+4, baseY+2, width-8, 4);
+
+  ctx.fillStyle = '#f4c7a2';
+  ctx.fillRect(baseX+6, baseY-4, width-12, 10);
+  ctx.fillStyle = '#2a1b18';
+  ctx.fillRect(baseX+6, baseY-4, width-12, 2);
+  ctx.fillRect(baseX+8, baseY, width-16, 2);
+
+  ctx.fillStyle = '#d44a4a';
+  ctx.fillRect(baseX+width/2-2, baseY+16, 4, 18);
+
+  ctx.fillStyle = '#7a4338';
+  ctx.fillRect(baseX-2, baseY+18, 6, 20);
+  ctx.fillRect(baseX+width-4, baseY+18, 6, 20);
+  ctx.fillStyle = '#f4c7a2';
+  ctx.fillRect(baseX-2, baseY+36, 6, 6);
+  ctx.fillRect(baseX+width-4, baseY+36, 6, 6);
+
+  if(punching){
+    const extend = 16;
+    const armY = baseY + 24;
+    ctx.fillStyle = '#7a4338';
+    if(dir>0){
+      ctx.fillRect(baseX+width-4, armY, extend, 6);
+      ctx.fillStyle = flashing ? '#ffd5b0' : '#f3cda8';
+      ctx.fillRect(baseX+width-4+extend, armY-2, 6, 8);
+    } else {
+      ctx.fillRect(baseX-extend-2, armY, extend, 6);
+      ctx.fillStyle = flashing ? '#ffd5b0' : '#f3cda8';
+      ctx.fillRect(baseX-extend-8, armY-2, 6, 8);
+    }
+    ctx.fillStyle = 'rgba(255,140,140,0.35)';
+    for(let s=0;s<3;s++){
+      const offset = s*4;
+      const streakX = dir>0 ? baseX+width+4+offset : baseX-16-offset;
+      ctx.fillRect(streakX, armY-6 + s*3, 3, 3);
+    }
+  }
+
+  if(guard.maxHp){
+    const ratio = Math.max(0, Math.min(1, guard.hp / guard.maxHp));
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.fillRect(baseX, baseY-8, width, 4);
+    ctx.fillStyle=flashing ? '#ff6b6b' : '#ff4444';
+    ctx.fillRect(baseX, baseY-8, width*ratio, 4);
+  }
+}
+
 
 function drawWindowGuard(ctx, guard, nowTs){
   if(!guard || !guard.window) return;
@@ -6080,6 +6646,10 @@ function draw(){
     drawOutside();
     return;
   }
+  if(arcadeRampage && arcadeRampage.active){
+    drawArcadeRampage();
+    return;
+  }
   ctx.fillStyle = activePalette.background; ctx.fillRect(0,0,W,H);
 
   if(!inSub){
@@ -6106,6 +6676,37 @@ function draw(){
       if(fx.type==='ticker'){
         ctx.fillStyle='rgba(255,215,90,0.35)';
         ctx.fillRect(80+ox, fx.y, 3*W-160, 8);
+      } else if(fx.type==='arcadeBackdrop'){
+        ctx.fillStyle='rgba(16,24,38,0.92)';
+        ctx.fillRect(0,0,W,H);
+      } else if(fx.type==='arcadeGrid'){
+        const offset = (camX*0.3)%140;
+        ctx.fillStyle='rgba(40,60,100,0.18)';
+        for(let x=-offset; x<3*W; x+=140){
+          ctx.fillRect(x+ox, 60, 2, floorSlab.y-120);
+        }
+      } else if(fx.type==='arcadeCubicle'){
+        ctx.fillStyle='rgba(52,68,108,0.32)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.fillStyle='rgba(82,104,158,0.28)';
+        ctx.fillRect(fx.x+6+ox, fx.y+6, Math.max(0, fx.w-12), Math.max(0, fx.h-12));
+      } else if(fx.type==='arcadeChart'){
+        ctx.fillStyle='rgba(255,214,140,0.25)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.strokeStyle='rgba(255,255,255,0.2)';
+        ctx.strokeRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.beginPath();
+        ctx.moveTo(fx.x+12+ox, fx.y+fx.h-18);
+        ctx.lineTo(fx.x+fx.w/2+ox, fx.y+16);
+        ctx.lineTo(fx.x+fx.w-12+ox, fx.y+fx.h-24);
+        ctx.stroke();
+      } else if(fx.type==='arcadeGunMount'){
+        ctx.fillStyle='#202638';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.fillStyle='#151b28';
+        ctx.fillRect(fx.x+12+ox, fx.y+fx.h-36, fx.w-24, 30);
+        ctx.fillStyle='#3e4c6a';
+        ctx.fillRect(fx.x+20+ox, fx.y+8, fx.w-40, fx.h-52);
       } else if(fx.type==='cubiclesParallax'){
         const offset = (camX*0.25)%160;
         for(let x=-offset;x<3*W;x+=160){
@@ -6300,6 +6901,22 @@ function draw(){
       ctx.fillStyle = activePalette.desk; ctx.fillRect(d.x+ox,d.y,d.w,d.h);
       ctx.fillStyle = activePalette.deskEdge; ctx.fillRect(d.x+6+ox,d.y+d.h-10,d.w-12,8);
       ctx.fillStyle = activePalette.deskLeg; ctx.fillRect(d.x+4+ox,d.y+d.h,6,10); ctx.fillRect(d.x+d.w-10+ox,d.y+d.h,6,10);
+    }
+    for(const station of arcadeStations){
+      if(!station) continue;
+      ctx.fillStyle = '#242a3a';
+      ctx.fillRect(station.x+ox, station.y, station.w, station.h);
+      ctx.fillStyle = '#1a1f2b';
+      ctx.fillRect(station.x+10+ox, station.y+station.h-28, station.w-20, 24);
+      ctx.fillStyle = '#373f56';
+      ctx.fillRect(station.x+20+ox, station.y+8, station.w-40, station.h-48);
+      ctx.fillStyle = '#0f141c';
+      ctx.fillRect(station.x+station.w/2-12+ox, station.y-24, 24, 24);
+      if(!station.used){
+        ctx.fillStyle='rgba(255,255,255,0.85)';
+        ctx.font='14px monospace';
+        ctx.fillText('SPACE: Machine Gun', station.x+ox-12, station.y-8);
+      }
     }
     // plants
     for(const p of plants){
@@ -6513,7 +7130,7 @@ function draw(){
     // guards with flashlight cone
     for(const g of guards){
       const isCEO = g.type==='ceo' || g.ceo;
-      if(!isCEO){
+      if(!isCEO && g.flashlight !== false){
         ctx.fillStyle = activePalette.flashlightCone;
         const coneDir = (g.vx>=0?1:-1);
         ctx.beginPath();
@@ -6557,6 +7174,10 @@ function draw(){
           ctx.strokeStyle = 'rgba(255,255,255,0.35)';
           ctx.strokeRect(baseX, baseY - 14, width, 6);
         }
+        continue;
+      }
+      if(g.type==='thug'){
+        drawArcadeThug(ctx, g, ox);
         continue;
       }
       let tint = '#2f6fa2';
@@ -6700,6 +7321,10 @@ function draw(){
       ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+10);
       ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+36);
       ctx.closePath(); ctx.fill();
+    }
+
+    if(arcadePixelOverlay){
+      drawArcadePixelOverlay(ctx);
     }
 
     // Smoke overlay when servers down
