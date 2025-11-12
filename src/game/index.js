@@ -1292,7 +1292,8 @@ const ceoArenaState = {
   lockAnnounced:false,
   introShown:false,
   shockwaves:[],
-  lastSupplyWave:-1
+  lastSupplyWave:-1,
+  initialSupplyDelivered:false
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -1497,6 +1498,24 @@ function evaluateWeaponUnlocks(){
   if(player.files>=25) unlockWeapon('saber','Saber');
   if(player.intel>=40) unlockWeapon('machineGun','Machine gun');
   updateWeaponButtons();
+}
+
+function unlockAllWeapons(){
+  if(!player.weaponsUnlocked) player.weaponsUnlocked = {};
+  const knownWeapons = new Set([
+    ...Object.keys(weaponButtons || {}),
+    ...Object.keys(player.weaponsUnlocked)
+  ]);
+  let unlockedAny = false;
+  for(const weapon of knownWeapons){
+    if(!player.weaponsUnlocked[weapon]){
+      player.weaponsUnlocked[weapon] = true;
+      unlockedAny = true;
+    }
+  }
+  updateWeaponButtons();
+  evaluateWeaponUnlocks();
+  return unlockedAny;
 }
 function showRageModal(message){
   if(rageMessage && message){ rageMessage.textContent = message; }
@@ -3180,7 +3199,7 @@ function makeCeoPenthouseArena(yBase){
     backgroundFX.push({ type:'coliseumTorch', x:tx, y:yBase-128, h:110 });
   }
 
-  door = { x: 0.24*W, y: yBase-210, w:130, h:210, unlocked:true, open:true, lift:1, glowUntil:0 };
+  door = { x: 0.24*W, y: yBase-210, w:130, h:210, unlocked:false, open:false, lift:0, glowUntil:0 };
 
   ceoArenaState.bounds = {
     left: door.x + door.w - 20,
@@ -3203,6 +3222,7 @@ function makeCeoPenthouseArena(yBase){
   ceoArenaState.introShown = true;
   ceoArenaState.shockwaves = [];
   ceoArenaState.lastSupplyWave = -1;
+  ceoArenaState.initialSupplyDelivered = false;
 
   notify('The penthouse reveals a marble coliseum. Step into the arena to begin the gauntlet.');
   centerNote('CEO Coliseum — enter the arena.', 2000);
@@ -3228,6 +3248,7 @@ function resetCeoArenaState(){
   ceoArenaState.shockwaves = [];
   ceoArenaState.currentBoss = null;
   ceoArenaState.lastSupplyWave = -1;
+  ceoArenaState.initialSupplyDelivered = false;
 }
 
 function spawnCeoBoss(){
@@ -3288,17 +3309,36 @@ function spawnCeoArenaEnemy(){
   guards.push(guard);
 }
 
-function spawnCeoArenaSupplyDrop(){
+function spawnCeoArenaSupplyDrop(options={}){
   if(!floorSlab || !ceoArenaState.bounds) return;
+  const { initial=false, final=false, showNote=true } = options;
   const groundY = floorSlab.y;
   const centerX = (ceoArenaState.bounds.left + ceoArenaState.bounds.right) / 2;
-  const baseY = groundY - 26;
-  const ammoX = centerX - 48;
-  const medkitX = centerX + 22;
-  pickups.push({ type:'ammo', x: ammoX, y: baseY, w:20, h:20, amount:30 });
-  pickups.push({ type:'medkit', x: medkitX, y: baseY, w:20, h:20, amount:40 });
-  centerNote('Supply drop delivered.', 1400);
-  notify('Arena resupply: ammo and medkit available.');
+  const baseY = groundY - 30;
+  const spacing = 46;
+  const drops = [
+    { type:'medkit', amount:250 },
+    { type:'medkit', amount:250 },
+    { type:'medkit', amount:250 },
+    { type:'ammo', amount:120 },
+    { type:'ammo', amount:120 },
+    { type:'unlockAll' }
+  ];
+  const startX = centerX - spacing * ((drops.length - 1) / 2);
+  drops.forEach((drop, index)=>{
+    const x = Math.round(startX + index * spacing) - 12;
+    pickups.push({ type: drop.type, x, y: baseY, w:24, h:24, amount: drop.amount });
+  });
+  const noteText = initial ? 'Initial supply drop ready!' : final ? 'Final supply drop delivered!' : 'Supply drop delivered.';
+  if(showNote){
+    centerNote(noteText, 1600);
+  }
+  const notifyText = initial
+    ? 'Arena kickoff cache: 3 medkits, 2 ammo crates, and an arsenal dossier.'
+    : final
+      ? 'Final arena cache: 3 medkits, 2 ammo crates, and an arsenal dossier.'
+      : 'Arena resupply: 3 medkits, 2 ammo crates, and an arsenal dossier available.';
+  notify(notifyText);
 }
 
 function beginCeoArenaWave(index){
@@ -3390,6 +3430,10 @@ function updateCeoArena(dt){
       alarmUntil = 0;
       notify('Arena lockdown engaged. Survive the CEO\'s gauntlet!');
       centerNote('Arena locked — Wave 1 incoming!', 2000);
+      if(!ceoArenaState.initialSupplyDelivered){
+        spawnCeoArenaSupplyDrop({ initial:true, showNote:false });
+        ceoArenaState.initialSupplyDelivered = true;
+      }
       beginCeoArenaWave(0);
     }
     return;
@@ -3436,13 +3480,14 @@ function updateCeoArena(dt){
           ceoArenaState.ceoActive = false;
           if(door){
             door.unlocked = true;
-            door.open = true;
-            door.lift = 1;
+            door.open = false;
+            door.lift = 0;
             door.glowUntil = now()+4000;
           }
           if(runActive){
-            notify('CEO defeated! Debt tyranny ends tonight.');
-            endGame('victory');
+            spawnCeoArenaSupplyDrop({ final:true, showNote:false });
+            notify('CEO defeated! Elevator unlocked — escape to finish the mission.');
+            centerNote('CEO defeated — reach the elevator!', 2400);
           }
         }
       } else if(!ceoArenaState.betweenWaves){
@@ -4361,6 +4406,18 @@ function interact(){
           notify('Violet dossier recovered.');
           updateSpecialFileUI();
         }
+        if(it.type==='unlockAll'){
+          const unlocked = unlockAllWeapons();
+          it.type=null;
+          if(unlocked){
+            centerNote('All weapons unlocked!', 1800);
+            notify('Arsenal dossier grants access to every weapon.');
+          } else {
+            centerNote('Arsenal dossier recovered.', 1400);
+            notify('All weapons already unlocked, dossier secured.');
+          }
+          chime();
+        }
       }
     }
     // Coffee machines
@@ -4525,7 +4582,7 @@ function interact(){
           doorOpenSFX();
           setTimeout(()=>{
             if(currentFloor >= FLOORS){
-              finishRun('escape', { message:"You cleared the tower before midnight!", note:"Tower secured." });
+              finishRun('victory', { message:'CEO eliminated! Tower reclaimed.', note:'Penthouse secured.' });
               return;
             }
             currentFloor = Math.min(FLOORS, currentFloor+1);
@@ -5027,7 +5084,7 @@ function update(dt){
     }
     if(!spotlightHit){ spotlightDetection = Math.max(0, spotlightDetection - dt*0.5); }
     if(now()>alarmUntil) alarm=false;
-    const arenaElevatorLocked = (currentFloor === FLOORS && ceoArenaState && ceoArenaState.triggered && !ceoArenaState.completed);
+    const arenaElevatorLocked = (currentFloor === FLOORS && ceoArenaState && !ceoArenaState.completed);
     if(now()>elevatorLockedUntil && destroyedOnFloor===totalServersOnFloor && !door.unlocked && !arenaElevatorLocked){
       door.unlocked=true; door.glowUntil = now()+2000;
     }
@@ -6615,6 +6672,14 @@ function draw(){
       if(it.type==='intel'){ ctx.fillStyle='#c89eff'; ctx.fillRect(x,y,it.w,it.h); }
       if(it.type==='feather'){ ctx.fillStyle='#fff7a8'; ctx.fillRect(x,y,it.w,it.h); }
       if(it.type==='special'){ ctx.fillStyle='#B455FF'; ctx.fillRect(x,y,it.w,it.h); }
+      if(it.type==='unlockAll'){
+        ctx.fillStyle='#ffe28c';
+        ctx.fillRect(x,y,it.w,it.h);
+        ctx.fillStyle='#2b1d55';
+        ctx.fillRect(x+4,y+4,it.w-8,it.h-8);
+        ctx.fillStyle='#ffecc0';
+        ctx.fillRect(x+6,y+6,it.w-12,it.h-12);
+      }
     }
 
     // player
