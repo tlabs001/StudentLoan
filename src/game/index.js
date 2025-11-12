@@ -158,6 +158,39 @@ const OUTSIDE_WINDOW_GUARD_SLOTS = [
 ];
 
 const ARCADE_BEATDOWN_FLOORS = new Set([13, 14, 23]);
+const TOP_DOWN_FLOORS = new Set([9, 34]);
+const TOP_DOWN_FLOOR_CONFIG = {
+  9: {
+    name: 'Ventilation Maze',
+    noteValue: 1000,
+    noteLabel: '$1,000 Note',
+    internCount: 6,
+    requiredBoxes: 9,
+    weaponUnlocks: ['grenade', 'saber'],
+    speed: 180,
+    secretPhotos: [
+      'CEO in a coconut bra',
+      'CEO napping on a pool float',
+      'CEO karaoke with seagulls',
+      'CEO tangled in seaweed'
+    ]
+  },
+  34: {
+    name: 'Executive Vent Vault',
+    noteValue: 10000,
+    noteLabel: '$10,000 Note',
+    internCount: 8,
+    requiredBoxes: 9,
+    weaponUnlocks: ['saber', 'machineGun'],
+    speed: 195,
+    secretPhotos: [
+      'CEO in a gold lame wetsuit',
+      'CEO serenading dolphins',
+      'CEO slipping on a yacht deck',
+      'CEO eating instant noodles in disguise'
+    ]
+  }
+};
 const ARCADE_RAMPAGE_TARGET_DEFAULT = 26;
 
 (()=>{
@@ -1317,6 +1350,8 @@ const ceoArenaState = {
   initialSupplyDelivered:false
 };
 
+let topDownState = null;
+
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
 function timeLeftMs(){
@@ -1869,6 +1904,13 @@ const now=()=>performance.now();
 function rect(a,b){ return !(a.x+a.w<b.x || a.x>b.x+b.w || a.y+a.h<b.y || a.y>b.y+b.h); }
 function rect2(x,y,w,h,b){ return !(x+w<b.x || x>b.x+b.w || y+h<b.y || y>b.y+b.h); }
 const fmtCurrency = (value)=>Math.round(Math.max(0, Math.abs(value))).toLocaleString();
+function shuffleArray(array, rng=Math.random){
+  for(let i=array.length-1; i>0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
 function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
 function notify(text){ noteEl.textContent = text; }
 
@@ -1877,6 +1919,16 @@ const ui = {
   toast: (msg) => notify(msg),
   banner: (msg, duration=4000) => centerNote(msg, duration)
 };
+
+const unlockedAchievements = new Set();
+function unlockAchievement(id, title, description){
+  if(!id || unlockedAchievements.has(id)) return;
+  unlockedAchievements.add(id);
+  const detail = description ? `${title}: ${description}` : title;
+  notify(`Achievement unlocked — ${detail}`);
+  centerNote(`Achievement Unlocked: ${title}`, 1800);
+  chime();
+}
 
 const audio = {
   play(id){
@@ -2746,9 +2798,14 @@ function enterFloor(targetFloor, options={}){
   player.vy = 0;
   makeLevel(currentFloor);
   handleFloorStart(currentFloor);
-  player.y = floorSlab.y - player.h;
-  player.prevBottom = player.y + player.h;
-  player.prevVy = 0;
+  if(topDownState){
+    player.prevBottom = player.y + player.h;
+    player.prevVy = 0;
+  } else {
+    player.y = floorSlab.y - player.h;
+    player.prevBottom = player.y + player.h;
+    player.prevVy = 0;
+  }
   if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
   updateMinimapHighlight();
   if(options.showBanner !== false){
@@ -3734,6 +3791,7 @@ function makeLevel(i){
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
   plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
+  topDownState = null;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
   player.punchAnimUntil = 0;
@@ -3749,6 +3807,12 @@ function makeLevel(i){
 
   const doubleWidth = isArcadeBeatdownFloor(i);
   setLevelWidth(doubleWidth ? BASE_LEVEL_WIDTH * 2 : BASE_LEVEL_WIDTH);
+
+  if(TOP_DOWN_FLOORS.has(i)){
+    makeTopDownMazeLevel(i);
+    camX = 0;
+    return;
+  }
 
   floorTheme = getFloorTheme(i);
   const levelSpan = levelWidth();
@@ -4108,6 +4172,651 @@ function makeLevel(i){
   }
 
   camX = clamp(player.x - W*0.45, 0, levelSpan - W);
+}
+
+function makeTopDownMazeLevel(floor){
+  floorTheme = getFloorTheme(floor);
+  activePalette = computePaletteForFloor(floor);
+  lightingCondition = 'dim';
+  backgroundFX.length = 0;
+  floorSlab = { x:0, y:H-20, w:W, h:20 };
+
+  const config = TOP_DOWN_FLOOR_CONFIG[floor] || TOP_DOWN_FLOOR_CONFIG[9];
+  const baseCols = 29;
+  const baseRows = 21;
+  const tileSize = Math.max(22, Math.floor(Math.min((W-140)/baseCols, (H-160)/baseRows)));
+  const offsetX = Math.floor((W - tileSize * baseCols) / 2);
+  const offsetY = Math.floor((H - tileSize * baseRows) / 2);
+  const rng = makeSeededRandom(`vent-${floor}-${Math.floor(now())}`);
+
+  const grid = generateTopDownMaze(baseCols, baseRows, rng);
+  grid[Math.max(1, baseRows-2)][Math.max(1, baseCols-2)] = 0;
+  if(baseCols > 2) grid[Math.max(1, baseRows-2)][baseCols-3] = 0;
+  if(baseRows > 2) grid[baseRows-3][Math.max(1, baseCols-2)] = 0;
+
+  const walkableCells = [];
+  for(let row=0; row<baseRows; row++){
+    for(let col=0; col<baseCols; col++){
+      if(grid[row][col] === 0){
+        walkableCells.push({ row, col });
+      }
+    }
+  }
+
+  const startCell = { row:1, col:1 };
+  const exitCell = { row: Math.max(1, baseRows-2), col: Math.max(1, baseCols-2) };
+  const cellKey = (cell)=>`${cell.row}:${cell.col}`;
+  const reserved = new Set([cellKey(startCell), cellKey(exitCell)]);
+  const takeCells = (count)=>{
+    const pool = walkableCells.filter(cell => !reserved.has(cellKey(cell)));
+    if(pool.length === 0) return [];
+    const shuffled = shuffleArray([...pool], rng);
+    const selection = shuffled.slice(0, Math.min(count, shuffled.length));
+    for(const cell of selection){ reserved.add(cellKey(cell)); }
+    return selection;
+  };
+
+  const topDown = {
+    floor,
+    config,
+    cols: baseCols,
+    rows: baseRows,
+    tileSize,
+    offsetX,
+    offsetY,
+    grid,
+    startCell,
+    exitCell,
+    door:null,
+    boxes:[],
+    loot:[],
+    gaps:[],
+    ladders:[],
+    interns:[],
+    internsKilled:0,
+    requiredBoxes: config && Number.isFinite(config.requiredBoxes) ? config.requiredBoxes : 9,
+    hotwiredCount:0,
+    missionComplete:false,
+    missionAnnounced:false,
+    exiting:false,
+    speed: config && config.speed ? config.speed : 180,
+    noteLabel: config && config.noteLabel ? config.noteLabel : '$1,000 Note',
+    noteValue: config && Number.isFinite(config.noteValue) ? config.noteValue : 1000,
+    secretPhotos: Array.isArray(config && config.secretPhotos) ? config.secretPhotos.slice() : [],
+    originalSize:{ w: player.w, h: player.h },
+    prevWeaponsDisabled: state.playerWeaponsDisabled
+  };
+
+  const startCenter = topDownCellCenter(topDown, startCell.col, startCell.row);
+  const exitCenter = topDownCellCenter(topDown, exitCell.col, exitCell.row);
+  topDown.door = { x: exitCenter.x, y: exitCenter.y, radius: tileSize * 0.7, open:false, glowUntil:0 };
+
+  const boxCells = takeCells(topDown.requiredBoxes);
+  if(boxCells.length < topDown.requiredBoxes){
+    topDown.requiredBoxes = boxCells.length;
+  }
+  if(topDown.requiredBoxes <= 0){
+    topDown.requiredBoxes = boxCells.length;
+  }
+  for(const cell of boxCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.boxes.push({ col:cell.col, row:cell.row, x:center.x, y:center.y, activated:false, glowUntil:0 });
+  }
+
+  const gapCells = takeCells(10);
+  for(const cell of gapCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.gaps.push({ col:cell.col, row:cell.row, x:center.x, y:center.y, triggered:false });
+  }
+
+  const ladderCells = takeCells(10);
+  for(const cell of ladderCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.ladders.push({ col:cell.col, row:cell.row, x:center.x, y:center.y, triggered:false });
+  }
+
+  const weaponLabels = {
+    grenade:'Grenade Launcher',
+    saber:'Saber',
+    machineGun:'Machine Gun',
+    flame:'Flamethrower'
+  };
+  const weaponCells = takeCells(config.weaponUnlocks.length);
+  config.weaponUnlocks.forEach((weapon, idx)=>{
+    const cell = weaponCells[idx];
+    if(!cell) return;
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.loot.push({ type:'weapon', weapon, label: weaponLabels[weapon] || weapon, x:center.x, y:center.y, collected:false });
+  });
+
+  const intelCells = takeCells(10);
+  for(const cell of intelCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    const amount = 1 + Math.floor(rng()*2);
+    topDown.loot.push({ type:'intel', amount, x:center.x, y:center.y, collected:false });
+  }
+
+  const fileCells = takeCells(10);
+  for(const cell of fileCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    const amount = 1 + Math.floor(rng()*2);
+    topDown.loot.push({ type:'file', amount, x:center.x, y:center.y, collected:false });
+  }
+
+  const cashCells = takeCells(8);
+  for(const cell of cashCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.loot.push({ type:'cash', amount: topDown.noteValue, x:center.x, y:center.y, collected:false });
+  }
+
+  const secretCells = takeCells(topDown.secretPhotos.length);
+  topDown.secretPhotos.forEach((photo, idx)=>{
+    const cell = secretCells[idx];
+    if(!cell) return;
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.loot.push({ type:'secret', photo, x:center.x, y:center.y, collected:false });
+  });
+
+  const cacheCells = takeCells(6);
+  for(const cell of cacheCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.loot.push({ type:'cache', intel:2, files:2, x:center.x, y:center.y, collected:false });
+  }
+
+  const upgradeCells = takeCells(3);
+  for(const cell of upgradeCells){
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    topDown.loot.push({ type:'upgrade', x:center.x, y:center.y, collected:false });
+  }
+
+  const internNames = shuffleArray(['Avery','Sam','Jordan','Sky','Mika','Quinn','Riley','Dakota','Toni','Emery','Kai','Devon','Harper','Rowan','Indy','Shiloh'], rng);
+  const internCells = takeCells(Math.max(0, config.internCount || 0));
+  internCells.forEach((cell, idx)=>{
+    const center = topDownCellCenter(topDown, cell.col, cell.row);
+    const name = `${internNames[idx % internNames.length]} the Intern`;
+    topDown.interns.push({ name, col:cell.col, row:cell.row, x:center.x, y:center.y, alive:true, hitFlashUntil:0 });
+  });
+
+  player.w = 24;
+  player.h = 24;
+  player.x = startCenter.x - player.w/2;
+  player.y = startCenter.y - player.h/2;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.climbing = false;
+  player.crouch = false;
+  player.sprint = false;
+  player.facing = 1;
+
+  door = { x: exitCenter.x - tileSize/2, y: exitCenter.y - tileSize/2, w: tileSize, h: tileSize, unlocked:false, open:false, lift:0, glowUntil:0 };
+  totalServersOnFloor = 0;
+  sprinklersActiveUntil = 0;
+
+  topDownState = topDown;
+  state.playerWeaponsDisabled = true;
+  camX = 0;
+  notify(`${config.name}: Hotwire ${topDown.requiredBoxes} electrical boxes hidden in the vents.`);
+  centerNote(`Level ${floor} – ${config.name}`, 1800);
+  updateMusicForState();
+  updateHudCommon();
+}
+
+function generateTopDownMaze(cols, rows, rng=Math.random){
+  const grid = Array.from({length: rows}, ()=>Array(cols).fill(1));
+  const stack = [];
+  const start = { row:1, col:1 };
+  const dirs = [
+    { dr:0, dc:2 },
+    { dr:0, dc:-2 },
+    { dr:2, dc:0 },
+    { dr:-2, dc:0 }
+  ];
+  grid[start.row][start.col] = 0;
+  stack.push(start);
+  while(stack.length){
+    const current = stack[stack.length-1];
+    const neighbors = [];
+    for(const dir of dirs){
+      const nr = current.row + dir.dr;
+      const nc = current.col + dir.dc;
+      if(nr <= 0 || nr >= rows || nc <= 0 || nc >= cols) continue;
+      if(grid[nr][nc] === 1){
+        neighbors.push({ row:nr, col:nc, dir });
+      }
+    }
+    if(neighbors.length === 0){
+      stack.pop();
+      continue;
+    }
+    shuffleArray(neighbors, rng);
+    const next = neighbors[0];
+    const midRow = current.row + next.dir.dr/2;
+    const midCol = current.col + next.dir.dc/2;
+    grid[midRow][midCol] = 0;
+    grid[next.row][next.col] = 0;
+    stack.push({ row: next.row, col: next.col });
+  }
+  const extraBreaks = Math.floor(cols * rows * 0.08);
+  for(let i=0; i<extraBreaks; i++){
+    const row = 1 + Math.floor(rng() * (rows - 2));
+    const col = 1 + Math.floor(rng() * (cols - 2));
+    if(grid[row][col] === 1){
+      grid[row][col] = 0;
+    }
+  }
+  return grid;
+}
+
+function topDownCellCenter(state, col, row){
+  return {
+    x: state.offsetX + col * state.tileSize + state.tileSize/2,
+    y: state.offsetY + row * state.tileSize + state.tileSize/2
+  };
+}
+
+function topDownWalkablePoint(state, x, y){
+  const col = Math.floor((x - state.offsetX) / state.tileSize);
+  const row = Math.floor((y - state.offsetY) / state.tileSize);
+  if(row < 0 || col < 0 || row >= state.rows || col >= state.cols) return false;
+  const rowData = state.grid[row];
+  if(!rowData) return false;
+  return rowData[col] === 0;
+}
+
+function topDownWalkableRect(state, x, y, w, h){
+  const pad = Math.min(6, Math.floor(state.tileSize * 0.18));
+  const points = [
+    { x: x + pad, y: y + pad },
+    { x: x + w - pad, y: y + pad },
+    { x: x + pad, y: y + h - pad },
+    { x: x + w - pad, y: y + h - pad }
+  ];
+  return points.every(pt => topDownWalkablePoint(state, pt.x, pt.y));
+}
+
+function movePlayerTopDown(state, moveX, moveY){
+  if(moveX){
+    const steps = Math.max(1, Math.ceil(Math.abs(moveX) / Math.max(1, state.tileSize * 0.45)));
+    const stepX = moveX / steps;
+    for(let i=0; i<steps; i++){
+      const nextX = player.x + stepX;
+      if(topDownWalkableRect(state, nextX, player.y, player.w, player.h)){
+        player.x = nextX;
+      } else {
+        break;
+      }
+    }
+  }
+  if(moveY){
+    const steps = Math.max(1, Math.ceil(Math.abs(moveY) / Math.max(1, state.tileSize * 0.45)));
+    const stepY = moveY / steps;
+    for(let i=0; i<steps; i++){
+      const nextY = player.y + stepY;
+      if(topDownWalkableRect(state, player.x, nextY, player.w, player.h)){
+        player.y = nextY;
+      } else {
+        break;
+      }
+    }
+  }
+}
+
+function updateTopDown(dt){
+  if(!topDownState) return;
+  const td = topDownState;
+  const speed = td.speed || 180;
+  let inputX = 0;
+  let inputY = 0;
+  if(keys['a'] || keys['arrowleft']) inputX -= 1;
+  if(keys['d'] || keys['arrowright']) inputX += 1;
+  if(keys['w'] || keys['arrowup']) inputY -= 1;
+  if(keys['s'] || keys['arrowdown']) inputY += 1;
+  const sprinting = keys['shift'];
+  if(inputX || inputY){
+    const length = Math.hypot(inputX, inputY) || 1;
+    const moveSpeed = speed * (sprinting ? 1.3 : 1);
+    const moveX = (inputX / length) * moveSpeed * dt;
+    const moveY = (inputY / length) * moveSpeed * dt;
+    movePlayerTopDown(td, moveX, moveY);
+    if(inputX > 0) player.facing = 1;
+    else if(inputX < 0) player.facing = -1;
+  }
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  player.onGround = true;
+  player.vx = 0;
+  player.vy = 0;
+  player.crouch = false;
+  player.climbing = false;
+  player.sprint = sprinting;
+
+  const centerX = player.x + player.w/2;
+  const centerY = player.y + player.h/2;
+  const range = td.tileSize * 0.7;
+  for(const gap of td.gaps){
+    if(gap.triggered) continue;
+    if(Math.hypot(centerX - gap.x, centerY - gap.y) <= range){
+      gap.triggered = true;
+      notify('You vault across a rattling vent gap.');
+      centerNote('Vent gap cleared', 900);
+    }
+  }
+  for(const ladder of td.ladders){
+    if(ladder.triggered) continue;
+    if(Math.hypot(centerX - ladder.x, centerY - ladder.y) <= range){
+      ladder.triggered = true;
+      notify('Ladder climbed deeper into the vents.');
+    }
+  }
+  if(td.door && Math.hypot(centerX - td.door.x, centerY - td.door.y) <= range){
+    td.door.glowUntil = now() + 200;
+  }
+  updateHudCommon();
+}
+
+function interactTopDown(){
+  if(!topDownState) return;
+  const td = topDownState;
+  const px = player.x + player.w/2;
+  const py = player.y + player.h/2;
+  const range = td.tileSize * 0.75;
+
+  for(const box of td.boxes){
+    if(box.activated) continue;
+    if(Math.hypot(px - box.x, py - box.y) <= range){
+      box.activated = true;
+      box.glowUntil = now() + 600;
+      td.hotwiredCount = Math.min(td.boxes.length, td.hotwiredCount + 1);
+      notify('Electrical box rerouted.');
+      centerNote('Electrical box hotwired', 1200);
+      chime();
+      if(td.hotwiredCount >= td.requiredBoxes && !td.missionComplete){
+        td.missionComplete = true;
+        if(!td.missionAnnounced){
+          td.missionAnnounced = true;
+          notify('All boxes hotwired! Return to the elevator.');
+          centerNote('All boxes hotwired!', 1600);
+          chime();
+        }
+      }
+      updateHudCommon();
+      return;
+    }
+  }
+
+  for(const loot of td.loot){
+    if(loot.collected) continue;
+    if(Math.hypot(px - loot.x, py - loot.y) > range) continue;
+    loot.collected = true;
+    if(loot.type === 'cash'){
+      const amount = Math.round(loot.amount || td.noteValue || 1000);
+      addChecking(amount);
+      centerNote(`Checking +$${fmtCurrency(amount)}`, 1200);
+      notify(`${td.noteLabel || '$1,000 Note'} recovered.`);
+      beep({freq:600});
+    } else if(loot.type === 'intel'){
+      const amount = Math.max(1, loot.amount || 1);
+      player.intel += amount;
+      evaluateWeaponUnlocks();
+      centerNote(`Intel +${amount}`, 1200);
+      notify('Intel cache secured.');
+      beep({freq:760});
+    } else if(loot.type === 'file'){
+      const amount = Math.max(1, loot.amount || 1);
+      player.files += amount;
+      evaluateWeaponUnlocks();
+      centerNote(`Files +${amount}`, 1200);
+      notify('File archive captured.');
+      beep({freq:720});
+    } else if(loot.type === 'cache'){
+      const intelGain = Math.max(1, loot.intel || 1);
+      const fileGain = Math.max(1, loot.files || 1);
+      player.intel += intelGain;
+      player.files += fileGain;
+      evaluateWeaponUnlocks();
+      centerNote(`Intel +${intelGain} / Files +${fileGain}`, 1400);
+      notify('Combined intel cache recovered.');
+      chime();
+    } else if(loot.type === 'weapon'){
+      const label = loot.label || (loot.weapon || 'Weapon');
+      unlockWeapon(loot.weapon, label);
+    } else if(loot.type === 'secret'){
+      player.specialFiles = (player.specialFiles || 0) + 1;
+      updateSpecialFileUI();
+      centerNote('Secret file uncovered!', 1600);
+      notify(`Embarrassing photo: ${loot.photo} (Dr. Jeffstein’s Island).`);
+      chime();
+    } else if(loot.type === 'upgrade'){
+      grantWeaponUpgrade();
+      centerNote('Weapon upgrade installed', 1400);
+      notify('Vents yielded a weapon mod.');
+      chime();
+    }
+    updateHudCommon();
+    return;
+  }
+
+  if(td.door && td.missionComplete && Math.hypot(px - td.door.x, py - td.door.y) <= range){
+    td.door.open = true;
+    notify('Elevator engaged. Vent infiltration complete.');
+    centerNote('Elevator unlocked', 1500);
+    chime();
+    completeTopDownLevel();
+    return;
+  }
+
+  notify('Nothing here to interact with.');
+}
+
+function handleTopDownAttack(){
+  if(!topDownState) return;
+  const td = topDownState;
+  const px = player.x + player.w/2;
+  const py = player.y + player.h/2;
+  const range = td.tileSize * 0.75;
+  let any=false;
+  for(const intern of td.interns){
+    if(!intern.alive) continue;
+    if(Math.hypot(px - intern.x, py - intern.y) <= range){
+      intern.alive = false;
+      intern.hitFlashUntil = now() + 220;
+      td.internsKilled += 1;
+      notify(`${intern.name} neutralized.`);
+      centerNote(`${intern.name} eliminated`, 1200);
+      any = true;
+    }
+  }
+  if(!any){
+    notify('Your strike slices only vent dust.');
+  }
+  updateHudCommon();
+}
+
+function restorePlayerFromTopDown(tdState){
+  if(!tdState) return;
+  if(tdState.originalSize){
+    player.w = tdState.originalSize.w;
+    player.h = tdState.originalSize.h;
+  }
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = false;
+  player.crouch = false;
+  player.climbing = false;
+  state.playerWeaponsDisabled = !!tdState.prevWeaponsDisabled;
+}
+
+function completeTopDownLevel(){
+  if(!topDownState || topDownState.exiting) return;
+  const td = topDownState;
+  td.exiting = true;
+  const totalInterns = td.interns.length;
+  const killed = td.internsKilled;
+  const floor = td.floor;
+  if(totalInterns > 0){
+    if(killed === 0){
+      unlockAchievement(`vent-pacifist-${floor}`, floor === 9 ? 'Vent Mercy I' : `Vent Mercy ${floor}`, 'Cleared the vents without harming interns');
+    } else if(killed === totalInterns){
+      unlockAchievement(`vent-menace-${floor}`, floor === 9 ? 'Intern Hunter I' : `Intern Hunter ${floor}`, 'Eliminated every intern in the vents');
+    }
+  }
+  const nextFloor = Math.min(FLOORS, currentFloor + 1);
+  restorePlayerFromTopDown(td);
+  topDownState = null;
+  setTimeout(()=>enterFloor(nextFloor, {}), 600);
+}
+
+function drawTopDown(){
+  ctx.fillStyle = activePalette && activePalette.background ? activePalette.background : '#0b121c';
+  ctx.fillRect(0,0,W,H);
+  if(!topDownState) return;
+  const td = topDownState;
+  const tile = td.tileSize;
+  for(let row=0; row<td.rows; row++){
+    for(let col=0; col<td.cols; col++){
+      const x = td.offsetX + col * tile;
+      const y = td.offsetY + row * tile;
+      if(td.grid[row][col] === 0){
+        ctx.fillStyle = 'rgba(44,64,88,0.92)';
+        ctx.fillRect(x, y, tile, tile);
+        ctx.fillStyle = 'rgba(120,160,200,0.22)';
+        ctx.fillRect(x+2, y+2, tile-4, tile-4);
+      } else {
+        ctx.fillStyle = 'rgba(8,12,18,0.96)';
+        ctx.fillRect(x, y, tile, tile);
+      }
+    }
+  }
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(150,110,60,0.35)';
+  for(const gap of td.gaps){
+    ctx.fillRect(gap.x - tile*0.45, gap.y - tile*0.45, tile*0.9, tile*0.9);
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(220,210,120,0.85)';
+  ctx.lineWidth = 2;
+  for(const ladder of td.ladders){
+    const x = ladder.x;
+    const y = ladder.y;
+    ctx.beginPath();
+    ctx.moveTo(x - tile*0.28, y - tile*0.4);
+    ctx.lineTo(x - tile*0.28, y + tile*0.4);
+    ctx.moveTo(x + tile*0.28, y - tile*0.4);
+    ctx.lineTo(x + tile*0.28, y + tile*0.4);
+    for(let r=-2; r<=2; r++){
+      const stepY = y + r * tile*0.18;
+      ctx.moveTo(x - tile*0.28, stepY);
+      ctx.lineTo(x + tile*0.28, stepY);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  for(const box of td.boxes){
+    const size = tile*0.7;
+    const bx = box.x - size/2;
+    const by = box.y - size/2;
+    ctx.fillStyle = box.activated ? 'rgba(120,255,180,0.85)' : 'rgba(255,220,140,0.85)';
+    ctx.fillRect(bx, by, size, size);
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, size, size);
+  }
+
+  for(const loot of td.loot){
+    if(loot.collected) continue;
+    const lx = loot.x;
+    const ly = loot.y;
+    if(loot.type === 'cash'){
+      ctx.fillStyle = 'rgba(90,220,150,0.85)';
+      ctx.beginPath();
+      ctx.arc(lx, ly, tile*0.26, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#0c2a18';
+      ctx.font = `${Math.max(10, Math.floor(tile*0.3))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', lx, ly);
+    } else if(loot.type === 'intel'){
+      ctx.fillStyle = 'rgba(120,200,255,0.85)';
+      ctx.fillRect(lx - tile*0.3, ly - tile*0.22, tile*0.6, tile*0.44);
+    } else if(loot.type === 'file' || loot.type === 'cache'){
+      ctx.fillStyle = 'rgba(255,190,140,0.85)';
+      ctx.beginPath();
+      ctx.moveTo(lx - tile*0.32, ly - tile*0.26);
+      ctx.lineTo(lx + tile*0.34, ly - tile*0.26);
+      ctx.lineTo(lx + tile*0.26, ly + tile*0.28);
+      ctx.lineTo(lx - tile*0.4, ly + tile*0.28);
+      ctx.closePath();
+      ctx.fill();
+    } else if(loot.type === 'weapon'){
+      ctx.fillStyle = 'rgba(200,130,240,0.85)';
+      ctx.fillRect(lx - tile*0.25, ly - tile*0.25, tile*0.5, tile*0.5);
+    } else if(loot.type === 'secret'){
+      ctx.fillStyle = 'rgba(255,120,200,0.9)';
+      ctx.beginPath();
+      ctx.arc(lx, ly, tile*0.28, 0, Math.PI*2);
+      ctx.fill();
+    } else if(loot.type === 'upgrade'){
+      ctx.fillStyle = 'rgba(255,255,140,0.85)';
+      ctx.beginPath();
+      ctx.moveTo(lx, ly - tile*0.32);
+      ctx.lineTo(lx + tile*0.28, ly + tile*0.32);
+      ctx.lineTo(lx - tile*0.28, ly + tile*0.32);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  if(td.door){
+    const glow = td.door.glowUntil && td.door.glowUntil > now();
+    ctx.strokeStyle = glow || td.missionComplete ? 'rgba(120,255,180,0.9)' : 'rgba(255,220,140,0.4)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(td.door.x - tile*0.4, td.door.y - tile*0.4, tile*0.8, tile*0.8);
+    ctx.fillStyle = 'rgba(40,60,90,0.55)';
+    ctx.fillRect(td.door.x - tile*0.4, td.door.y - tile*0.4, tile*0.8, tile*0.8);
+  }
+
+  for(const intern of td.interns){
+    ctx.fillStyle = intern.alive ? 'rgba(220,220,255,0.85)' : 'rgba(120,20,40,0.6)';
+    ctx.beginPath();
+    ctx.arc(intern.x, intern.y, tile*0.24, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#0b1420';
+    ctx.font = `${Math.max(9, Math.floor(tile*0.22))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('i', intern.x, intern.y);
+  }
+
+  ctx.fillStyle = '#88f6ff';
+  ctx.beginPath();
+  ctx.arc(player.x + player.w/2, player.y + player.h/2, Math.max(player.w, player.h)/2, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#0a1f2c';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = '16px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`Electrical Boxes: ${td.hotwiredCount}/${td.requiredBoxes}`, 24, 20);
+  ctx.fillText(`Interns pacified: ${td.internsKilled}/${td.interns.length}`, 24, 40);
+  if(td.secretPhotos && td.secretPhotos.length){
+    const collected = td.loot.filter(l => l.type==='secret' && l.collected).length;
+    ctx.fillText(`Secret Files: ${collected}/${td.secretPhotos.length}`, 24, 60);
+  }
+  if(td.missionComplete){
+    ctx.fillStyle = 'rgba(120,255,180,0.85)';
+    ctx.fillText('Return to the elevator!', 24, 80);
+  }
 }
 
 function makeArcadeBeatdownLevel(floor, yBase){
@@ -4884,6 +5593,10 @@ function activateSprinklers(yBase, until){
 function interact(){
   if(activeHack) return;
   if(pause) return;
+  if(topDownState){
+    interactTopDown();
+    return;
+  }
   const p={x:player.x, y:player.y, w:player.w, h:player.h};
   if(arcadeRampage && arcadeRampage.active) return;
 
@@ -5170,6 +5883,10 @@ function interact(){
 // Attacks / weapons
 function attack(){
   if(pause) return;
+  if(topDownState){
+    handleTopDownAttack();
+    return;
+  }
   if(outsideMode){
     fireOutsideShot();
     return;
@@ -5514,6 +6231,11 @@ function update(dt){
       activateMidnightRage();
       return;
     }
+  }
+
+  if(topDownState){
+    updateTopDown(dt);
+    return;
   }
 
   if(player.interestRate>0 && now()-interestDrainTimer>1000){
@@ -6154,13 +6876,21 @@ function update(dt){
   }
   for(let i=bullets.length-1;i>=0;i--) if(bullets[i].life<=0) bullets.splice(i,1);
 
-  // HUD update
-  if(timeEl) timeEl.textContent= `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
-  if(serversEl) serversEl.textContent=`Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
-  if(alarmsEl) alarmsEl.textContent= alarm? 'Alarms: ACTIVE' : 'Alarms: OK';
-  const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges');
-  if(player.hasFeather) inv.push('Feather');
-  if(invEl) invEl.textContent=`Inv: ${inv.join(', ')||'—'}`;
+  updateHudCommon();
+}
+
+function updateHudCommon(){
+  if(timeEl) timeEl.textContent = `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
+  if(serversEl){
+    if(topDownState){
+      serversEl.textContent = `Electrical Boxes: ${topDownState.hotwiredCount}/${topDownState.requiredBoxes}`;
+    } else {
+      serversEl.textContent = `Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
+    }
+  }
+  if(alarmsEl) alarmsEl.textContent = topDownState ? 'Alarms: —' : (alarm ? 'Alarms: ACTIVE' : 'Alarms: OK');
+  const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges'); if(player.hasFeather) inv.push('Feather');
+  if(invEl) invEl.textContent = `Inv: ${inv.join(', ')||'—'}`;
   const hpRatio = Math.min(1, Math.max(0, player.checking / (player.checkingMax || CHECKING_MAX)));
   if(hpFill) hpFill.style.width = `${hpRatio*100}%`;
   if(hpText) hpText.textContent = Math.max(0, Math.round(player.checking));
@@ -7046,6 +7776,10 @@ function drawOutside(){
 }
 
 function draw(){
+  if(topDownState){
+    drawTopDown();
+    return;
+  }
   if(outsideMode){
     drawOutside();
     return;
