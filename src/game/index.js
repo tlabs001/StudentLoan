@@ -205,6 +205,37 @@ const TOP_DOWN_FLOORS = new Set();
 const TOP_DOWN_FLOOR_CONFIG = VENT_DUNGEON_CONFIG;
 const ARCADE_RAMPAGE_TARGET_DEFAULT = 26;
 
+const DRONE_MISSION_CONFIG = {
+  10: {
+    id: 'corporate-mansions',
+    name: 'Drone Strike on Corporate Mansions',
+    hackType: 'tetris',
+    hackWinsRequired: 3,
+    hackLinesPerMatch: 6,
+    drone: {
+      terrain: 'mansion',
+      totalTargets: 36,
+      maxActiveTargets: 5,
+      missionText: 'Hack complete. Eliminate all 16 estates.',
+      enemyLabel: 'Estate Guard'
+    }
+  },
+  35: {
+    id: 'mega-yacht-elimination',
+    name: 'Mega-Yacht Elimination',
+    hackType: 'chess',
+    hackWinsRequired: 3,
+    hackMaxGames: 20,
+    drone: {
+      terrain: 'yacht',
+      totalTargets: 20,
+      maxActiveTargets: 4,
+      missionText: 'Target yachts destroyed',
+      enemyLabel: 'Deck Guard'
+    }
+  }
+};
+
 (()=>{
 // ===== Color utilities & palettes =====
 function clamp01(v){ return Math.min(1, Math.max(0, v)); }
@@ -1256,7 +1287,7 @@ let outsideSpawnTimer = 0;
 const outsideOccupiedSlots = new Set();
 
 // Camera
-let camX=0, seenDoor=false;
+let camX=0, camY=0, seenDoor=false;
 
 // Player
 const player = {
@@ -1364,6 +1395,7 @@ const ceoArenaState = {
 
 let topDownState = null;
 let ventDungeonState = null;
+let droneMissionState = null;
 
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
@@ -2804,6 +2836,7 @@ function enterFloor(targetFloor, options={}){
   outsideNextCounterSniperAt = 0;
   currentFloor = floor;
   camX = 0;
+  camY = 0;
   seenDoor = false;
   player.x = initialSpawnX;
   player.y = 0;
@@ -2858,7 +2891,7 @@ function startNewRun(name){
   startClock = performance.now();
   last = performance.now();
   attackHeld = false;
-  camX = 0; seenDoor=false;
+  camX = 0; camY = 0; seenDoor=false;
   scheduledBonusFloor = BONUS_FLOOR_MIN + Math.floor(Math.random()*(BONUS_FLOOR_MAX-BONUS_FLOOR_MIN+1));
   scheduleManagerFloor();
   resetPlayerState();
@@ -3192,6 +3225,7 @@ function damageWorker(worker, amount){
 const keys={};
 let attackHeld=false;
 window.addEventListener('keydown', e=>{
+  if(droneMissionState && handleDroneMissionKeyDown(e)) return;
   const k=e.key.toLowerCase();
   if(activeHack){
     e.preventDefault();
@@ -3252,13 +3286,14 @@ window.addEventListener('keydown', e=>{
   if(k===' '){ interact(); }
 },{passive:false});
 window.addEventListener('keyup', e=>{
+  if(droneMissionState && handleDroneMissionKeyUp(e)) return;
   const k=e.key.toLowerCase();
   keys[k] = false;
   if(k==='e'){ attackHeld=false; }
 }, {passive:false});
 
 // mouse
-window.addEventListener('mousedown', ()=>{ attackHeld=true; attack(); });
+window.addEventListener('mousedown', e=>{ if(droneMissionState && handleDroneMissionMouseDown(e)) return; attackHeld=true; attack(); });
 window.addEventListener('mouseup', ()=>{ attackHeld=false; });
 window.addEventListener('blur', ()=>{ attackHeld=false; });
 
@@ -3816,6 +3851,7 @@ function makeLevel(i){
   plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
   topDownState = null;
   ventDungeonState = null;
+  droneMissionState = null;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
   player.punchAnimUntil = 0;
@@ -3832,15 +3868,24 @@ function makeLevel(i){
   const doubleWidth = isArcadeBeatdownFloor(i);
   setLevelWidth(doubleWidth ? BASE_LEVEL_WIDTH * 2 : BASE_LEVEL_WIDTH);
 
+  if(DRONE_MISSION_CONFIG[i]){
+    startDroneMissionLevel(i);
+    camX = 0;
+    camY = 0;
+    return;
+  }
+
   if(VENT_DUNGEON_FLOORS.has(i)){
     makeVentDungeonLevel(i);
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    camY = computeVentCameraTarget(ventDungeonState);
     return;
   }
 
   if(TOP_DOWN_FLOORS.has(i)){
     makeTopDownMazeLevel(i);
     camX = 0;
+    camY = 0;
     return;
   }
 
@@ -3851,6 +3896,7 @@ function makeLevel(i){
   if(i === ECO_BOSS_FLOOR){
     spawnEcoBossRoom(i);
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    camY = 0;
     return;
   }
   serverObjective = isServerFloor(i);
@@ -3916,12 +3962,14 @@ function makeLevel(i){
     makeCeoPenthouseArena(yBase);
     totalServersOnFloor = servers.length;
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    camY = 0;
     return;
   }
 
   if(isArcadeBeatdownFloor(i)){
     makeArcadeBeatdownLevel(i, yBase);
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    camY = 0;
     return;
   }
 
@@ -3940,6 +3988,7 @@ function makeLevel(i){
     makeBoardRoomLevel(i, yBase);
     totalServersOnFloor = servers.length;
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    camY = 0;
     return;
   }
 
@@ -4394,8 +4443,14 @@ function makeVentDungeonLevel(floor){
     noteLabel: config.noteLabel || '$1,000 Note',
     internsKilled:0,
     internTotal:0,
-    door:null
+    door:null,
+    cameraBounds:null,
+    cameraBaseline:0
   };
+
+  const cameraTop = Math.min(-40, topBoundY + 60);
+  ventState.cameraBounds = { top: cameraTop, bottom: 0 };
+  ventState.cameraBaseline = (floorSlab ? floorSlab.y : yBase) - player.h - 24;
 
   const boxCells = takeCells(ventState.requiredBoxes);
   for(const cell of boxCells){
@@ -4540,11 +4595,28 @@ function makeVentDungeonLevel(floor){
   player.climbing = false;
 
   ventDungeonState = ventState;
+  resetVentCamera(ventState);
   notify(`${config.name}: Hotwire ${ventState.requiredBoxes} electrical boxes hidden in the vents.`);
   centerNote(`Level ${floor} – ${config.name}`, 1800);
   setAmbient('wind');
   updateMusicForState();
   updateHudCommon();
+}
+
+function computeVentCameraTarget(state){
+  if(!state) return 0;
+  const bounds = state.cameraBounds || {};
+  const top = Number.isFinite(bounds.top) ? bounds.top : -H;
+  const bottom = Number.isFinite(bounds.bottom) ? bounds.bottom : 0;
+  const baseline = Number.isFinite(state.cameraBaseline)
+    ? state.cameraBaseline
+    : ((floorSlab ? floorSlab.y : H) - player.h - 24);
+  const target = player.y - baseline;
+  return clamp(target, top, bottom);
+}
+
+function resetVentCamera(state){
+  camY = computeVentCameraTarget(state);
 }
 
 function makeTopDownMazeLevel(floor){
@@ -4738,6 +4810,7 @@ function makeTopDownMazeLevel(floor){
   topDownState = topDown;
   state.playerWeaponsDisabled = true;
   camX = 0;
+  camY = 0;
   notify(`${config.name}: Hotwire ${topDown.requiredBoxes} electrical boxes hidden in the vents.`);
   centerNote(`Level ${floor} – ${config.name}`, 1800);
   updateMusicForState();
@@ -5103,6 +5176,1134 @@ function completeVentDungeonLevel(){
     }
   }
   ventDungeonState = null;
+}
+
+// ==== Drone strike missions ====
+
+const TETRIS_PIECES = [
+  { name:'I', color:'#66d2ff', rotations:[
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:2,y:0}],
+    [{x:1,y:-1},{x:1,y:0},{x:1,y:1},{x:1,y:2}]
+  ]},
+  { name:'L', color:'#ffb347', rotations:[
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:1,y:-1}],
+    [{x:0,y:-1},{x:0,y:0},{x:0,y:1},{x:1,y:1}],
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:-1,y:1}],
+    [{x:-1,y:-1},{x:0,y:-1},{x:0,y:0},{x:0,y:1}]
+  ]},
+  { name:'J', color:'#6fa3ff', rotations:[
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:-1,y:-1}],
+    [{x:0,y:-1},{x:0,y:0},{x:0,y:1},{x:1,y:-1}],
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:1,y:1}],
+    [{x:-1,y:1},{x:0,y:-1},{x:0,y:0},{x:0,y:1}]
+  ]},
+  { name:'T', color:'#c68cff', rotations:[
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:0,y:-1}],
+    [{x:0,y:-1},{x:0,y:0},{x:0,y:1},{x:1,y:0}],
+    [{x:-1,y:0},{x:0,y:0},{x:1,y:0},{x:0,y:1}],
+    [{x:-1,y:0},{x:0,y:-1},{x:0,y:0},{x:0,y:1}]
+  ]},
+  { name:'S', color:'#7adf8a', rotations:[
+    [{x:-1,y:0},{x:0,y:0},{x:0,y:-1},{x:1,y:-1}],
+    [{x:0,y:-1},{x:0,y:0},{x:1,y:0},{x:1,y:1}]
+  ]},
+  { name:'Z', color:'#ff6f6f', rotations:[
+    [{x:-1,y:-1},{x:0,y:-1},{x:0,y:0},{x:1,y:0}],
+    [{x:1,y:-1},{x:1,y:0},{x:0,y:0},{x:0,y:1}]
+  ]},
+  { name:'O', color:'#f7e56f', rotations:[
+    [{x:0,y:0},{x:1,y:0},{x:0,y:-1},{x:1,y:-1}]
+  ]}
+];
+
+const CHESS_LAYOUTS = [
+  {
+    cursor:{x:2,y:4},
+    pieces:[
+      {type:'king', color:'player', x:2, y:5},
+      {type:'queen', color:'player', x:1, y:4},
+      {type:'rook', color:'player', x:4, y:5},
+      {type:'king', color:'ai', x:3, y:0},
+      {type:'rook', color:'ai', x:0, y:1},
+      {type:'knight', color:'ai', x:5, y:2}
+    ]
+  },
+  {
+    cursor:{x:3,y:5},
+    pieces:[
+      {type:'king', color:'player', x:3, y:5},
+      {type:'rook', color:'player', x:0, y:4},
+      {type:'queen', color:'player', x:5, y:4},
+      {type:'king', color:'ai', x:2, y:0},
+      {type:'rook', color:'ai', x:4, y:1},
+      {type:'knight', color:'ai', x:1, y:2}
+    ]
+  },
+  {
+    cursor:{x:1,y:5},
+    pieces:[
+      {type:'king', color:'player', x:1, y:5},
+      {type:'queen', color:'player', x:2, y:4},
+      {type:'rook', color:'player', x:4, y:4},
+      {type:'king', color:'ai', x:4, y:0},
+      {type:'rook', color:'ai', x:2, y:1},
+      {type:'knight', color:'ai', x:0, y:2}
+    ]
+  }
+];
+
+function startDroneMissionLevel(floor){
+  const config = DRONE_MISSION_CONFIG[floor];
+  if(!config) return;
+  floorSlab = { x:0, y:H-20, w:W, h:20 };
+  droneMissionState = {
+    floor,
+    config,
+    phase:'hack',
+    hackWins:0,
+    hackGames:0,
+    hackProgress:0,
+    hackMessage:'',
+    hackCooldown:0,
+    hackOverrideNotified:false,
+    pendingDrone:false,
+    pendingDroneDelay:0,
+    tetris:null,
+    chess:null,
+    drone:null,
+    bombs:[],
+    explosions:[],
+    enemies:[],
+    enemyShots:[],
+    targets:[],
+    destroyedTargets:0,
+    spawnedTargets:0,
+    loanSaved:0,
+    camera:{x:0,y:0},
+    input:{left:false,right:false,up:false,down:false},
+    missionText: config.drone && config.drone.missionText ? config.drone.missionText : '',
+    overlay:null
+  };
+  state.playerWeaponsDisabled = true;
+  player.hacking = false;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = false;
+  setAmbient('wind');
+  updateMusicForState();
+  notify(`${config.name}: Breach security protocols.`);
+  centerNote(`Level ${floor} – ${config.name}`, 2000);
+  if(config.hackType === 'tetris'){
+    initializeTetrisHack(droneMissionState);
+    droneMissionState.hackMessage = 'Align code blocks to penetrate the firewall.';
+  } else if(config.hackType === 'chess'){
+    initializeChessHack(droneMissionState);
+    droneMissionState.hackMessage = 'Checkmate the firewall AI three times to breach access.';
+  }
+  updateHudCommon();
+}
+
+function initializeTetrisHack(mission){
+  const linesPerMatch = mission.config && Number.isFinite(mission.config.hackLinesPerMatch) ? mission.config.hackLinesPerMatch : 6;
+  mission.tetris = {
+    rows: 18,
+    cols: 10,
+    grid: Array.from({length:18}, ()=>Array(10).fill(null)),
+    piece:null,
+    nextPiece: pickRandomTetrisPiece(),
+    dropTimer:0,
+    dropInterval:0.8,
+    fastDrop:false,
+    linesCleared:0,
+    linesRequired: Math.max(3, linesPerMatch),
+    failedSpawn:false
+  };
+  spawnTetrisPiece(mission.tetris);
+}
+
+function pickRandomTetrisPiece(){
+  return TETRIS_PIECES[Math.floor(Math.random()*TETRIS_PIECES.length)];
+}
+
+function spawnTetrisPiece(state){
+  const piece = state.nextPiece || pickRandomTetrisPiece();
+  state.nextPiece = pickRandomTetrisPiece();
+  state.piece = { def: piece, rotation:0, x: Math.floor(state.cols/2), y: -2 };
+  if(checkTetrisCollision(state, state.piece, 0, 0)){
+    state.failedSpawn = true;
+  }
+}
+
+function getTetrisCells(piece, rotation){
+  const rots = piece.def.rotations;
+  const rot = rots[(rotation || 0) % rots.length];
+  return rot;
+}
+
+function checkTetrisCollision(state, piece, offsetX, offsetY, rotation){
+  const rotIndex = rotation !== undefined ? rotation : piece.rotation;
+  const cells = getTetrisCells(piece, rotIndex);
+  for(const cell of cells){
+    const cx = piece.x + cell.x + offsetX;
+    const cy = piece.y + cell.y + offsetY;
+    if(cx < 0 || cx >= state.cols) return true;
+    if(cy >= state.rows){
+      return true;
+    }
+    if(cy >= 0){
+      if(state.grid[cy][cx]) return true;
+    }
+  }
+  return false;
+}
+
+function moveTetrisPiece(state, dx, dy){
+  if(!state.piece) return false;
+  if(checkTetrisCollision(state, state.piece, dx, dy)){
+    if(dy>0) return false;
+    return dx!==0;
+  }
+  state.piece.x += dx;
+  state.piece.y += dy;
+  return true;
+}
+
+function rotateTetrisPiece(state, dir){
+  if(!state.piece) return;
+  const def = state.piece.def;
+  const total = def.rotations.length;
+  if(total<=1) return;
+  const nextRot = (state.piece.rotation + dir + total) % total;
+  if(!checkTetrisCollision(state, state.piece, 0, 0, nextRot)){
+    state.piece.rotation = nextRot;
+  }
+}
+
+function lockTetrisPiece(mission){
+  const state = mission.tetris;
+  if(!state || !state.piece) return;
+  const cells = getTetrisCells(state.piece, state.piece.rotation);
+  let blockedTop=false;
+  for(const cell of cells){
+    const cx = state.piece.x + cell.x;
+    const cy = state.piece.y + cell.y;
+    if(cy < 0){
+      blockedTop = true;
+      continue;
+    }
+    if(cy >= 0 && cy < state.rows && cx>=0 && cx<state.cols){
+      state.grid[cy][cx] = state.piece.def.color;
+    }
+  }
+  state.piece = null;
+  if(blockedTop){
+    concludeDroneHackMatch(mission, false, 'Hack failed — stack overflow.');
+    return;
+  }
+  const cleared = clearTetrisLines(state);
+  state.linesCleared += cleared;
+  if(state.linesCleared >= state.linesRequired){
+    concludeDroneHackMatch(mission, true, `Hack progress ${Math.round(Math.min(1, state.linesCleared/state.linesRequired)*100)}%.`);
+    return;
+  }
+  spawnTetrisPiece(state);
+}
+
+function clearTetrisLines(state){
+  let cleared = 0;
+  for(let row=state.rows-1; row>=0; row--){
+    if(state.grid[row].every(cell=>!!cell)){
+      cleared++;
+      for(let r=row; r>0; r--){
+        state.grid[r] = state.grid[r-1].slice();
+      }
+      state.grid[0] = Array(state.cols).fill(null);
+      row++;
+    }
+  }
+  return cleared;
+}
+
+function initializeChessHack(mission){
+  const layout = CHESS_LAYOUTS[Math.floor(Math.random()*CHESS_LAYOUTS.length)];
+  const pieces = layout.pieces.map(p=>({...p}));
+  mission.chess = {
+    size:6,
+    pieces,
+    cursor:{...layout.cursor},
+    selected:null,
+    selectedPiece:null,
+    availableMoves:[],
+    turn:'player',
+    result:null,
+    hints:false,
+    recommended:null,
+    moveDelay:0
+  };
+}
+
+function chessPieceAt(state, x, y){
+  return state.pieces.find(p=>p.x===x && p.y===y && !p.captured);
+}
+
+function chessPieceValue(type){
+  if(type==='king') return 100;
+  if(type==='queen') return 9;
+  if(type==='rook') return 5;
+  if(type==='knight') return 3;
+  return 1;
+}
+
+function chessGenerateMoves(state, piece){
+  const moves=[];
+  const size = state.size;
+  const occupied = (x,y)=>state.pieces.find(p=>p.x===x && p.y===y && !p.captured);
+  const pushMove=(x,y)=>{
+    if(x<0||x>=size||y<0||y>=size) return false;
+    const other = occupied(x,y);
+    if(other && other.color===piece.color) return false;
+    moves.push({x,y,capture:other||null});
+    return !other;
+  };
+  if(piece.type==='rook' || piece.type==='queen'){
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    for(const [dx,dy] of dirs){
+      let x=piece.x+dx, y=piece.y+dy;
+      while(x>=0&&x<size&&y>=0&&y<size){
+        const cont = pushMove(x,y);
+        if(!cont) break;
+        x+=dx; y+=dy;
+      }
+    }
+  }
+  if(piece.type==='queen' || piece.type==='bishop'){
+    const dirs=[[1,1],[-1,-1],[1,-1],[-1,1]];
+    for(const [dx,dy] of dirs){
+      let x=piece.x+dx, y=piece.y+dy;
+      while(x>=0&&x<size&&y>=0&&y<size){
+        const cont = pushMove(x,y);
+        if(!cont) break;
+        x+=dx; y+=dy;
+      }
+    }
+  }
+  if(piece.type==='king'){
+    for(let dx=-1; dx<=1; dx++){
+      for(let dy=-1; dy<=1; dy++){
+        if(dx===0 && dy===0) continue;
+        pushMove(piece.x+dx, piece.y+dy);
+      }
+    }
+  }
+  if(piece.type==='knight'){
+    const jumps=[[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]];
+    for(const [dx,dy] of jumps){
+      pushMove(piece.x+dx, piece.y+dy);
+    }
+  }
+  return moves;
+}
+
+function chessApplyMove(state, piece, move){
+  const capture = move.capture;
+  if(capture){ capture.captured = true; }
+  piece.x = move.x;
+  piece.y = move.y;
+}
+
+function concludeDroneHackMatch(mission, success, message){
+  if(mission.phase!=='hack') return;
+  mission.hackGames += 1;
+  mission.hackMessage = message || (success ? 'Hack progress increased.' : 'Hack failed — rebooting attempt.');
+  mission.hackCooldown = 1.1;
+  if(success){
+    mission.hackWins += 1;
+    mission.hackProgress = Math.min(1, mission.hackWins / (mission.config.hackWinsRequired || 3));
+    chime();
+    mission.hackMessage = `Hack progress ${Math.round(mission.hackProgress*100)}%.`;
+    if(mission.hackWins >= (mission.config.hackWinsRequired || 3)){
+      mission.pendingDrone = true;
+      mission.pendingDroneDelay = 0.8;
+      mission.hackMessage = 'Access granted — initializing drone control.';
+    }
+  } else {
+    lockedBuzz();
+  }
+  mission.tetris = null;
+  mission.chess = null;
+  if(mission.config.hackMaxGames && mission.hackGames >= mission.config.hackMaxGames && mission.hackWins < (mission.config.hackWinsRequired || 3)){
+    if(!mission.hackOverrideNotified){
+      mission.hackOverrideNotified = true;
+      mission.pendingDrone = true;
+      mission.pendingDroneDelay = 0.8;
+      mission.hackMessage = 'Firewall overloaded — proceeding under stealth.';
+      notify('Firewall overloaded — proceeding under stealth.');
+      centerNote('Firewall overloaded — proceeding under stealth.', 2200);
+    }
+  }
+  updateHudCommon();
+}
+
+function initializeDronePhase(mission){
+  mission.phase = 'drone';
+  mission.bombs = [];
+  mission.explosions = [];
+  mission.enemies = [];
+  mission.enemyShots = [];
+  mission.targets = mission.targets.filter(t=>!t.destroyed || t.destructionTimer>0);
+  mission.areaSize = mission.config.drone && mission.config.drone.terrain === 'yacht' ? 5200 : 4200;
+  mission.drone = {
+    x: mission.areaSize/2,
+    y: mission.areaSize/2,
+    heading: -Math.PI/2,
+    speed: 240,
+    baseSpeed: 240,
+    health: 120,
+    maxHealth: 120,
+    dropCooldown:0,
+    damageFlash:0
+  };
+  mission.camera.x = mission.drone.x - W/2;
+  mission.camera.y = mission.drone.y - H/2;
+  mission.destroyedTargets = 0;
+  mission.spawnedTargets = 0;
+  mission.targets = [];
+  const maxActive = mission.config.drone && mission.config.drone.maxActiveTargets ? mission.config.drone.maxActiveTargets : 4;
+  for(let i=0; i<maxActive; i++){
+    spawnDroneTarget(mission);
+  }
+  mission.hackMessage = '';
+  notify('Hack complete. Drone uplink acquired.');
+  centerNote('Hack complete — drone strike authorized.', 2200);
+  updateHudCommon();
+}
+
+function spawnDroneTarget(mission){
+  const config = mission.config.drone || {};
+  const total = config.totalTargets || 12;
+  if(mission.spawnedTargets >= total) return null;
+  const area = mission.areaSize || 4200;
+  const radiusBase = config.terrain === 'yacht' ? 120 : 140;
+  const radius = radiusBase * (0.7 + Math.random()*0.4);
+  const x = 240 + Math.random() * Math.max(200, area - 480);
+  const y = 240 + Math.random() * Math.max(200, area - 480);
+  const hp = config.terrain === 'yacht' ? 3 : 2;
+  const target = {
+    id:`target-${mission.spawnedTargets+1}`,
+    x,y,
+    radius,
+    hp,
+    maxHp:hp,
+    type:config.terrain||'mansion',
+    destroyed:false,
+    destructionTimer:0
+  };
+  mission.spawnedTargets += 1;
+  mission.targets.push(target);
+  spawnDroneGuards(mission, target);
+  return target;
+}
+
+function spawnDroneGuards(mission, target){
+  const config = mission.config.drone || {};
+  const guardCount = config.terrain === 'yacht' ? 3 : 2 + Math.floor(Math.random()*2);
+  for(let i=0;i<guardCount;i++){
+    const angle = Math.random() * Math.PI * 2;
+    const distance = target.radius + 70 + Math.random()*40;
+    mission.enemies.push({
+      x: target.x + Math.cos(angle)*distance,
+      y: target.y + Math.sin(angle)*distance,
+      angle,
+      radius:distance,
+      orbitSpeed:0.3 + Math.random()*0.25,
+      hp:1,
+      target,
+      cooldown:0.4 + Math.random()*0.4
+    });
+  }
+}
+
+function dropDroneBomb(mission){
+  if(!mission || !mission.drone) return false;
+  if(mission.drone.dropCooldown>0) return false;
+  mission.bombs.push({ x: mission.drone.x, y: mission.drone.y, timer:0, travelTime:0.65 + Math.random()*0.1 });
+  mission.drone.dropCooldown = 0.4;
+  return true;
+}
+
+function triggerDroneExplosion(mission, bomb){
+  const config = mission.config.drone || {};
+  const maxRadius = config.terrain === 'yacht' ? 170 : 150;
+  const explosion = { x:bomb.x, y:bomb.y, radius:20, maxRadius, life:0.5 };
+  mission.explosions.push(explosion);
+  boom();
+  applyExplosionDamage(mission, explosion);
+}
+
+function applyExplosionDamage(mission, explosion){
+  const config = mission.config.drone || {};
+  const maxRadius = explosion.maxRadius || 140;
+  for(const target of mission.targets){
+    if(!target || target.destroyed) continue;
+    const dist = Math.hypot(target.x - explosion.x, target.y - explosion.y);
+    if(dist <= maxRadius + target.radius*0.5){
+      target.hp = Math.max(0, target.hp - 1);
+      if(target.hp === 0){
+        target.destroyed = true;
+        target.destructionTimer = 0.8;
+        mission.destroyedTargets += 1;
+        notify(`${config.terrain === 'yacht' ? 'Yacht' : 'Estate'} destroyed.`);
+        if(config.terrain === 'yacht'){
+          centerNote('Board member eliminated.', 1600);
+        }
+        if(mission.destroyedTargets >= (config.totalTargets || 12)){
+          mission.phase = 'complete';
+          mission.overlay = { title:'Mission Complete', timer:1.6 };
+          centerNote('Mission Complete', 2000);
+          notify('Mission complete. Returning to the tower.');
+        } else if(mission.spawnedTargets < (config.totalTargets || 12)){
+          spawnDroneTarget(mission);
+        }
+      }
+    }
+  }
+  for(const enemy of mission.enemies){
+    if(!enemy || enemy.hp<=0) continue;
+    const dist = Math.hypot(enemy.x - explosion.x, enemy.y - explosion.y);
+    if(dist <= maxRadius){
+      enemy.hp = 0;
+      applyLoanPayment(100);
+      mission.loanSaved += 100;
+      ui.toast(`Loan reduced $100 – ${mission.config.drone.enemyLabel || 'Guard'} eliminated.`);
+    }
+  }
+  mission.enemies = mission.enemies.filter(e=>e.hp>0);
+  updateHudCommon();
+}
+
+function damageDrone(mission, amount){
+  if(!mission || !mission.drone) return;
+  mission.drone.health = Math.max(0, mission.drone.health - amount);
+  mission.drone.damageFlash = 0.2;
+  if(mission.drone.health <= 0){
+    notify('Drone compromised — rebuilding control link.');
+    centerNote('Drone destroyed — rebooting controls.', 2000);
+    respawnDrone(mission);
+  }
+}
+
+function respawnDrone(mission){
+  const config = mission.config.drone || {};
+  mission.drone = {
+    x: mission.areaSize/2,
+    y: mission.areaSize/2,
+    heading: -Math.PI/2,
+    speed: 200,
+    baseSpeed: 220,
+    health: 120,
+    maxHealth: 120,
+    dropCooldown:0,
+    damageFlash:0
+  };
+  mission.enemyShots = [];
+  mission.bombs = [];
+  mission.explosions = [];
+  mission.input = {left:false,right:false,up:false,down:false};
+  for(const target of mission.targets){
+    if(target && target.destroyed){
+      target.destructionTimer = Math.max(0, target.destructionTimer - 0.2);
+    }
+  }
+  if(mission.enemies.length === 0){
+    const activeTargets = mission.targets.filter(t=>t && !t.destroyed);
+    for(const target of activeTargets){
+      spawnDroneGuards(mission, target);
+    }
+  }
+}
+
+function completeDroneMissionLevel(){
+  if(!droneMissionState) return;
+  const nextFloor = Math.min(FLOORS, currentFloor + 1);
+  droneMissionState = null;
+  state.playerWeaponsDisabled = false;
+  setTimeout(()=>enterFloor(nextFloor, {}), 600);
+  updateHudCommon();
+}
+
+function updateDroneMission(dt){
+  const mission = droneMissionState;
+  if(!mission) return;
+  if(mission.phase === 'complete'){
+    if(mission.overlay){
+      mission.overlay.timer -= dt;
+      if(mission.overlay.timer <= 0){
+        mission.overlay = null;
+        completeDroneMissionLevel();
+      }
+    } else {
+      completeDroneMissionLevel();
+    }
+    return;
+  }
+  if(mission.pendingDrone){
+    mission.pendingDroneDelay = Math.max(0, mission.pendingDroneDelay - dt);
+    if(mission.pendingDroneDelay <= 0){
+      mission.pendingDrone = false;
+      initializeDronePhase(mission);
+    }
+    return;
+  }
+  if(mission.phase === 'hack'){
+    if(mission.hackCooldown > 0){
+      mission.hackCooldown = Math.max(0, mission.hackCooldown - dt);
+      if(mission.hackCooldown <= 0 && !mission.pendingDrone){
+        if(mission.config.hackType === 'tetris') initializeTetrisHack(mission);
+        else if(mission.config.hackType === 'chess') initializeChessHack(mission);
+      }
+      return;
+    }
+    if(mission.config.hackType === 'tetris'){
+      updateTetrisHackState(mission, dt);
+    } else if(mission.config.hackType === 'chess'){
+      updateChessHackState(mission, dt);
+    }
+    return;
+  }
+  if(mission.phase === 'drone'){
+    updateDronePhase(mission, dt);
+    return;
+  }
+}
+
+function updateTetrisHackState(mission, dt){
+  const state = mission.tetris;
+  if(!state) return;
+  if(state.failedSpawn){
+    concludeDroneHackMatch(mission, false, 'Hack failed — connection collapsed.');
+    return;
+  }
+  const speedBonus = Math.min(0.3, (mission.hackWins||0) * 0.08);
+  const interval = state.fastDrop ? 0.08 : Math.max(0.22, state.dropInterval - speedBonus);
+  state.dropTimer += dt;
+  if(state.dropTimer >= interval){
+    state.dropTimer = 0;
+    if(!moveTetrisPiece(state, 0, 1)){
+      lockTetrisPiece(mission);
+    }
+  }
+}
+
+function updateChessHackState(mission, dt){
+  const chess = mission.chess;
+  if(!chess) return;
+  if(chess.moveDelay > 0){
+    chess.moveDelay = Math.max(0, chess.moveDelay - dt);
+  }
+  if(chess.turn === 'ai' && chess.moveDelay <= 0){
+    const aiMove = chooseAiMove(chess);
+    if(aiMove){
+      chessApplyMove(chess, aiMove.piece, aiMove.move);
+      chess.selected = null;
+      chess.selectedPiece = null;
+      chess.availableMoves = [];
+      if(aiMove.move.capture && aiMove.move.capture.type === 'king' && aiMove.move.capture.color === 'player'){
+        chess.result = 'ai';
+        concludeDroneHackMatch(mission, false, 'Firewall AI countered your move.');
+        return;
+      }
+      const playerKingAlive = chess.pieces.some(p=>p.type==='king' && p.color==='player' && !p.captured);
+      const aiKingAlive = chess.pieces.some(p=>p.type==='king' && p.color==='ai' && !p.captured);
+      if(!playerKingAlive){
+        chess.result = 'ai';
+        concludeDroneHackMatch(mission, false, 'Firewall AI seized the board.');
+        return;
+      }
+      if(!aiKingAlive){
+        chess.result = 'player';
+        concludeDroneHackMatch(mission, true, 'Firewall defeated in chess skirmish.');
+        return;
+      }
+      chess.turn = 'player';
+      chess.moveDelay = 0.2;
+    } else {
+      concludeDroneHackMatch(mission, true, 'Firewall stalemated — breach achieved.');
+      return;
+    }
+  }
+  if(chess.turn === 'player' && chess.hints){
+    chess.recommended = computeRecommendedPlayerMove(chess);
+  } else {
+    chess.recommended = null;
+  }
+}
+
+function chooseAiMove(chess){
+  const moves = [];
+  for(const piece of chess.pieces){
+    if(piece.captured || piece.color !== 'ai') continue;
+    const options = chessGenerateMoves(chess, piece);
+    for(const move of options){
+      moves.push({ piece, move, score: scoreChessMove(chess, piece, move, 'ai') });
+    }
+  }
+  if(!moves.length) return null;
+  moves.sort((a,b)=>b.score - a.score);
+  const topScore = moves[0].score;
+  const best = moves.filter(m=>m.score >= topScore - 0.01);
+  return best[Math.floor(Math.random()*best.length)];
+}
+
+function scoreChessMove(chess, piece, move, side){
+  let score = 0;
+  if(move.capture){
+    score += chessPieceValue(move.capture.type) * 12;
+    if(move.capture.type === 'king') score += 500;
+  }
+  const opponentKing = chess.pieces.find(p=>p.type==='king' && p.color !== side && !p.captured);
+  if(opponentKing){
+    const targetX = (move.x !== undefined) ? move.x : piece.x;
+    const targetY = (move.y !== undefined) ? move.y : piece.y;
+    const dist = Math.hypot(targetX - opponentKing.x, targetY - opponentKing.y);
+    score += Math.max(0, 40 - dist*6);
+  }
+  if(piece.type==='king') score -= 4; // discourage reckless king moves
+  if(piece.type==='queen') score += 3;
+  return score;
+}
+
+function computeRecommendedPlayerMove(chess){
+  let best=null;
+  for(const piece of chess.pieces){
+    if(piece.captured || piece.color!=='player') continue;
+    const options = chessGenerateMoves(chess, piece);
+    for(const move of options){
+      const score = scoreChessMove(chess, piece, move, 'player');
+      if(!best || score > best.score){
+        best = { piece, move, score };
+      }
+    }
+  }
+  return best;
+}
+
+function updateDronePhase(mission, dt){
+  const drone = mission.drone;
+  if(!drone) return;
+  if(mission.input.left) drone.heading -= dt * 1.6;
+  if(mission.input.right) drone.heading += dt * 1.6;
+  const desired = mission.input.up ? drone.baseSpeed + 120 : mission.input.down ? drone.baseSpeed * 0.6 : drone.baseSpeed;
+  drone.speed += (desired - drone.speed) * 0.12;
+  drone.x += Math.cos(drone.heading) * drone.speed * dt;
+  drone.y += Math.sin(drone.heading) * drone.speed * dt;
+  const area = mission.areaSize || 4200;
+  const margin = 160;
+  drone.x = clamp(drone.x, margin, area - margin);
+  drone.y = clamp(drone.y, margin, area - margin);
+  mission.camera.x += ((drone.x - W/2) - mission.camera.x) * 0.14;
+  mission.camera.y += ((drone.y - H/2) - mission.camera.y) * 0.14;
+  drone.dropCooldown = Math.max(0, drone.dropCooldown - dt);
+  drone.damageFlash = Math.max(0, drone.damageFlash - dt);
+
+  for(const bomb of mission.bombs){
+    bomb.timer += dt;
+  }
+  const finished = mission.bombs.filter(b=>b.timer >= b.travelTime);
+  if(finished.length){
+    for(const bomb of finished){
+      triggerDroneExplosion(mission, bomb);
+    }
+  }
+  mission.bombs = mission.bombs.filter(b=>b.timer < b.travelTime);
+
+  for(const explosion of mission.explosions){
+    explosion.life -= dt;
+    explosion.radius = Math.min(explosion.maxRadius || 140, explosion.radius + dt * 280);
+  }
+  mission.explosions = mission.explosions.filter(e=>e.life>0);
+
+  for(const enemy of mission.enemies){
+    const target = enemy.target && !enemy.target.destroyed ? enemy.target : null;
+    if(target){
+      enemy.angle += enemy.orbitSpeed * dt;
+      enemy.x = target.x + Math.cos(enemy.angle) * enemy.radius;
+      enemy.y = target.y + Math.sin(enemy.angle) * enemy.radius;
+    }
+    enemy.cooldown -= dt;
+    if(enemy.cooldown <= 0){
+      enemy.cooldown = 1.1 + Math.random()*0.7;
+      const angle = Math.atan2(drone.y - enemy.y, drone.x - enemy.x);
+      const speed = 420;
+      mission.enemyShots.push({ x:enemy.x, y:enemy.y, vx:Math.cos(angle)*speed, vy:Math.sin(angle)*speed, life:2.4 });
+    }
+  }
+  mission.enemies = mission.enemies.filter(e=>e.hp>0);
+
+  for(const shot of mission.enemyShots){
+    shot.x += shot.vx * dt;
+    shot.y += shot.vy * dt;
+    shot.life -= dt;
+    const dist = Math.hypot(shot.x - drone.x, shot.y - drone.y);
+    if(dist < 32){
+      shot.life = 0;
+      damageDrone(mission, 18);
+    }
+  }
+  mission.enemyShots = mission.enemyShots.filter(s=>s.life>0);
+
+  for(const target of mission.targets){
+    if(target.destroyed){
+      target.destructionTimer = Math.max(0, target.destructionTimer - dt);
+    }
+  }
+  mission.targets = mission.targets.filter(t=>!t.destroyed || t.destructionTimer>0);
+  updateHudCommon();
+}
+
+function drawDroneMission(){
+  const mission = droneMissionState;
+  if(!mission) return;
+  if(mission.phase === 'hack'){
+    if(mission.config.hackType === 'tetris') drawTetrisHack(mission);
+    else if(mission.config.hackType === 'chess') drawChessHack(mission);
+    return;
+  }
+  drawDronePhase(mission);
+}
+
+function drawTetrisHack(mission){
+  const state = mission.tetris;
+  ctx.fillStyle = '#05090f';
+  ctx.fillRect(0,0,W,H);
+  const cols = state ? state.cols : 10;
+  const rows = state ? state.rows : 18;
+  const cell = 26;
+  const boardW = cols * cell;
+  const boardH = rows * cell;
+  const originX = Math.floor(W/2 - boardW/2);
+  const originY = Math.floor(H/2 - boardH/2);
+  ctx.fillStyle = 'rgba(22,36,54,0.9)';
+  ctx.fillRect(originX-10, originY-10, boardW+20, boardH+20);
+  if(state){
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const x = originX + c*cell;
+        const y = originY + r*cell;
+        ctx.fillStyle = state.grid[r][c] || 'rgba(12,20,32,0.6)';
+        ctx.fillRect(x+2,y+2,cell-4,cell-4);
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.strokeRect(x+1,y+1,cell-2,cell-2);
+      }
+    }
+    if(state.piece){
+      const cells = getTetrisCells(state.piece, state.piece.rotation);
+      for(const cellPos of cells){
+        const px = state.piece.x + cellPos.x;
+        const py = state.piece.y + cellPos.y;
+        if(py < 0 || py >= rows || px < 0 || px >= cols) continue;
+        const x = originX + px*cell;
+        const y = originY + py*cell;
+        ctx.fillStyle = state.piece.def.color;
+        ctx.fillRect(x+2,y+2,cell-4,cell-4);
+        ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+        ctx.strokeRect(x+1,y+1,cell-2,cell-2);
+      }
+    }
+    if(state.nextPiece){
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = '14px monospace';
+      ctx.fillText('Next', originX + boardW + 30, originY + 30);
+      const preview = getTetrisCells({ def: state.nextPiece }, 0);
+      for(const cellPos of preview){
+        const x = originX + boardW + 30 + cellPos.x * (cell-6);
+        const y = originY + 50 + cellPos.y * (cell-6);
+        ctx.fillStyle = state.nextPiece.color;
+        ctx.fillRect(x, y, cell-8, cell-8);
+      }
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '20px monospace';
+  ctx.fillText('Mainframe Hack — Align the data stream', W/2, originY - 40);
+  ctx.textAlign = 'center';
+  ctx.fillText(`Wins: ${mission.hackWins}/${mission.config.hackWinsRequired || 3}  •  Games: ${mission.hackGames}`, W/2, originY - 16);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(80,140,255,0.8)';
+  ctx.fillRect(originX, originY + boardH + 30, boardW, 12);
+  ctx.fillStyle = 'rgba(120,220,160,0.95)';
+  ctx.fillRect(originX, originY + boardH + 30, boardW * Math.min(1, mission.hackProgress || 0), 12);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.strokeRect(originX, originY + boardH + 30, boardW, 12);
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = '14px monospace';
+  ctx.fillText(mission.hackMessage || 'Win three matches to unlock the drone.', originX, originY + boardH + 54);
+}
+
+function drawChessHack(mission){
+  const chess = mission.chess;
+  const size = chess ? chess.size : 6;
+  const square = 72;
+  const boardW = size * square;
+  const boardH = size * square;
+  const originX = Math.floor(W/2 - boardW/2);
+  const originY = Math.floor(H/2 - boardH/2);
+  ctx.fillStyle = '#05070d';
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = 'rgba(18,28,46,0.95)';
+  ctx.fillRect(originX-14, originY-14, boardW+28, boardH+28);
+  for(let r=0;r<size;r++){
+    for(let c=0;c<size;c++){
+      const light = (r+c)%2===0;
+      ctx.fillStyle = light ? '#3a4d72' : '#1f2b44';
+      const x = originX + c*square;
+      const y = originY + r*square;
+      ctx.fillRect(x,y,square,square);
+    }
+  }
+  if(chess){
+    if(chess.recommended){
+      ctx.fillStyle = 'rgba(120,220,180,0.35)';
+      const move = chess.recommended.move;
+      ctx.fillRect(originX + move.x*square, originY + move.y*square, square, square);
+    }
+    if(chess.selected){
+      ctx.fillStyle = 'rgba(255,220,120,0.35)';
+      ctx.fillRect(originX + chess.selected.x*square, originY + chess.selected.y*square, square, square);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)';
+      for(const move of chess.availableMoves){
+        ctx.fillRect(originX + move.x*square + square/3, originY + move.y*square + square/3, square/3, square/3);
+      }
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(originX + chess.cursor.x*square + 3, originY + chess.cursor.y*square + 3, square-6, square-6);
+    ctx.lineWidth = 1;
+    for(const piece of chess.pieces){
+      if(piece.captured) continue;
+      const x = originX + piece.x*square + square/2;
+      const y = originY + piece.y*square + square/2;
+      ctx.fillStyle = piece.color==='player' ? '#d6f4ff' : '#f4b8b8';
+      ctx.beginPath();
+      ctx.arc(x, y, square*0.32, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#0c1422';
+      ctx.font = '20px monospace';
+      const letter = piece.type.charAt(0).toUpperCase();
+      ctx.fillText(letter, x-8, y+8);
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.textAlign='center';
+  ctx.font = '22px monospace';
+  ctx.fillText('Strategic Breach — Chess Minigame', W/2, originY - 40);
+  ctx.font = '16px monospace';
+  ctx.fillText(`Wins: ${mission.hackWins}/${mission.config.hackWinsRequired || 3} • Games: ${mission.hackGames}${mission.config.hackMaxGames ? ` / ${mission.config.hackMaxGames}` : ''}`, W/2, originY - 16);
+  ctx.textAlign='left';
+  ctx.font = '14px monospace';
+  ctx.fillText(mission.hackMessage || 'Win three games against the firewall AI.', originX, originY + boardH + 30);
+  ctx.fillText('Arrow keys move cursor • Enter to move • H toggles hints', originX, originY + boardH + 50);
+  ctx.textAlign='left';
+}
+
+function drawDronePhase(mission){
+  const config = mission.config.drone || {};
+  const terrain = config.terrain || 'mansion';
+  const ox = -mission.camera.x;
+  const oy = -mission.camera.y;
+  ctx.fillStyle = terrain==='yacht' ? '#053349' : '#08170f';
+  ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(ox, oy);
+  for(const target of mission.targets){
+    if(target.destroyed){
+      ctx.fillStyle = 'rgba(255,160,90,0.35)';
+      const alpha = Math.max(0, target.destructionTimer/0.8);
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, target.radius + 80*(1-alpha), 0, Math.PI*2);
+      ctx.fill();
+      continue;
+    }
+    if(terrain === 'yacht'){
+      ctx.fillStyle = '#d0f0ff';
+      ctx.beginPath();
+      ctx.ellipse(target.x, target.y, target.radius*1.4, target.radius*0.55, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#85b9cc';
+      ctx.beginPath();
+      ctx.ellipse(target.x, target.y, target.radius, target.radius*0.36, 0, 0, Math.PI*2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#2f4030';
+      ctx.fillRect(target.x-target.radius, target.y-target.radius*0.6, target.radius*2, target.radius*1.2);
+      ctx.fillStyle = '#47604a';
+      ctx.fillRect(target.x-target.radius*0.85, target.y-target.radius*0.45, target.radius*1.7, target.radius*0.9);
+    }
+  }
+  for(const enemy of mission.enemies){
+    ctx.fillStyle = '#ff6c6c';
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y, 14, 0, Math.PI*2);
+    ctx.fill();
+  }
+  for(const bomb of mission.bombs){
+    ctx.fillStyle = '#ffd27c';
+    ctx.beginPath();
+    ctx.arc(bomb.x, bomb.y, 8, 0, Math.PI*2);
+    ctx.fill();
+  }
+  for(const shot of mission.enemyShots){
+    ctx.fillStyle = '#ff4a4a';
+    ctx.fillRect(shot.x-3, shot.y-3, 6, 6);
+  }
+  for(const explosion of mission.explosions){
+    ctx.fillStyle = 'rgba(255,200,120,0.25)';
+    ctx.beginPath();
+    ctx.arc(explosion.x, explosion.y, explosion.radius, 0, Math.PI*2);
+    ctx.fill();
+  }
+  if(mission.drone){
+    const drone = mission.drone;
+    ctx.save();
+    ctx.translate(drone.x, drone.y);
+    ctx.rotate(drone.heading);
+    ctx.fillStyle = 'rgba(180,220,255,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(24,0);
+    ctx.lineTo(-18,-16);
+    ctx.lineTo(-18,16);
+    ctx.closePath();
+    ctx.fill();
+    if(drone.damageFlash>0){
+      ctx.fillStyle = 'rgba(255,120,120,0.55)';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '20px monospace';
+  ctx.fillText(config.missionText || 'Eliminate all targets.', 24, 32);
+  ctx.font = '16px monospace';
+  const total = config.totalTargets || 12;
+  ctx.fillText(`Targets destroyed: ${mission.destroyedTargets}/${total}`, 24, 56);
+  ctx.fillText(`Loan reduced: $${fmtCurrency(mission.loanSaved || 0)}`, 24, 78);
+  if(mission.drone){
+    const healthRatio = mission.drone.health / mission.drone.maxHealth;
+    ctx.fillStyle = 'rgba(40,60,80,0.8)';
+    ctx.fillRect(24, H-48, 220, 18);
+    ctx.fillStyle = '#76e1ff';
+    ctx.fillRect(24, H-48, 220 * Math.max(0, Math.min(1, healthRatio)), 18);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeRect(24, H-48, 220, 18);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.font = '14px monospace';
+    ctx.fillText('Drone Integrity', 24, H-58);
+  }
+  if(mission.overlay){
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '28px monospace';
+    ctx.textAlign='center';
+    ctx.fillText(mission.overlay.title || 'Mission Complete', W/2, H/2);
+    ctx.textAlign='left';
+  }
+}
+
+function handleDroneMissionKeyDown(event){
+  if(!droneMissionState) return false;
+  const mission = droneMissionState;
+  const key = event.key.toLowerCase();
+  if(mission.phase === 'hack'){
+    if(mission.config.hackType === 'tetris' && mission.tetris){
+      if(key==='arrowleft' || key==='a'){ moveTetrisPiece(mission.tetris, -1, 0); event.preventDefault(); return true; }
+      if(key==='arrowright' || key==='d'){ moveTetrisPiece(mission.tetris, 1, 0); event.preventDefault(); return true; }
+      if(key==='arrowdown' || key==='s'){ mission.tetris.fastDrop = true; event.preventDefault(); return true; }
+      if(key==='arrowup' || key==='w'){ rotateTetrisPiece(mission.tetris, 1); event.preventDefault(); return true; }
+      if(key==='q'){ rotateTetrisPiece(mission.tetris, -1); event.preventDefault(); return true; }
+      if(key===' '){
+        if(mission.tetris){
+          while(moveTetrisPiece(mission.tetris, 0, 1)){}
+          lockTetrisPiece(mission);
+        }
+        event.preventDefault();
+        return true;
+      }
+    } else if(mission.config.hackType === 'chess' && mission.chess){
+      const chess = mission.chess;
+      if(key==='arrowleft' || key==='a'){ chess.cursor.x = Math.max(0, chess.cursor.x-1); event.preventDefault(); return true; }
+      if(key==='arrowright' || key==='d'){ chess.cursor.x = Math.min(chess.size-1, chess.cursor.x+1); event.preventDefault(); return true; }
+      if(key==='arrowup' || key==='w'){ chess.cursor.y = Math.max(0, chess.cursor.y-1); event.preventDefault(); return true; }
+      if(key==='arrowdown' || key==='s'){ chess.cursor.y = Math.min(chess.size-1, chess.cursor.y+1); event.preventDefault(); return true; }
+      if(key==='h'){ chess.hints = !chess.hints; event.preventDefault(); return true; }
+      if((key==='enter' || key===' ') && chess.turn==='player'){
+        const piece = chessPieceAt(chess, chess.cursor.x, chess.cursor.y);
+        if(chess.selectedPiece){
+          const move = chess.availableMoves.find(m=>m.x===chess.cursor.x && m.y===chess.cursor.y);
+          if(move){
+            chessApplyMove(chess, chess.selectedPiece, move);
+            event.preventDefault();
+            if(move.capture && move.capture.type==='king' && move.capture.color==='ai'){
+              concludeDroneHackMatch(mission, true, 'Firewall king eliminated.');
+              return true;
+            }
+            chess.turn = 'ai';
+            chess.moveDelay = 0.25;
+            chess.selectedPiece = null;
+            chess.selected = null;
+            chess.availableMoves = [];
+          } else {
+            chess.selectedPiece = null;
+            chess.selected = null;
+            chess.availableMoves = [];
+            event.preventDefault();
+          }
+          return true;
+        } else if(piece && piece.color==='player'){
+          chess.selectedPiece = piece;
+          chess.selected = { x: piece.x, y: piece.y };
+          chess.availableMoves = chessGenerateMoves(chess, piece);
+          event.preventDefault();
+          return true;
+        }
+      }
+      if(key==='escape'){ chess.selectedPiece = null; chess.selected = null; chess.availableMoves = []; event.preventDefault(); return true; }
+    }
+  } else if(mission.phase === 'drone'){
+    if(key==='arrowleft' || key==='a'){ mission.input.left = true; event.preventDefault(); return true; }
+    if(key==='arrowright' || key==='d'){ mission.input.right = true; event.preventDefault(); return true; }
+    if(key==='arrowup' || key==='w'){ mission.input.up = true; event.preventDefault(); return true; }
+    if(key==='arrowdown' || key==='s'){ mission.input.down = true; event.preventDefault(); return true; }
+    if(key===' '){
+      dropDroneBomb(mission);
+      event.preventDefault();
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleDroneMissionKeyUp(event){
+  if(!droneMissionState) return false;
+  const mission = droneMissionState;
+  const key = event.key.toLowerCase();
+  if(mission.phase === 'hack' && mission.config.hackType === 'tetris' && mission.tetris){
+    if(key==='arrowdown' || key==='s'){ mission.tetris.fastDrop = false; return true; }
+  }
+  if(mission.phase === 'drone'){
+    if(key==='arrowleft' || key==='a'){ mission.input.left = false; return true; }
+    if(key==='arrowright' || key==='d'){ mission.input.right = false; return true; }
+    if(key==='arrowup' || key==='w'){ mission.input.up = false; return true; }
+    if(key==='arrowdown' || key==='s'){ mission.input.down = false; return true; }
+  }
+  return false;
+}
+
+function handleDroneMissionMouseDown(event){
+  if(!droneMissionState) return false;
+  if(droneMissionState.phase === 'drone'){ dropDroneBomb(droneMissionState); event.preventDefault(); return true; }
+  return false;
 }
 
 function drawTopDown(){
@@ -6353,6 +7554,7 @@ function interact(){
         const targetY = (entryVentWorld? entryVentWorld.y : floorSlab.y-160);
         player.x = targetX; player.y = targetY - player.h;
         camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+        camY = ventDungeonState ? computeVentCameraTarget(ventDungeonState) : 0;
         player.prevBottom = player.y + player.h;
         player.prevVy = 0;
         sub=null; entryVentWorld=null;
@@ -6678,6 +7880,10 @@ function update(dt){
   maybeRespawnFeather();
   if(outsideMode){
     updateOutside(dt);
+    return;
+  }
+  if(droneMissionState){
+    updateDroneMission(dt);
     return;
   }
   if((!arcadeRampage || !arcadeRampage.active) && arcadeStations.length){
@@ -7172,10 +8378,19 @@ function update(dt){
     if(door.open){ door.lift = Math.min(1, door.lift + 0.06); }
     else { door.lift = Math.max(0, door.lift - 0.04); }
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    if(ventDungeonState){
+      const targetCamY = computeVentCameraTarget(ventDungeonState);
+      camY += (targetCamY - camY) * 0.25;
+    } else {
+      camY += (0 - camY) * 0.25;
+      if(Math.abs(camY) < 0.1) camY = 0;
+    }
 
   } else {
     // Sublevel physics
     player.x = clamp(player.x, 80, W-80 - player.w);
+    camY += (0 - camY) * 0.3;
+    if(Math.abs(camY) < 0.1) camY = 0;
     if(rect(player, sub.floor)){
       if(player.vy>0 && player.y+player.h - sub.floor.y < 28){
         player.y = sub.floor.y - player.h; player.vy=0; player.onGround=true;
@@ -7378,11 +8593,18 @@ function updateHudCommon(){
       serversEl.textContent = `Electrical Boxes: ${topDownState.hotwiredCount}/${topDownState.requiredBoxes}`;
     } else if(ventDungeonState){
       serversEl.textContent = `Electrical Boxes: ${ventDungeonState.hotwiredCount}/${ventDungeonState.requiredBoxes}`;
+    } else if(droneMissionState){
+      if(droneMissionState.phase === 'drone'){
+        const total = (droneMissionState.config && droneMissionState.config.drone && droneMissionState.config.drone.totalTargets) || 12;
+        serversEl.textContent = `Targets: ${droneMissionState.destroyedTargets}/${total}`;
+      } else {
+        serversEl.textContent = `Hack Progress: ${Math.round((droneMissionState.hackProgress || 0) * 100)}%`;
+      }
     } else {
       serversEl.textContent = `Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
     }
   }
-  if(alarmsEl) alarmsEl.textContent = (topDownState || ventDungeonState) ? 'Alarms: —' : (alarm ? 'Alarms: ACTIVE' : 'Alarms: OK');
+  if(alarmsEl) alarmsEl.textContent = (topDownState || ventDungeonState || droneMissionState) ? 'Alarms: —' : (alarm ? 'Alarms: ACTIVE' : 'Alarms: OK');
   const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges'); if(player.hasFeather) inv.push('Feather');
   if(invEl) invEl.textContent = `Inv: ${inv.join(', ')||'—'}`;
   const hpRatio = Math.min(1, Math.max(0, player.checking / (player.checkingMax || CHECKING_MAX)));
@@ -8270,6 +9492,10 @@ function drawOutside(){
 }
 
 function draw(){
+  if(droneMissionState){
+    drawDroneMission();
+    return;
+  }
   if(topDownState){
     drawTopDown();
     return;
@@ -8286,6 +9512,9 @@ function draw(){
 
   if(!inSub){
     const ox = -camX;
+    const oy = -camY;
+    ctx.save();
+    ctx.translate(0, oy);
 
     // back wall
     for(const wall of walls){
@@ -8992,10 +10221,6 @@ function draw(){
       ctx.closePath(); ctx.fill();
     }
 
-    if(arcadePixelOverlay){
-      drawArcadePixelOverlay(ctx);
-    }
-
     // Smoke overlay when servers down
     if(smokeActive){
       smokeT += 0.01;
@@ -9005,6 +10230,12 @@ function draw(){
         const sx = (i*260 + (Math.sin(smokeT*0.7+i)*120)) + ox;
         ctx.fillRect(sx, floorSlab.y-140 + Math.sin(smokeT+i)*8, 240, 120);
       }
+    }
+
+    ctx.restore();
+
+    if(arcadePixelOverlay){
+      drawArcadePixelOverlay(ctx);
     }
 
     if(lightingCondition==='dim'){
