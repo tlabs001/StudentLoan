@@ -7068,6 +7068,13 @@ function startWarzoneMission(){
     elapsedMs:0,
     rain,
     skyline,
+    patrols: Array.from({ length: 6 }, () => ({
+      lane: -0.7 + Math.random()*1.4,
+      depth: 0.25 + Math.random()*0.45,
+      dir: Math.random()<0.5 ? -1 : 1,
+      speed: 0.4 + Math.random()*0.4,
+      bob: Math.random()*Math.PI*2
+    })),
     completed:false
   };
   rooftopMissionState = null;
@@ -7122,7 +7129,7 @@ function handleWarzoneFire(){
   let targetEnemy = null;
   for(let i=0; i<mission.enemies.length; i++){
     const enemy = mission.enemies[i];
-    const width = enemy.kind === 'tank' ? 0.16 : 0.11;
+    const width = enemy.kind === 'specialOps' ? 0.14 : 0.11;
     if(Math.abs(enemy.x - mission.aimX) <= width){
       if(!targetEnemy || enemy.distance < targetEnemy.distance){
         targetEnemy = enemy;
@@ -7150,7 +7157,7 @@ function handleWarzoneFire(){
 }
 
 function spawnWarzoneEnemy(){
-  const kinds = ['soldier','specialOps','greenBeret','redBeret','tank'];
+  const kinds = ['soldier','specialOps','greenBeret','redBeret'];
   const kind = kinds[Math.floor(Math.random()*kinds.length)];
   const enemy = {
     kind,
@@ -7165,10 +7172,6 @@ function spawnWarzoneEnemy(){
     enemy.hp = 3;
     enemy.speed = 0.028 + Math.random()*0.02;
     enemy.fireInterval = 1.2 + Math.random()*1.2;
-  } else if(kind === 'tank'){
-    enemy.hp = 6;
-    enemy.speed = 0.012 + Math.random()*0.012;
-    enemy.fireInterval = 2.4 + Math.random()*1.2;
   } else if(kind === 'greenBeret' || kind === 'redBeret'){
     enemy.hp = 1;
     enemy.speed = 0.024 + Math.random()*0.02;
@@ -7187,6 +7190,16 @@ function updateWarzoneMission(dt){
       if(drop.y > H){ drop.y = -Math.random()*60; drop.x = Math.random()*W; }
       if(drop.x < -40){ drop.x = W + Math.random()*30; }
       if(drop.x > W + 40){ drop.x = -Math.random()*30; }
+    }
+  }
+  if(mission.patrols){
+    for(const patrol of mission.patrols){
+      patrol.lane += patrol.dir * patrol.speed * dt * (mission.phase === 'gun' ? 0.18 : 0.35);
+      if(patrol.lane < -0.85 || patrol.lane > 0.85){
+        patrol.dir *= -1;
+        patrol.lane = clamp(patrol.lane, -0.85, 0.85);
+      }
+      patrol.bob = (patrol.bob || 0) + dt * 5.5;
     }
   }
   if(mission.phase === 'sneak'){
@@ -7330,11 +7343,73 @@ function drawWarzoneMission(){
   ctx.font = '18px monospace';
   ctx.fillText(`Kill Count: ${mission.killCount}`, 24, 44);
   if(mission.phase === 'sneak' || mission.phase === 'gunPrep'){
-    const roadTop = H*0.42;
-    ctx.fillStyle = '#111924';
-    ctx.fillRect(0, roadTop, W, H-roadTop);
-    ctx.fillStyle = '#1c2736';
-    ctx.fillRect(0, roadTop+40, W, H-roadTop-40);
+    const roadTop = H*0.44;
+    const laneTopHalf = W*0.18;
+    const laneBottomHalf = W*0.52;
+    ctx.fillStyle = '#0a111c';
+    ctx.beginPath();
+    ctx.moveTo(W/2 - laneTopHalf - 60, roadTop-40);
+    ctx.lineTo(W/2 + laneTopHalf + 60, roadTop-40);
+    ctx.lineTo(W/2 + laneBottomHalf + 120, H);
+    ctx.lineTo(W/2 - laneBottomHalf - 120, H);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#111b29';
+    ctx.beginPath();
+    ctx.moveTo(W/2 - laneTopHalf, roadTop);
+    ctx.lineTo(W/2 + laneTopHalf, roadTop);
+    ctx.lineTo(W/2 + laneBottomHalf, H);
+    ctx.lineTo(W/2 - laneBottomHalf, H);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#182333';
+    ctx.beginPath();
+    ctx.moveTo(W/2 - laneTopHalf - 12, roadTop);
+    ctx.lineTo(W/2 - laneTopHalf - 90, H);
+    ctx.lineTo(W/2 - laneBottomHalf - 90, H);
+    ctx.lineTo(W/2 - laneTopHalf + 6, roadTop);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(W/2 + laneTopHalf + 12, roadTop);
+    ctx.lineTo(W/2 + laneTopHalf + 90, H);
+    ctx.lineTo(W/2 + laneBottomHalf + 90, H);
+    ctx.lineTo(W/2 + laneTopHalf - 6, roadTop);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(90,130,180,0.2)';
+    for(let stripe=0; stripe<7; stripe++){
+      const t = stripe/7;
+      const stripeY = roadTop + t*(H-roadTop) + 20;
+      const stripeHeight = 14 + t*30;
+      const stripeWidth = 16 + t*40;
+      ctx.save();
+      ctx.translate(W/2, stripeY);
+      ctx.scale(1, 1.1);
+      ctx.fillRect(-stripeWidth/2, -stripeHeight/2, stripeWidth, stripeHeight);
+      ctx.restore();
+    }
+    if(mission.patrols){
+      for(const patrol of mission.patrols){
+        const depth = clamp(patrol.depth || 0.4, 0.1, 0.95);
+        const laneHalf = laneTopHalf*0.6 + (laneBottomHalf - laneTopHalf*0.6) * depth;
+        const px = W/2 + patrol.lane * laneHalf;
+        const py = roadTop + depth * (H-roadTop) - 70;
+        const bob = Math.sin(patrol.bob||0) * 6 * (1-depth);
+        const scale = 0.45 + (1-depth)*0.5;
+        const bodyH = 56 * scale;
+        const bodyW = 20 * scale;
+        ctx.fillStyle = 'rgba(18,28,40,0.78)';
+        ctx.fillRect(px - bodyW/2, py - bodyH + bob, bodyW, bodyH*0.65);
+        ctx.fillStyle = 'rgba(12,20,32,0.85)';
+        ctx.fillRect(px - bodyW*0.35, py - bodyH*0.42 + bob, bodyW*0.7, bodyH*0.35);
+        ctx.beginPath();
+        ctx.arc(px, py - bodyH + bob - bodyW*0.2, bodyW*0.45, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(10,16,24,0.6)';
+        ctx.fillRect(px + bodyW*0.32, py - bodyH*0.25 + bob, bodyW*0.9, bodyW*0.22);
+      }
+    }
     const progress = mission.gunDistance > 0 ? mission.distance / mission.gunDistance : 0;
     ctx.fillStyle = '#4ec6ff';
     ctx.fillRect(24, H-34, Math.max(0, Math.min(W-48, (W-48)*progress)), 8);
@@ -7344,12 +7419,57 @@ function drawWarzoneMission(){
       if(cover < mission.distance) continue;
       const relative = cover - mission.distance;
       const normalized = Math.max(0, Math.min(1, relative / mission.gunDistance));
-      const carY = roadTop + 80 + normalized * 220;
-      const carW = 220 - normalized*120;
-      ctx.fillStyle = '#202f3f';
-      ctx.fillRect(W/2 - carW/2, carY, carW, 40);
-      ctx.fillStyle = '#0d141f';
-      ctx.fillRect(W/2 - carW/2 + 10, carY+26, carW-20, 12);
+      const depth = 1 - normalized;
+      const idx = mission.coverPositions.indexOf(cover);
+      const laneBias = idx % 2 === 0 ? -1 : 1;
+      const laneShift = laneTopHalf*0.3 + (laneBottomHalf*0.55) * depth;
+      const cx = W/2 + laneBias * laneShift;
+      const baseY = roadTop + 90 + normalized * (H-roadTop-180);
+      const carLength = 220 - normalized*90;
+      const carHeight = 58 - normalized*18;
+      const cabinHeight = carHeight * 0.48;
+      const wheelRadius = 14 - normalized*5;
+      ctx.fillStyle = idx % 2 === 0 ? '#203143' : '#1a2b3c';
+      ctx.beginPath();
+      ctx.moveTo(cx - carLength/2, baseY);
+      ctx.lineTo(cx + carLength/2, baseY);
+      ctx.lineTo(cx + carLength/2 - 70*depth, baseY - carHeight);
+      ctx.lineTo(cx - carLength/2 + 70*depth, baseY - carHeight);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(82,118,154,0.45)';
+      ctx.beginPath();
+      ctx.moveTo(cx - carLength/2 + 52*depth, baseY - carHeight + cabinHeight);
+      ctx.lineTo(cx + carLength/2 - 48*depth, baseY - carHeight + cabinHeight);
+      ctx.lineTo(cx + carLength/2 - 96*depth, baseY - carHeight + cabinHeight*0.15);
+      ctx.lineTo(cx - carLength/2 + 92*depth, baseY - carHeight + cabinHeight*0.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#0a1019';
+      ctx.beginPath();
+      ctx.ellipse(cx - carLength*0.28, baseY + wheelRadius*0.4, wheelRadius, wheelRadius*0.65, 0, 0, Math.PI*2);
+      ctx.ellipse(cx + carLength*0.28, baseY + wheelRadius*0.4, wheelRadius, wheelRadius*0.65, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#131c28';
+      ctx.fillRect(cx - carLength/2 + 16, baseY - carHeight*0.36, carLength - 32, carHeight*0.18);
+    }
+    if(mission.phase === 'gunPrep'){
+      const nestY = roadTop + 70;
+      const nestWidth = 160;
+      const nestHeight = 34;
+      ctx.fillStyle = '#1d2939';
+      ctx.fillRect(W/2 - nestWidth/2, nestY, nestWidth, nestHeight);
+      ctx.fillStyle = '#27374c';
+      ctx.fillRect(W/2 - nestWidth/2 + 12, nestY - 28, nestWidth - 24, 24);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(W/2 - 6, nestY - 36, 12, 40);
+      ctx.fillStyle = '#121a27';
+      ctx.fillRect(W/2 - nestWidth/2 - 40, nestY + nestHeight - 6, nestWidth + 80, 24);
+      if(mission.awaitingGun){
+        ctx.strokeStyle = 'rgba(110,200,255,0.6)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(W/2 - nestWidth/2 - 4, nestY - 32, nestWidth + 8, nestHeight + 40);
+      }
     }
     ctx.fillStyle = '#f1f5ff';
     ctx.font = '16px monospace';
@@ -7368,65 +7488,141 @@ function drawWarzoneMission(){
     return;
   }
   if(mission.phase !== 'gun') return;
-  const groundY = H*0.7;
-  ctx.fillStyle = '#101925';
-  ctx.fillRect(0, groundY, W, H-groundY);
-  ctx.fillStyle = '#0b121c';
-  ctx.fillRect(0, groundY-24, W, 24);
-  for(const enemy of mission.enemies){
-    const dist = Math.max(0, Math.min(1.2, enemy.distance));
-    const depth = 1 - Math.min(1, dist / 1.2);
-    const size = 26 + depth * 120;
-    const ex = 80 + enemy.x * (W-160);
-    const ey = groundY - 20 - depth * 180;
-    if(enemy.kind === 'tank'){
-      ctx.fillStyle = '#545a64';
-      ctx.fillRect(ex - size*0.6, ey, size*1.2, size*0.5);
-      ctx.fillStyle = '#40464f';
-      ctx.fillRect(ex - size*0.5, ey - size*0.2, size, size*0.3);
-    } else {
-      ctx.fillStyle = enemy.kind === 'specialOps' ? '#1a1a22' : enemy.kind === 'redBeret' ? '#2a3928' : '#2b3c2f';
-      ctx.fillRect(ex - size*0.18, ey - size*0.55, size*0.36, size*0.55);
-      ctx.fillStyle = enemy.kind === 'redBeret' ? '#ba2c2c' : enemy.kind === 'greenBeret' ? '#1f5a2c' : '#1a2331';
-      ctx.fillRect(ex - size*0.22, ey - size*0.68, size*0.44, size*0.18);
-    }
+  const horizonY = H*0.32;
+  const groundY = H*0.74;
+  const laneTopHalf = W*0.2;
+  const laneBottomHalf = W*0.62;
+  const projectWarzone = (xNorm, dist)=>{
+    const maxDist = 1.6;
+    const d = clamp(dist || 0, 0, maxDist);
+    const progress = 1 - d / maxDist;
+    const laneHalf = laneTopHalf*0.7 + (laneBottomHalf - laneTopHalf*0.7) * progress;
+    const px = W/2 + (xNorm - 0.5) * laneHalf * 2.2;
+    const py = horizonY + progress * (groundY - horizonY);
+    return { x: px, y: py, progress };
+  };
+  ctx.fillStyle = '#0a111c';
+  ctx.beginPath();
+  ctx.moveTo(W/2 - laneTopHalf - 90, horizonY - 28);
+  ctx.lineTo(W/2 + laneTopHalf + 90, horizonY - 28);
+  ctx.lineTo(W/2 + laneBottomHalf + 180, H);
+  ctx.lineTo(W/2 - laneBottomHalf - 180, H);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#111a28';
+  ctx.beginPath();
+  ctx.moveTo(W/2 - laneTopHalf, horizonY);
+  ctx.lineTo(W/2 + laneTopHalf, horizonY);
+  ctx.lineTo(W/2 + laneBottomHalf, groundY + 36);
+  ctx.lineTo(W/2 - laneBottomHalf, groundY + 36);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#182233';
+  ctx.beginPath();
+  ctx.moveTo(W/2 - laneTopHalf - 12, horizonY);
+  ctx.lineTo(W/2 - laneTopHalf - 92, groundY + 72);
+  ctx.lineTo(W/2 - laneBottomHalf - 92, groundY + 122);
+  ctx.lineTo(W/2 - laneBottomHalf + 6, horizonY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(W/2 + laneTopHalf + 12, horizonY);
+  ctx.lineTo(W/2 + laneTopHalf + 92, groundY + 72);
+  ctx.lineTo(W/2 + laneBottomHalf + 92, groundY + 122);
+  ctx.lineTo(W/2 + laneBottomHalf - 6, horizonY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(118,160,214,0.2)';
+  for(let stripe=0; stripe<8; stripe++){
+    const t = stripe/8;
+    const stripeY = horizonY + t * (groundY - horizonY) + 30;
+    const stripeHeight = 16 + t*36;
+    const stripeWidth = 18 + t*54;
+    ctx.save();
+    ctx.translate(W/2, stripeY);
+    ctx.scale(1, 1.08);
+    ctx.fillRect(-stripeWidth/2, -stripeHeight/2, stripeWidth, stripeHeight);
+    ctx.restore();
   }
   if(mission.goreUnlocked){
     const goreLevel = Math.max(0, Math.min(1, (mission.elapsedMs - ITS_ONLY_MONEY_GORE_MS) / (3 * 60 * 1000)));
-    ctx.fillStyle = `rgba(180,12,32,${0.18 + goreLevel*0.35})`;
-    ctx.fillRect(0, groundY - goreLevel*120, W, goreLevel*160 + 40);
+    ctx.fillStyle = `rgba(120,18,28,${0.22 + goreLevel*0.4})`;
+    ctx.beginPath();
+    ctx.moveTo(W/2 - laneTopHalf + 4, horizonY + 18);
+    ctx.lineTo(W/2 + laneTopHalf - 4, horizonY + 18);
+    ctx.lineTo(W/2 + laneBottomHalf - 16, groundY + 28);
+    ctx.lineTo(W/2 - laneBottomHalf + 16, groundY + 28);
+    ctx.closePath();
+    ctx.fill();
     for(const burst of mission.bloodBursts){
-      const depth = 1 - Math.min(1, Math.max(0, burst.distance) / 1.2);
-      const size = 14 + depth * 60;
-      const ex = 80 + burst.x * (W-160);
-      const ey = groundY - depth * 180;
+      const pos = projectWarzone(burst.x || 0.5, Math.max(0, burst.distance || 0));
+      const size = 18 + pos.progress * 72;
+      const height = 10 + pos.progress * 36;
       ctx.fillStyle = `rgba(220,32,48,${Math.max(0, burst.life)})`;
       ctx.beginPath();
-      ctx.ellipse(ex, ey, size, size*0.4, 0, 0, Math.PI*2);
+      ctx.ellipse(pos.x, pos.y + 12, size, height, 0, 0, Math.PI*2);
       ctx.fill();
+    }
+  }
+  const orderedEnemies = [...mission.enemies].sort((a,b)=> (b.distance||0) - (a.distance||0));
+  for(const enemy of orderedEnemies){
+    const pos = projectWarzone(enemy.x, enemy.distance);
+    const scale = 0.6 + pos.progress * 2.8;
+    const footY = pos.y + 10;
+    const torsoH = 48 * scale;
+    const legH = 30 * scale;
+    const width = 22 * scale;
+    const baseColor = enemy.kind === 'specialOps' ? '#151a26' : enemy.kind === 'redBeret' ? '#3a1f1f' : enemy.kind === 'greenBeret' ? '#23382a' : '#2a362d';
+    const accent = enemy.kind === 'redBeret' ? '#9c2626' : enemy.kind === 'greenBeret' ? '#1f5a2c' : '#161f26';
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(pos.x - width/2, footY - torsoH - legH, width, torsoH);
+    ctx.fillStyle = accent;
+    ctx.fillRect(pos.x - width*0.58, footY - torsoH - legH - width*0.6, width*1.16, width*0.32);
+    ctx.fillStyle = '#d9c59a';
+    if(enemy.kind === 'specialOps'){
+      ctx.fillStyle = '#0f121a';
+      ctx.fillRect(pos.x - width*0.5, footY - torsoH - legH - width*0.7, width, width*0.7);
+      ctx.fillStyle = '#1f2a3a';
+      ctx.fillRect(pos.x - width*0.36, footY - torsoH - legH - width*0.32, width*0.72, width*0.24);
+    } else {
+      ctx.beginPath();
+      ctx.arc(pos.x, footY - torsoH - legH - width*0.35, width*0.4, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#1a2532';
+    ctx.fillRect(pos.x - width*0.5, footY - legH, width*0.32, legH);
+    ctx.fillRect(pos.x + width*0.18, footY - legH, width*0.32, legH);
+    ctx.fillStyle = '#0c121b';
+    ctx.fillRect(pos.x - width*0.54, footY - 6, width*0.36, 8);
+    ctx.fillRect(pos.x + width*0.18, footY - 6, width*0.36, 8);
+    ctx.fillStyle = '#111926';
+    ctx.fillRect(pos.x - width*0.7, footY - torsoH*0.55, width*1.4, width*0.18);
+    if(enemy.kind === 'specialOps'){
+      ctx.fillStyle = '#3fffc1';
+      ctx.fillRect(pos.x - width*0.38, footY - torsoH - legH - width*0.28, width*0.76, width*0.14);
     }
   }
   if(mission.politician){
     const boss = mission.politician;
-    const depth = boss.progress;
-    const width = 200 + depth * 220;
-    const height = 220 + depth * 180;
-    const cx = W/2;
-    const cy = groundY - 60 - depth * 160;
+    const bossDist = clamp(1.1 - (boss.progress||0) * 0.8, 0.24, 1.1);
+    const pos = projectWarzone(boss.x || 0.5, bossDist);
+    const footY = pos.y + 14;
+    const width = 240 + (boss.progress||0) * 240;
+    const height = 260 + (boss.progress||0) * 220;
+    const left = pos.x - width/2;
+    const top = footY - height;
     ctx.fillStyle = '#f5a142';
-    ctx.fillRect(cx - width/2, cy - height, width, height);
+    ctx.fillRect(left, top, width, height);
     ctx.fillStyle = '#f2d15f';
-    ctx.fillRect(cx - width*0.35, cy - height - 28, width*0.7, 34);
+    ctx.fillRect(pos.x - width*0.34, top - 32, width*0.68, 36);
     ctx.fillStyle = '#1d3f7c';
-    ctx.fillRect(cx - width*0.4, cy - height*0.45, width*0.8, height*0.55);
-    ctx.fillStyle = '#f7c04d';
-    ctx.fillRect(cx - width*0.36, cy - height - 24, width*0.72, 12);
+    ctx.fillRect(pos.x - width*0.38, top + height*0.55, width*0.76, height*0.45);
     ctx.fillStyle = '#0c0c10';
-    ctx.fillRect(cx - width*0.2, cy - height - 20, width*0.4, 10);
+    ctx.fillRect(pos.x - width*0.24, top - 26, width*0.48, 14);
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.textAlign='center';
     ctx.font = '18px monospace';
-    ctx.fillText('POLITICIAN', cx, cy - height - 40);
+    ctx.fillText('POLITICIAN', pos.x, top - 44);
     const ratio = boss.maxHp > 0 ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : 1;
     ctx.fillStyle = 'rgba(40,50,70,0.8)';
     ctx.fillRect(W/2-160, 72, 320, 18);
@@ -7436,44 +7632,92 @@ function drawWarzoneMission(){
     ctx.strokeRect(W/2-160, 72, 320, 18);
     if(boss.lastHitAt && boss.lastHitAt + 200 > now()){
       ctx.fillStyle = 'rgba(255,255,255,0.18)';
-      ctx.fillRect(cx - width/2, cy - height, width, height);
+      ctx.fillRect(left, top, width, height);
     }
   }
   ctx.textAlign='left';
   ctx.font = '15px monospace';
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
   ctx.fillText('Hold the line for twenty-five minutes. 100 enemies approach at all times.', 24, 74);
   if(mission.alliesJoined){
     ctx.textAlign='right';
     ctx.fillText('Allied students provide suppressive fire.', W-24, 74);
     ctx.textAlign='left';
   }
-  const crossX = 80 + mission.aimX * (W-160);
-  const crossY = H*0.42;
+  const cross = projectWarzone(mission.aimX, 0.66);
+  const crossX = cross.x;
+  const crossY = cross.y - 46;
   ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(crossX-18, crossY);
-  ctx.lineTo(crossX+18, crossY);
-  ctx.moveTo(crossX, crossY-18);
-  ctx.lineTo(crossX, crossY+18);
+  ctx.moveTo(crossX-24, crossY);
+  ctx.lineTo(crossX+24, crossY);
+  ctx.moveTo(crossX, crossY-24);
+  ctx.lineTo(crossX, crossY+24);
   ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(crossX, crossY, 9, 0, Math.PI*2);
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#212d3f';
+  ctx.beginPath();
+  ctx.moveTo(W/2 - laneBottomHalf - 40, groundY + 12);
+  ctx.lineTo(W/2 + laneBottomHalf + 40, groundY + 12);
+  ctx.lineTo(W/2 + laneBottomHalf + 120, H);
+  ctx.lineTo(W/2 - laneBottomHalf - 120, H);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#273446';
+  ctx.fillRect(W/2 - 220, groundY - 18, 440, 42);
+  ctx.fillStyle = '#111a26';
+  ctx.fillRect(W/2 - 240, groundY + 18, 480, 30);
+  const gunPivotX = W/2;
+  const gunPivotY = groundY - 48;
+  const aimAngle = (mission.aimX - 0.5) * 0.38;
+  ctx.fillStyle = '#1b2534';
+  ctx.fillRect(W/2 - 90, groundY - 42, 180, 30);
+  ctx.fillStyle = '#101722';
+  ctx.fillRect(W/2 - 120, groundY - 18, 240, 24);
+  ctx.save();
+  ctx.translate(gunPivotX, gunPivotY);
+  ctx.rotate(aimAngle);
+  ctx.fillStyle = '#182434';
+  ctx.fillRect(-26, -32, 52, 96);
+  ctx.fillStyle = '#303f56';
+  ctx.fillRect(-10, -170, 20, 170);
+  ctx.fillStyle = '#455b78';
+  ctx.fillRect(-6, -220, 12, 54);
   if(mission.muzzleFlashUntil && mission.muzzleFlashUntil > now()){
-    ctx.fillStyle = 'rgba(255,220,140,0.45)';
+    ctx.fillStyle = 'rgba(255,220,160,0.45)';
     ctx.beginPath();
-    ctx.arc(W/2, groundY+10, 46, 0, Math.PI);
+    ctx.moveTo(0, -220);
+    ctx.lineTo(32, -264);
+    ctx.lineTo(-32, -264);
+    ctx.closePath();
     ctx.fill();
   }
-  ctx.fillStyle = '#2a3444';
-  ctx.fillRect(W/2-140, groundY+6, 280, 36);
-  ctx.fillStyle = '#1c2534';
-  ctx.fillRect(W/2-200, groundY+36, 400, 26);
+  ctx.restore();
+  ctx.fillStyle = '#0d141e';
+  ctx.fillRect(W/2 - 46, groundY - 70, 92, 34);
+  ctx.fillStyle = '#222f42';
+  ctx.fillRect(W/2 - 64, groundY - 52, 128, 22);
   if(mission.alliesJoined){
-    ctx.fillStyle = '#222c3c';
-    ctx.fillRect(W*0.18 - 26, groundY+2, 52, 38);
-    ctx.fillRect(W*0.82 - 26, groundY+2, 52, 38);
-    ctx.fillStyle = '#38475e';
-    ctx.fillRect(W*0.18 - 18, groundY - 48, 36, 52);
-    ctx.fillRect(W*0.82 - 18, groundY - 48, 36, 52);
+    const sideOffset = laneBottomHalf * 0.8;
+    for(const side of [-1,1]){
+      const baseX = W/2 + side * sideOffset;
+      ctx.fillStyle = '#202b3d';
+      ctx.fillRect(baseX - 44, groundY - 26, 88, 28);
+      ctx.fillStyle = '#131c28';
+      ctx.fillRect(baseX - 56, groundY - 10, 112, 22);
+      ctx.save();
+      ctx.translate(baseX, groundY - 44);
+      ctx.rotate(side * -0.12);
+      ctx.fillStyle = '#253549';
+      ctx.fillRect(-14, -78, 28, 78);
+      ctx.fillStyle = '#3a516a';
+      ctx.fillRect(-8, -126, 16, 82);
+      ctx.restore();
+    }
   }
   if(mission.playerHitFlashUntil && mission.playerHitFlashUntil > now()){
     ctx.fillStyle = 'rgba(255,80,80,0.25)';
