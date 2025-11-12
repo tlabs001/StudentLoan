@@ -4381,7 +4381,7 @@ function makeVentDungeonLevel(floor){
     return selection;
   };
 
-  const state = {
+  const ventState = {
     floor,
     config,
     adjacency,
@@ -4397,7 +4397,7 @@ function makeVentDungeonLevel(floor){
     door:null
   };
 
-  const boxCells = takeCells(state.requiredBoxes);
+  const boxCells = takeCells(ventState.requiredBoxes);
   for(const cell of boxCells){
     const rect = walkwayMap.get(cellKey(cell));
     if(!rect) continue;
@@ -4405,10 +4405,10 @@ function makeVentDungeonLevel(floor){
     const height = 46;
     const bx = rect.x + rect.w/2 - width/2;
     const by = rect.y - height + 6;
-    state.boxes.push({x:bx, y:by, w:width, h:height, activated:false, glowUntil:0});
+    ventState.boxes.push({x:bx, y:by, w:width, h:height, activated:false, glowUntil:0});
   }
-  if(state.boxes.length < state.requiredBoxes){
-    state.requiredBoxes = state.boxes.length;
+  if(ventState.boxes.length < ventState.requiredBoxes){
+    ventState.requiredBoxes = ventState.boxes.length;
   }
   const placePickup = (cell, pickup)=>{
     const rect = walkwayMap.get(cellKey(cell));
@@ -4421,7 +4421,7 @@ function makeVentDungeonLevel(floor){
 
   const cashCells = takeCells(5);
   for(const cell of cashCells){
-    placePickup(cell, {type:'cash', amount: state.noteValue, noteLabel: state.noteLabel, size:22});
+    placePickup(cell, {type:'cash', amount: ventState.noteValue, noteLabel: ventState.noteLabel, size:22});
   }
 
   const intelCells = takeCells(6);
@@ -4492,7 +4492,7 @@ function makeVentDungeonLevel(floor){
     };
     workers.push(worker);
   }
-  state.internTotal = workers.filter(w=>w.isIntern).length;
+  ventState.internTotal = workers.filter(w=>w.isIntern).length;
 
   sprinklers.length = 0;
   movingPlatforms.length = 0;
@@ -4515,11 +4515,11 @@ function makeVentDungeonLevel(floor){
   const doorX = exitRect ? exitRect.x + exitRect.w - doorWidth + 12 : levelSpan - doorWidth - 60;
   const doorY = exitRect ? exitRect.y - doorHeight + exitRect.h + 4 : yBase - doorHeight;
   door = { x:doorX, y:doorY, w:doorWidth, h:doorHeight, unlocked:false, open:false, lift:0, glowUntil:0 };
-  state.door = door;
+  ventState.door = door;
   totalServersOnFloor = -1;
   destroyedOnFloor = 0;
-  if(state.requiredBoxes <= 0){
-    state.missionComplete = true;
+  if(ventState.requiredBoxes <= 0){
+    ventState.missionComplete = true;
     door.unlocked = true;
   }
 
@@ -4539,8 +4539,8 @@ function makeVentDungeonLevel(floor){
   player.crouch = false;
   player.climbing = false;
 
-  ventDungeonState = state;
-  notify(`${config.name}: Hotwire ${state.requiredBoxes} electrical boxes hidden in the vents.`);
+  ventDungeonState = ventState;
+  notify(`${config.name}: Hotwire ${ventState.requiredBoxes} electrical boxes hidden in the vents.`);
   centerNote(`Level ${floor} – ${config.name}`, 1800);
   setAmbient('wind');
   updateMusicForState();
