@@ -1266,6 +1266,34 @@ const state = {
   midnightRage: false
 };
 
+const CEO_ARENA_WAVES = [
+  { id:'guards', label:'Wave 1 — Upgraded Guards', type:'heavy', count:15, hpMult:1.35, speedMult:1.1, damageMult:1.1, spawnInterval:0.45 },
+  { id:'ninjas', label:'Wave 2 — Elite Ninjas', type:'ninja', count:10, hpMult:1.3, speedMult:1.25, damageMult:1.15, spawnInterval:0.5 },
+  { id:'soldiers', label:'Wave 3 — US Soldiers', type:'soldier', count:20, hpMult:1.2, speedMult:1.05, damageMult:1.2, spawnInterval:0.35 },
+  { id:'ceo', label:'Wave 4 — CEO Showdown', boss:true, spawnDelay:1.4 }
+];
+
+const ceoArenaState = {
+  bounds:null,
+  triggerX:0,
+  spawnPoint:null,
+  triggered:false,
+  active:false,
+  spawning:false,
+  waveIndex:-1,
+  currentWave:null,
+  currentBoss:null,
+  pendingSpawns:0,
+  spawnTimer:0,
+  betweenWaves:false,
+  nextWaveAt:0,
+  completed:false,
+  ceoActive:false,
+  lockAnnounced:false,
+  introShown:false,
+  shockwaves:[]
+};
+
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
 function timeLeftMs(){
@@ -3017,6 +3045,52 @@ function makeGuard(x,y,i){
   return guard;
 }
 
+function createArenaGuard(type, x, y, config={}){
+  const { hpMult=1, speedMult=1, damageMult=1 } = config;
+  const tier = Math.max(0, Math.floor((currentFloor-1)/3));
+  const hpScale = 1 + tier * 0.18;
+  const speedScale = 1 + tier * 0.06;
+  let baseHp = 20;
+  let baseSpeed = 0.9;
+  let shotInterval = 700;
+  let attackInterval = 900;
+  if(type==='heavy'){ baseHp=48; baseSpeed=0.7; shotInterval=320; attackInterval=760; }
+  if(type==='ninja'){ baseHp=32; baseSpeed=1.55; shotInterval=0; attackInterval=680; }
+  if(type==='auto'){ baseHp=24; baseSpeed=1.0; shotInterval=220; attackInterval=600; }
+  if(type==='soldier'){ baseHp=34; baseSpeed=1.05; shotInterval=240; attackInterval=760; }
+  const hp = Math.round(baseHp * hpScale * hpMult);
+  const speed = Math.max(0.3, baseSpeed * speedScale * speedMult);
+  const guard = new Agent({
+    x,
+    y,
+    w:GUARD_WIDTH,
+    h:GUARD_HEIGHT,
+    vx: Math.abs(speed),
+    hp,
+    maxHp: hp,
+    dmg: Math.round(GUARD_BASE_DAMAGE * damageMult),
+    type,
+    weapon: type,
+    shotInterval,
+    attackInterval,
+    speed,
+    direction:1
+  });
+  if(type==='ninja'){
+    guard.shoot = false;
+    guard.vy = 0;
+    guard.onGround = true;
+    guard.jumpCount = 0;
+    guard.jumpCooldown = 0;
+    guard.airControl = 1.15;
+  }
+  if(type==='heavy'){ guard.damageReduction = Math.max(0.25, guard.damageReduction||0.25); }
+  if(type==='soldier'){ guard.weapon = 'soldier'; }
+  guard.spawnOrigin = x;
+  guard.arena = true;
+  return guard;
+}
+
 function applyGuardDamage(guard, amount){
   if(!guard || guard.hp<=0) return false;
   let dmg = amount;
@@ -3055,6 +3129,311 @@ function scheduleManagerFloor(){
   managerDefeated=false;
 }
 
+function makeCeoPenthouseArena(yBase){
+  backgroundFX.length = 0;
+  windowsArr.length = 0;
+  desks.length = 0;
+  deskDrawers.length = 0;
+  stealthZones.length = 0;
+  hazards.length = 0;
+  waterCoolers.length = 0;
+  coffeeMachines.length = 0;
+  vendingMachines.length = 0;
+  printers.length = 0;
+  ladders.length = 0;
+  vents.length = 0;
+  panels.length = 0;
+  movingPlatforms.length = 0;
+  plants.length = 0;
+  workers.length = 0;
+  pickups.length = 0;
+  spotlights.length = 0;
+  servers.length = 0;
+  serverTerminals.length = 0;
+  merchants.length = 0;
+  sprinklers.length = 0;
+  boardTables.length = 0;
+  boardMembers.length = 0;
+
+  floorSlab = { x:0, y:yBase, w:3*W, h:22 };
+
+  const arenaLeft = 0.68 * W;
+  const arenaRight = 3*W - 180;
+  const arenaWidth = Math.max(320, arenaRight - arenaLeft);
+  backgroundFX.push({ type:'coliseumBackdrop', x:0.4*W, y:70, w:2.2*W, h:240 });
+  backgroundFX.push({ type:'coliseumFloor', x:arenaLeft-40, y:yBase-72, w:arenaWidth+80, h:72 });
+  backgroundFX.push({ type:'coliseumMosaic', x:arenaLeft-30, y:yBase-132, w:arenaWidth+60, h:56 });
+  for(let c=0;c<6;c++){
+    const t = c/5;
+    const colX = arenaLeft + 60 + t * Math.max(120, arenaWidth-120);
+    backgroundFX.push({ type:'coliseumColumn', x:colX, y:yBase-250, h:220 });
+  }
+  backgroundFX.push({ type:'coliseumBanner', x:arenaLeft + arenaWidth/2 - 200, y:yBase-230, w:400, h:56 });
+  backgroundFX.push({ type:'coliseumStatue', x:arenaLeft-140, y:yBase-160, h:160 });
+  backgroundFX.push({ type:'coliseumStatue', x:arenaRight+20, y:yBase-160, h:160, flip:true });
+  for(let t=0;t<4;t++){
+    const tx = arenaLeft + 80 + t * ((arenaWidth-120)/3);
+    backgroundFX.push({ type:'coliseumTorch', x:tx, y:yBase-128, h:110 });
+  }
+
+  door = { x: 0.24*W, y: yBase-210, w:130, h:210, unlocked:true, open:true, lift:1, glowUntil:0 };
+
+  ceoArenaState.bounds = {
+    left: door.x + door.w - 20,
+    right: arenaRight
+  };
+  ceoArenaState.triggerX = arenaLeft - 100;
+  ceoArenaState.spawnPoint = { x: door.x + door.w - GUARD_WIDTH + 2, y: yBase - GUARD_HEIGHT };
+  ceoArenaState.triggered = false;
+  ceoArenaState.active = false;
+  ceoArenaState.spawning = false;
+  ceoArenaState.waveIndex = -1;
+  ceoArenaState.currentWave = null;
+  ceoArenaState.pendingSpawns = 0;
+  ceoArenaState.spawnTimer = 0;
+  ceoArenaState.betweenWaves = false;
+  ceoArenaState.nextWaveAt = 0;
+  ceoArenaState.completed = false;
+  ceoArenaState.ceoActive = false;
+  ceoArenaState.lockAnnounced = false;
+  ceoArenaState.introShown = true;
+  ceoArenaState.shockwaves = [];
+
+  notify('The penthouse reveals a marble coliseum. Step into the arena to begin the gauntlet.');
+  centerNote('CEO Coliseum — enter the arena.', 2000);
+}
+
+function resetCeoArenaState(){
+  ceoArenaState.bounds = null;
+  ceoArenaState.triggerX = 0;
+  ceoArenaState.spawnPoint = null;
+  ceoArenaState.triggered = false;
+  ceoArenaState.active = false;
+  ceoArenaState.spawning = false;
+  ceoArenaState.waveIndex = -1;
+  ceoArenaState.currentWave = null;
+  ceoArenaState.pendingSpawns = 0;
+  ceoArenaState.spawnTimer = 0;
+  ceoArenaState.betweenWaves = false;
+  ceoArenaState.nextWaveAt = 0;
+  ceoArenaState.completed = false;
+  ceoArenaState.ceoActive = false;
+  ceoArenaState.lockAnnounced = false;
+  ceoArenaState.introShown = false;
+  ceoArenaState.shockwaves = [];
+  ceoArenaState.currentBoss = null;
+}
+
+function spawnCeoBoss(){
+  const ceoWidth = Math.round(GUARD_WIDTH * 5);
+  const ceoHeight = Math.round(GUARD_HEIGHT * 4.5);
+  const bounds = ceoArenaState.bounds || { left:80, right:3*W-120 };
+  const center = (bounds.left + bounds.right) / 2;
+  const spawnX = clamp(center - ceoWidth/2, 80, 3*W - ceoWidth - 80);
+  const spawnY = (floorSlab ? floorSlab.y : (H-50)) - ceoHeight;
+  const ceo = new Agent({
+    x: spawnX,
+    y: spawnY,
+    w: ceoWidth,
+    h: ceoHeight,
+    vx: 0,
+    hp: 720,
+    maxHp: 720,
+    dmg: Math.round(GUARD_BASE_DAMAGE * 2.2),
+    type: 'ceo',
+    weapon: 'melee',
+    shotInterval: 0,
+    attackInterval: 0,
+    speed: 0.55,
+    direction: -1
+  });
+  ceo.spawnOrigin = spawnX;
+  ceo.boss = true;
+  ceo.damageReduction = 0.45;
+  ceo.ceo = true;
+  ceo.trackPlayer = true;
+  ceo.smashPhase = 'idle';
+  ceo.smashTimer = 2.6;
+  ceo.smashWindup = 0.85;
+  ceo.smashRadius = 220;
+  guards.push(ceo);
+  ceoArenaState.ceoActive = true;
+  ceoArenaState.currentBoss = ceo;
+  notify('The CEO strides into the arena! Jump to evade ground smashes.');
+}
+
+function spawnCeoArenaEnemy(){
+  if(!ceoArenaState.currentWave) return;
+  if(ceoArenaState.currentWave.boss){
+    spawnCeoBoss();
+    ceoArenaState.pendingSpawns = 0;
+    ceoArenaState.spawning = false;
+    ceoArenaState.spawnTimer = 0;
+    return;
+  }
+  const spawnBase = ceoArenaState.spawnPoint || { x: initialSpawnX, y: (floorSlab ? floorSlab.y : (H-50)) - GUARD_HEIGHT };
+  const guard = createArenaGuard(ceoArenaState.currentWave.type, spawnBase.x, spawnBase.y, ceoArenaState.currentWave);
+  guard.x = spawnBase.x;
+  guard.y = (floorSlab ? floorSlab.y : (H-50)) - guard.h;
+  guard.spawnOrigin = guard.x;
+  guard.direction = 1;
+  guard.vx = Math.abs(guard.speed || guard.vx || 0.9);
+  guard.wave = ceoArenaState.waveIndex;
+  guards.push(guard);
+}
+
+function beginCeoArenaWave(index){
+  const wave = CEO_ARENA_WAVES[index];
+  if(!wave) return;
+  ceoArenaState.active = true;
+  ceoArenaState.currentWave = wave;
+  ceoArenaState.waveIndex = index;
+  ceoArenaState.pendingSpawns = wave.boss ? 1 : Math.max(0, wave.count || 0);
+  ceoArenaState.spawnTimer = 0;
+  ceoArenaState.spawning = ceoArenaState.pendingSpawns > 0;
+  ceoArenaState.betweenWaves = false;
+  ceoArenaState.nextWaveAt = 0;
+  ceoArenaState.ceoActive = false;
+  const label = wave.label || `Wave ${index+1}`;
+  centerNote(label, 1800);
+  notify(`${label} incoming!`);
+}
+
+function updateCeoBoss(ceo, dt, playerCenterX){
+  if(!ceo) return false;
+  const bounds = ceoArenaState.bounds || { left:40, right:3*W-120 };
+  const speed = Math.max(0.3, ceo.speed || 0.5);
+  const center = ceo.x + ceo.w/2;
+  if(ceo.smashPhase !== 'windup' && ceo.smashPhase !== 'slam'){
+    const dir = playerCenterX >= center ? 1 : -1;
+    ceo.vx = dir * speed;
+    ceo.direction = dir;
+  } else {
+    ceo.vx *= 0.6;
+  }
+  ceo.x = clamp(ceo.x, bounds.left, bounds.right - ceo.w);
+  ceo.y = (floorSlab ? floorSlab.y : (H-50)) - ceo.h;
+  ceo.smashTimer = (ceo.smashTimer || 0) - dt;
+  let inflicted = false;
+  if(ceo.smashPhase === 'idle'){
+    if(ceo.smashTimer <= 0){
+      ceo.smashPhase = 'windup';
+      ceo.smashProgress = 0;
+      ceo.smashTimer = 0;
+      ceo.smashWarningUntil = now() + Math.round((ceo.smashWindup || 0.85) * 1000);
+      if(!ceo.lastCallout || now() - ceo.lastCallout > 1400){
+        centerNote('CEO preparing a ground smash — jump!', 1800);
+        ceo.lastCallout = now();
+      }
+    }
+  } else if(ceo.smashPhase === 'windup'){
+    ceo.smashProgress = (ceo.smashProgress || 0) + dt;
+    if(ceo.smashProgress >= (ceo.smashWindup || 0.9)){
+      ceo.smashPhase = 'slam';
+      ceo.smashRecover = 0.6;
+      ceo.smashProgress = 0;
+      ceo.smashFlashUntil = now() + 240;
+      const radius = ceo.smashRadius || 220;
+      const dx = Math.abs(playerCenterX - center);
+      if(dx <= radius){
+        if(player.onGround && !player.inVent){
+          loseChecking(Math.round(GUARD_BASE_DAMAGE * 1.8));
+          player.hurtUntil = now() + 500;
+          player.vy = -Math.max(JUMP*0.55, 7);
+          player.onGround = false;
+          player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+220);
+          inflicted = true;
+        }
+      }
+      ceoArenaState.shockwaves.push({ x:center, y:(floorSlab ? floorSlab.y : (H-50)), radius:80, life:0.55, grow:360 });
+    }
+  } else if(ceo.smashPhase === 'slam'){
+    ceo.smashRecover -= dt;
+    if(ceo.smashRecover <= 0){
+      ceo.smashPhase = 'idle';
+      ceo.smashTimer = 2.4;
+    }
+  }
+  return inflicted;
+}
+
+function updateCeoArena(dt){
+  if(currentFloor !== FLOORS || !ceoArenaState.bounds) return;
+  if(!ceoArenaState.triggered){
+    const triggerX = ceoArenaState.triggerX || 0;
+    if(player.x + player.w/2 >= triggerX){
+      ceoArenaState.triggered = true;
+      door.unlocked = false;
+      door.open = false;
+      door.lift = 0;
+      door.glowUntil = 0;
+      alarm = false;
+      alarmUntil = 0;
+      notify('Arena lockdown engaged. Survive the CEO\'s gauntlet!');
+      centerNote('Arena locked — Wave 1 incoming!', 2000);
+      beginCeoArenaWave(0);
+    }
+    return;
+  }
+
+  if(ceoArenaState.spawning && ceoArenaState.pendingSpawns > 0){
+    ceoArenaState.spawnTimer += dt;
+    const wave = ceoArenaState.currentWave;
+    if(wave && wave.boss){
+      const delay = wave.spawnDelay || 1.2;
+      if(ceoArenaState.spawnTimer >= delay){
+        spawnCeoArenaEnemy();
+      }
+    } else {
+      const interval = wave && wave.spawnInterval ? wave.spawnInterval : 0.45;
+      if(ceoArenaState.spawnTimer >= interval){
+        ceoArenaState.spawnTimer = 0;
+        spawnCeoArenaEnemy();
+        ceoArenaState.pendingSpawns = Math.max(0, ceoArenaState.pendingSpawns - 1);
+        if(ceoArenaState.pendingSpawns === 0){
+          ceoArenaState.spawning = false;
+        }
+      }
+    }
+  }
+
+  if(ceoArenaState.shockwaves.length){
+    for(const wave of ceoArenaState.shockwaves){
+      wave.life -= dt;
+      wave.radius += (wave.grow || 320) * dt;
+    }
+    ceoArenaState.shockwaves = ceoArenaState.shockwaves.filter(w => w.life > 0);
+  }
+
+  if(!ceoArenaState.spawning && ceoArenaState.pendingSpawns <= 0){
+    const wave = ceoArenaState.currentWave;
+    const bossWave = wave && wave.boss;
+    const alive = guards.some(g => g.hp>0 && (!bossWave || g.type==='ceo'));
+    if(!alive){
+      if(ceoArenaState.waveIndex >= CEO_ARENA_WAVES.length-1){
+        if(!ceoArenaState.completed){
+          ceoArenaState.completed = true;
+          ceoArenaState.active = false;
+          ceoArenaState.ceoActive = false;
+          if(runActive){
+            notify('CEO defeated! Debt tyranny ends tonight.');
+            endGame('victory');
+          }
+        }
+      } else if(!ceoArenaState.betweenWaves){
+        ceoArenaState.betweenWaves = true;
+        ceoArenaState.nextWaveAt = now() + 1500;
+        notify('Wave cleared! Ready for the next assault.');
+      }
+    }
+  }
+
+  if(ceoArenaState.betweenWaves && now() >= ceoArenaState.nextWaveAt){
+    ceoArenaState.betweenWaves = false;
+    beginCeoArenaWave(ceoArenaState.waveIndex + 1);
+  }
+}
+
 function makeLevel(i){
   walls=[]; windowsArr=[]; ladders=[]; vents=[]; servers=[]; panels=[]; cameras=[]; guards=[];
   workers=[]; coffeeMachines=[]; vendingMachines=[]; printers=[]; serverTerminals=[];
@@ -3064,10 +3443,12 @@ function makeLevel(i){
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
+  plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[];
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
   setAmbientForFloor(i);
   sprinklersActiveUntil = 0;
+  resetCeoArenaState();
 
   floorTheme = getFloorTheme(i);
   boardRoomActive = isBoardFloor(i);
@@ -3134,6 +3515,15 @@ function makeLevel(i){
   const yBase = H-50;
 
   walls.push({x:0,y:0,w:3*W,h:H});
+  floorSlab={x:0,y:yBase,w:3*W,h:16};
+
+  if(i === FLOORS){
+    makeCeoPenthouseArena(yBase);
+    totalServersOnFloor = servers.length;
+    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    return;
+  }
+
   const windowRows = boardRoomActive ? 2 : 3;
   const cols=18;
   const spacingX=(3*W-200)/cols;
@@ -3144,8 +3534,6 @@ function makeLevel(i){
       windowsArr.push({x:wx,y:wy,w:36,h:24});
     }
   }
-
-  floorSlab={x:0,y:yBase,w:3*W,h:16};
 
   if(boardRoomActive){
     makeBoardRoomLevel(i, yBase);
@@ -3328,33 +3716,6 @@ function makeLevel(i){
     const gx = pickGuardSpawn([...initialSpawns]);
     initialSpawns.push(gx);
     guards.push(makeGuard(gx, yBase-42, i));
-  }
-
-  if(i === FLOORS){
-    const ceoWidth = GUARD_WIDTH * 4;
-    const ceoHeight = GUARD_HEIGHT * 4;
-    const ceoX = Math.max(60, 1.5*W - ceoWidth/2);
-    const ceo = new Agent({
-      x: ceoX,
-      y: yBase - ceoHeight,
-      w: ceoWidth,
-      h: ceoHeight,
-      vx: 0.24,
-      hp: 480,
-      maxHp: 480,
-      dmg: Math.round(GUARD_BASE_DAMAGE * 1.5),
-      type: 'ceo',
-      weapon: 'launcher',
-      shotInterval: 2200,
-      attackInterval: 1600,
-      speed: 0.24,
-      direction: -1
-    });
-    ceo.spawnOrigin = ceoX;
-    ceo.boss = true;
-    ceo.damageReduction = 0.35;
-    ceo.ceo = true;
-    guards.push(ceo);
   }
 
   if(!managerDefeated && managerCheckFloor && i===managerCheckFloor){
@@ -4351,11 +4712,15 @@ function guardFire(g){
     g.lastShot = t;
     const dir = (player.x > g.x ? 1 : -1);
     bullets.push({type:'enemy', x:g.x + (dir>0?g.w:0), y:g.y+12, vx: dir*(7+Math.random()*1.5), vy:(Math.random()*0.8-0.4), life:800, from:'guard'});
-  } else if(g.type==='ceo'){
-    if(t - g.lastShot < 2200) return;
+  } else if(g.type==='soldier'){
+    if(t - g.lastShot < 260) return;
     g.lastShot = t;
     const dir = (player.x > g.x ? 1 : -1);
-    bullets.push({type:'rocket', x:g.x + (dir>0?g.w:0), y:g.y + Math.max(20, g.h*0.3), vx: dir*4, vy:0, life:1500, from:'guard', blast:true});
+    for(let burst=0; burst<3; burst++){
+      bullets.push({type:'enemy', x:g.x + (dir>0?g.w:0), y:g.y+12+burst*2, vx: dir*(9+burst*0.6), vy:(Math.random()*0.6-0.3), life:820, from:'guard'});
+    }
+  } else if(g.type==='ceo'){
+    return;
   } else if(g.type==='ninja'){
     // no ranged; close collision handled elsewhere
   }
@@ -4395,6 +4760,10 @@ function update(dt){
     const drain = Math.max(1, Math.round(player.interestRate));
     player.checking = Math.max(0, player.checking - drain);
     if(player.checking===0){ notify('Interest drained checking to zero!'); }
+  }
+
+  if(currentFloor === FLOORS && ceoArenaState.bounds){
+    updateCeoArena(dt);
   }
 
   // Inputs
@@ -4656,7 +5025,8 @@ function update(dt){
     // Guards
     const yGround = floorSlab.y;
     const blockReinforce = (destroyedOnFloor===totalServersOnFloor) && seenDoor;
-    if(alarm && guards.length<16 && !blockReinforce){
+    const arenaLocked = (currentFloor === FLOORS && ceoArenaState.triggered);
+    if(alarm && guards.length<16 && !blockReinforce && !arenaLocked){
       if(Math.random()<0.05){
         const existingSpawns = guards.filter(g=>g && g.hp>0).map(g=>g.spawnOrigin ?? g.x);
         const spawnX = pickGuardSpawn(existingSpawns);
@@ -4678,8 +5048,9 @@ function update(dt){
         g.vx = dir * base * evacBoost;
       }
       g.x += g.vx;
-      const guardLeftBound = 40;
-      const guardRightBound = 3*W - (g.w || 20) - 40;
+      const arenaBounds = (currentFloor === FLOORS && ceoArenaState.triggered && ceoArenaState.bounds) ? ceoArenaState.bounds : null;
+      const guardLeftBound = arenaBounds ? arenaBounds.left : 40;
+      const guardRightBound = arenaBounds ? arenaBounds.right - (g.w || 20) : 3*W - (g.w || 20) - 40;
       const baseMove = Math.max(0.1, g.speed || Math.abs(g.vx) || 0.6);
       if(g.x < guardLeftBound){
         g.x = guardLeftBound;
@@ -4714,13 +5085,15 @@ function update(dt){
       if(g.hp <= 0){ continue; }
 
       let inflicted = false;
-      if(inCone){
+      if(g.type==='ceo'){
+        if(updateCeoBoss(g, dt, px) && !inflicted){ inflicted = true; }
+      } else if(inCone){
         alarm=true; alarmUntil=now()+7000;
         if(Math.abs(dx)<40 && Math.abs(dy)<20){
           if(!stomped){
             if(scheduleGuardContactDamage()){ inflicted = true; }
           }
-        } else if(g.type!=='ninja') {
+        } else if(g.type!=='ninja' && g.type!=='ceo') {
           guardFire(g);
         }
       }
@@ -5702,6 +6075,73 @@ function draw(){
           ctx.stroke();
           ctx.lineWidth=1;
         }
+      } else if(fx.type==='coliseumBackdrop'){
+        ctx.fillStyle='rgba(240,232,210,0.28)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.strokeStyle='rgba(255,255,255,0.12)';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(fx.x+ox+12, fx.y+12, fx.w-24, fx.h-24);
+      } else if(fx.type==='coliseumFloor'){
+        ctx.fillStyle='rgba(240,224,190,0.25)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.strokeStyle='rgba(200,180,150,0.4)';
+        ctx.lineWidth=4;
+        ctx.strokeRect(fx.x+ox+6, fx.y+6, fx.w-12, fx.h-12);
+      } else if(fx.type==='coliseumMosaic'){
+        ctx.fillStyle='rgba(205,190,150,0.32)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.strokeStyle='rgba(255,255,255,0.18)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(fx.x+ox+8, fx.y+8, fx.w-16, fx.h-16);
+        const tile = (fx.w-32)/6;
+        for(let r=0;r<2;r++){
+          for(let c=0;c<6;c++){
+            const tx = fx.x + 16 + c*tile + ox;
+            const ty = fx.y + 12 + r*(fx.h/2 - 6);
+            ctx.fillStyle = (r+c)%2===0 ? 'rgba(255,232,180,0.45)' : 'rgba(220,200,160,0.4)';
+            ctx.fillRect(tx, ty, tile-6, fx.h/2 - 14);
+          }
+        }
+      } else if(fx.type==='coliseumColumn'){
+        ctx.fillStyle='rgba(235,228,210,0.6)';
+        ctx.fillRect(fx.x-20+ox, fx.y, 40, fx.h);
+        ctx.fillStyle='rgba(210,200,180,0.4)';
+        ctx.fillRect(fx.x-14+ox, fx.y+10, 28, fx.h-20);
+      } else if(fx.type==='coliseumBanner'){
+        ctx.fillStyle='rgba(200,40,40,0.6)';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.fillStyle='rgba(255,255,255,0.4)';
+        ctx.fillRect(fx.x+ox+12, fx.y+12, fx.w-24, fx.h-24);
+      } else if(fx.type==='coliseumStatue'){
+        const width = 48;
+        const flip = fx.flip ? -1 : 1;
+        ctx.save();
+        ctx.translate(fx.x+ox + (flip<0?width:0), fx.y);
+        ctx.scale(flip, 1);
+        ctx.fillStyle='rgba(210,210,220,0.55)';
+        ctx.fillRect(0, 0, width, fx.h);
+        ctx.fillStyle='rgba(170,170,180,0.4)';
+        ctx.fillRect(6, 10, width-12, fx.h-20);
+        ctx.restore();
+      } else if(fx.type==='coliseumTorch'){
+        ctx.fillStyle='rgba(170,120,60,0.8)';
+        ctx.fillRect(fx.x-8+ox, fx.y+fx.h-32, 16, 32);
+        ctx.fillStyle='rgba(120,80,40,0.7)';
+        ctx.fillRect(fx.x-4+ox, fx.y+fx.h-48, 8, 16);
+        const flameBaseY = fx.y + 24;
+        const flamePulse = Math.sin(performance.now()/200 + fx.x*0.01) * 6;
+        ctx.fillStyle='rgba(255,200,120,0.55)';
+        ctx.beginPath();
+        ctx.moveTo(fx.x+ox, flameBaseY-20-flamePulse);
+        ctx.quadraticCurveTo(fx.x-14+ox, flameBaseY-4, fx.x+ox, flameBaseY+8);
+        ctx.quadraticCurveTo(fx.x+14+ox, flameBaseY-4, fx.x+ox, flameBaseY-20-flamePulse);
+        ctx.fill();
+        ctx.fillStyle='rgba(255,240,180,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(fx.x+ox, flameBaseY-14-flamePulse*0.6);
+        ctx.quadraticCurveTo(fx.x-9+ox, flameBaseY-2, fx.x+ox, flameBaseY+4);
+        ctx.quadraticCurveTo(fx.x+9+ox, flameBaseY-2, fx.x+ox, flameBaseY-14-flamePulse*0.6);
+        ctx.fill();
       }
     }
     for(const screen of billboardScreens){
@@ -5717,6 +6157,20 @@ function draw(){
     }
     // floor
     drawPlatformBlock(ctx, floorSlab.x+ox, floorSlab.y, floorSlab.w, floorSlab.h, activePalette);
+
+    if(currentFloor === FLOORS && ceoArenaState.shockwaves && ceoArenaState.shockwaves.length){
+      ctx.save();
+      for(const wave of ceoArenaState.shockwaves){
+        const alpha = Math.max(0, Math.min(0.45, wave.life * 0.9));
+        if(alpha <= 0) continue;
+        ctx.strokeStyle = `rgba(255,210,150,${alpha})`;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.arc(wave.x + ox, wave.y, Math.max(0, wave.radius), 0, Math.PI*2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
 
     // desks
     for(const d of desks){
@@ -5986,6 +6440,30 @@ function draw(){
       if(g.type==='auto') tint='#3c8a3c';
       if(g.type==='launcher') tint='#8a3c3c';
       if(g.type==='ninja') tint='#2f2f2f';
+      if(g.type==='soldier') tint='#3d5f9a';
+      if(g.type==='ceo'){
+        const centerX = g.x + g.w/2 + ox;
+        const groundY = g.y + g.h;
+        const radius = g.smashRadius || 220;
+        if(g.smashPhase==='windup'){
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,220,140,0.45)';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(centerX, groundY, radius, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        if(g.smashFlashUntil && g.smashFlashUntil > now()){
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,150,100,0.5)';
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(centerX, groundY, radius + 24, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
       ctx.fillStyle = flashing ? '#ff9c9c' : tint;
       ctx.fillRect(g.x+2+ox,g.y+10,g.w-4,22);
       ctx.fillStyle='#1d1d1d';
