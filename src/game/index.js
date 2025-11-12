@@ -158,8 +158,8 @@ const OUTSIDE_WINDOW_GUARD_SLOTS = [
 ];
 
 const ARCADE_BEATDOWN_FLOORS = new Set([13, 14, 23]);
-const TOP_DOWN_FLOORS = new Set([9, 34]);
-const TOP_DOWN_FLOOR_CONFIG = {
+const VENT_DUNGEON_FLOORS = new Set([9, 34]);
+const VENT_DUNGEON_CONFIG = {
   9: {
     name: 'Ventilation Maze',
     noteValue: 1000,
@@ -168,6 +168,11 @@ const TOP_DOWN_FLOOR_CONFIG = {
     requiredBoxes: 9,
     weaponUnlocks: ['grenade', 'saber'],
     speed: 180,
+    cols: 9,
+    rows: 6,
+    cellWidth: 160,
+    cellHeight: 120,
+    loops: 0.28,
     secretPhotos: [
       'CEO in a coconut bra',
       'CEO napping on a pool float',
@@ -183,6 +188,11 @@ const TOP_DOWN_FLOOR_CONFIG = {
     requiredBoxes: 9,
     weaponUnlocks: ['saber', 'machineGun'],
     speed: 195,
+    cols: 10,
+    rows: 7,
+    cellWidth: 176,
+    cellHeight: 128,
+    loops: 0.34,
     secretPhotos: [
       'CEO in a gold lame wetsuit',
       'CEO serenading dolphins',
@@ -191,6 +201,8 @@ const TOP_DOWN_FLOOR_CONFIG = {
     ]
   }
 };
+const TOP_DOWN_FLOORS = new Set();
+const TOP_DOWN_FLOOR_CONFIG = VENT_DUNGEON_CONFIG;
 const ARCADE_RAMPAGE_TARGET_DEFAULT = 26;
 
 (()=>{
@@ -1351,6 +1363,7 @@ const ceoArenaState = {
 };
 
 let topDownState = null;
+let ventDungeonState = null;
 
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
@@ -2801,6 +2814,9 @@ function enterFloor(targetFloor, options={}){
   if(topDownState){
     player.prevBottom = player.y + player.h;
     player.prevVy = 0;
+  } else if(ventDungeonState){
+    player.prevBottom = player.y + player.h;
+    player.prevVy = 0;
   } else {
     player.y = floorSlab.y - player.h;
     player.prevBottom = player.y + player.h;
@@ -3161,6 +3177,13 @@ function damageWorker(worker, amount){
   if(worker.hp === 0){
     worker.alive = false;
     rewardWorker(worker);
+    if(worker.isIntern && ventDungeonState){
+      ventDungeonState.internsKilled = Math.min(ventDungeonState.internTotal || 0, (ventDungeonState.internsKilled || 0) + 1);
+      if(worker.internName){
+        notify(`${worker.internName} neutralized.`);
+      }
+      updateHudCommon();
+    }
   }
   return true;
 }
@@ -3792,6 +3815,7 @@ function makeLevel(i){
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
   plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
   topDownState = null;
+  ventDungeonState = null;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
   player.lawsuitSlowUntil = 0;
   player.punchAnimUntil = 0;
@@ -3807,6 +3831,12 @@ function makeLevel(i){
 
   const doubleWidth = isArcadeBeatdownFloor(i);
   setLevelWidth(doubleWidth ? BASE_LEVEL_WIDTH * 2 : BASE_LEVEL_WIDTH);
+
+  if(VENT_DUNGEON_FLOORS.has(i)){
+    makeVentDungeonLevel(i);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
+    return;
+  }
 
   if(TOP_DOWN_FLOORS.has(i)){
     makeTopDownMazeLevel(i);
@@ -4174,6 +4204,349 @@ function makeLevel(i){
   camX = clamp(player.x - W*0.45, 0, levelSpan - W);
 }
 
+function generateDungeonMazeGraph(cols, rows, extraLoopRatio=0.3, rng=Math.random){
+  const key = (r,c)=>`${r}:${c}`;
+  const adjacency = new Map();
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      adjacency.set(key(r,c), new Set());
+    }
+  }
+  const stack=[[0,0]];
+  const visited=new Set([key(0,0)]);
+  const dirs=[{dr:0,dc:1},{dr:1,dc:0},{dr:0,dc:-1},{dr:-1,dc:0}];
+  while(stack.length){
+    const current=stack[stack.length-1];
+    const [r,c]=current;
+    const options=[];
+    for(const dir of dirs){
+      const nr=r+dir.dr;
+      const nc=c+dir.dc;
+      if(nr<0||nr>=rows||nc<0||nc>=cols) continue;
+      const k=key(nr,nc);
+      if(!visited.has(k)) options.push({nr,nc});
+    }
+    if(!options.length){
+      stack.pop();
+      continue;
+    }
+    shuffleArray(options, rng);
+    const next=options[0];
+    const nextKey=key(next.nr,next.nc);
+    const curKey=key(r,c);
+    adjacency.get(curKey).add(nextKey);
+    adjacency.get(nextKey).add(curKey);
+    visited.add(nextKey);
+    stack.push([next.nr,next.nc]);
+  }
+  const extra = Math.round(Math.max(0, cols*rows * (extraLoopRatio||0)));
+  for(let i=0;i<extra;i++){
+    const r=Math.floor(rng()*rows);
+    const c=Math.floor(rng()*cols);
+    shuffleArray([...dirs], rng).some(dir=>{
+      const nr=r+dir.dr;
+      const nc=c+dir.dc;
+      if(nr<0||nr>=rows||nc<0||nc>=cols) return false;
+      const a=adjacency.get(key(r,c));
+      const b=adjacency.get(key(nr,nc));
+      const neighKey=key(nr,nc);
+      if(a.has(neighKey)) return false;
+      a.add(neighKey);
+      b.add(key(r,c));
+      return true;
+    });
+  }
+  return adjacency;
+}
+
+function makeVentDungeonLevel(floor){
+  const config = VENT_DUNGEON_CONFIG[floor] || VENT_DUNGEON_CONFIG[9];
+  floorTheme = getFloorTheme(floor);
+  activePalette = computePaletteForFloor(floor);
+  lightingCondition = 'dim';
+  backgroundFX.length = 0;
+  boardRoomActive = false;
+  ninjaRound = false;
+  serverObjective = false;
+  inflationActive = false;
+  bonusFloorActive = false;
+  evacuationActive = false;
+  evacuationUntil = 0;
+  powerSurgeUntil = 0;
+  elevatorLockedUntil = 0;
+  alarm = false;
+  state.playerWeaponsDisabled = false;
+
+  const rows = Math.max(3, config.rows || 6);
+  const cols = Math.max(3, config.cols || 9);
+  const cellWidth = Math.max(120, config.cellWidth || 160);
+  const cellHeight = Math.max(96, config.cellHeight || 120);
+  const rng = makeSeededRandom(`vent-dungeon-${floor}-${Math.floor(now())}`);
+
+  setLevelWidth(Math.max(BASE_LEVEL_WIDTH * 2, cols * cellWidth + 260));
+  const levelSpan = levelWidth();
+  const yBase = H - 50;
+  const walkwayHeight = 12;
+  const walkwayMargin = 18;
+  const startX = Math.max(80, Math.floor((levelSpan - cols * cellWidth) / 2));
+  const walkwayY = row => yBase - row * cellHeight - walkwayHeight;
+
+  walls.push({x:0,y:0,w:levelSpan,h:H});
+  floorSlab = {x:0, y:yBase, w:levelSpan, h:16};
+
+  const adjacency = generateDungeonMazeGraph(cols, rows, config.loops || 0.3, rng);
+  const walkwayMap = new Map();
+  for(let row=0; row<rows; row++){
+    for(let col=0; col<cols; col++){
+      const wx = startX + col * cellWidth + walkwayMargin;
+      const wy = walkwayY(row);
+      const ww = cellWidth - walkwayMargin * 2;
+      const rect = {x:wx, y:wy, w:ww, h:walkwayHeight, row, col};
+      walls.push({...rect, isPlatform:true});
+      walkwayMap.set(`${row}:${col}`, rect);
+    }
+  }
+
+  const boundaryThickness = Math.max(18, Math.round(cellWidth * 0.16));
+  const topBoundY = walkwayY(rows-1) - cellHeight - 20;
+  walls.push({x:startX - boundaryThickness, y:topBoundY, w:boundaryThickness, h:yBase - topBoundY + 120});
+  walls.push({x:startX + cols*cellWidth, y:topBoundY, w:boundaryThickness, h:yBase - topBoundY + 120});
+  walls.push({x:startX - boundaryThickness, y:topBoundY, w:cols*cellWidth + boundaryThickness*2, h:boundaryThickness});
+
+  for(let row=0; row<rows; row++){
+    for(let col=0; col<cols; col++){
+      const key = `${row}:${col}`;
+      const neighbors = adjacency.get(key) || new Set();
+      if(col < cols-1){
+        const eastKey = `${row}:${col+1}`;
+        if(!neighbors.has(eastKey)){
+          const wallX = startX + (col+1)*cellWidth - boundaryThickness/2;
+          const wallY = walkwayY(row) - cellHeight + walkwayHeight;
+          const wallH = cellHeight + walkwayHeight + 40;
+          walls.push({x:wallX, y:wallY, w:boundaryThickness, h:wallH});
+        }
+      }
+    }
+  }
+
+  ladders.length = 0;
+  const ladderWidth = 20;
+  for(let row=0; row<rows-1; row++){
+    for(let col=0; col<cols; col++){
+      const key = `${row}:${col}`;
+      const southKey = `${row+1}:${col}`;
+      const neighbors = adjacency.get(key) || new Set();
+      if(neighbors.has(southKey)){
+        const base = walkwayMap.get(key);
+        const above = walkwayMap.get(southKey);
+        if(base && above){
+          const ladderX = base.x + base.w/2 - ladderWidth/2;
+          const ladderTop = above.y - 10;
+          const ladderBottom = base.y + base.h + 12;
+          const ladderHeight = Math.max(80, ladderBottom - ladderTop);
+          ladders.push({x:ladderX, y:ladderTop, w:ladderWidth, h:ladderHeight});
+        }
+      }
+    }
+  }
+
+  const torchCount = Math.max(4, Math.round(cols * 0.8));
+  for(let i=0;i<torchCount;i++){
+    const col = Math.floor((i/torchCount) * cols * 1.1);
+    const clampCol = Math.min(cols-1, Math.max(0, col));
+    const rect = walkwayMap.get(`${rows-1}:${clampCol}`);
+    if(!rect) continue;
+    const tx = rect.x + rect.w/2;
+    const ty = rect.y - 160;
+    backgroundFX.push({type:'coliseumTorch', x:tx, y:ty, h:180});
+  }
+
+  const cells = [];
+  for(let row=0; row<rows; row++){
+    for(let col=0; col<cols; col++){
+      cells.push({row, col});
+    }
+  }
+  const cellKey = (cell)=>`${cell.row}:${cell.col}`;
+  const startCell = {row:0, col:0};
+  const exitCell = {row:rows-1, col:cols-1};
+  const usedCells = new Set([cellKey(startCell), cellKey(exitCell)]);
+  const freeCells = () => cells.filter(cell => !usedCells.has(cellKey(cell)));
+  const takeCells = (count)=>{
+    const pool = freeCells();
+    if(pool.length===0) return [];
+    shuffleArray(pool, rng);
+    const selection = pool.slice(0, Math.min(count, pool.length));
+    for(const cell of selection){ usedCells.add(cellKey(cell)); }
+    return selection;
+  };
+
+  const state = {
+    floor,
+    config,
+    adjacency,
+    boxes:[],
+    requiredBoxes: Math.max(1, config.requiredBoxes || 9),
+    hotwiredCount:0,
+    missionComplete:false,
+    missionAnnounced:false,
+    noteValue: config.noteValue || 1000,
+    noteLabel: config.noteLabel || '$1,000 Note',
+    internsKilled:0,
+    internTotal:0,
+    door:null
+  };
+
+  const boxCells = takeCells(state.requiredBoxes);
+  for(const cell of boxCells){
+    const rect = walkwayMap.get(cellKey(cell));
+    if(!rect) continue;
+    const width = 38;
+    const height = 46;
+    const bx = rect.x + rect.w/2 - width/2;
+    const by = rect.y - height + 6;
+    state.boxes.push({x:bx, y:by, w:width, h:height, activated:false, glowUntil:0});
+  }
+  if(state.boxes.length < state.requiredBoxes){
+    state.requiredBoxes = state.boxes.length;
+  }
+  const placePickup = (cell, pickup)=>{
+    const rect = walkwayMap.get(cellKey(cell));
+    if(!rect) return;
+    const size = pickup.size || 20;
+    const px = rect.x + rect.w/2 - size/2;
+    const py = rect.y - size - 6;
+    pickups.push({x:px, y:py, w:size, h:size, ...pickup});
+  };
+
+  const cashCells = takeCells(5);
+  for(const cell of cashCells){
+    placePickup(cell, {type:'cash', amount: state.noteValue, noteLabel: state.noteLabel, size:22});
+  }
+
+  const intelCells = takeCells(6);
+  for(const cell of intelCells){
+    placePickup(cell, {type:'intel', amount:2});
+  }
+
+  const fileCells = takeCells(6);
+  for(const cell of fileCells){
+    placePickup(cell, {type:'file', amount:2});
+  }
+
+  const cacheCells = takeCells(4);
+  for(const cell of cacheCells){
+    placePickup(cell, {type:'cache', intel:2, files:2, size:22});
+  }
+
+  const weaponUnlocks = Array.isArray(config.weaponUnlocks) ? [...config.weaponUnlocks] : [];
+  for(const weapon of weaponUnlocks){
+    const cellsForWeapon = takeCells(1);
+    if(!cellsForWeapon.length) break;
+    const cell = cellsForWeapon[0];
+    placePickup(cell, {type:'weapon', weapon, label:`${weapon} unlock schematic`, size:24});
+  }
+
+  const secretPhotos = Array.isArray(config.secretPhotos) ? config.secretPhotos : [];
+  const secretCells = takeCells(secretPhotos.length);
+  secretPhotos.forEach((photo, idx)=>{
+    const cell = secretCells[idx];
+    if(!cell) return;
+    placePickup(cell, {type:'secret', photo, size:24});
+  });
+
+  const internNames = shuffleArray(['Avery','Sam','Jordan','Sky','Mika','Quinn','Riley','Dakota','Toni','Emery','Kai','Devon','Harper','Rowan','Indy','Shiloh','Alex','Robin','Hayden','Sloane'], rng);
+  const internCells = takeCells(Math.max(0, config.internCount || 0));
+  for(let idx=0; idx<internCells.length; idx++){
+    const cell = internCells[idx];
+    const rect = walkwayMap.get(cellKey(cell));
+    if(!rect) continue;
+    const minX = rect.x + 6;
+    const maxX = rect.x + rect.w - 24;
+    const speed = 0.35 + rng()*0.2;
+    const vx = rng()<0.5 ? speed : -speed;
+    const appearance = createWorkerAppearance();
+    const worker = {
+      x: minX + (rect.w-24)/2,
+      y: rect.y - 38,
+      w:18,
+      h:38,
+      vx,
+      minX,
+      maxX,
+      bob: rng()*Math.PI*2,
+      alive:true,
+      hp:8,
+      maxHp:8,
+      rewardClaimed:false,
+      hitFlashUntil:0,
+      facing: vx>=0?1:-1,
+      appearance,
+      showTie:false,
+      hasBadge:false,
+      hasClipboard:false,
+      clipboardSide:1,
+      glasses:rng()<0.25,
+      isIntern:true,
+      internName:`${internNames[idx % internNames.length]} the Intern`
+    };
+    workers.push(worker);
+  }
+  state.internTotal = workers.filter(w=>w.isIntern).length;
+
+  sprinklers.length = 0;
+  movingPlatforms.length = 0;
+  vents.length = 0;
+  servers.length = 0;
+  panels.length = 0;
+  cameras.length = 0;
+  guards.length = 0;
+  plants.length = 0;
+  waterCoolers.length = 0;
+  spotlights.length = 0;
+  printers.length = 0;
+  coffeeMachines.length = 0;
+  vendingMachines.length = 0;
+  serverTerminals.length = 0;
+
+  const exitRect = walkwayMap.get(cellKey(exitCell));
+  const doorWidth = 120;
+  const doorHeight = 140;
+  const doorX = exitRect ? exitRect.x + exitRect.w - doorWidth + 12 : levelSpan - doorWidth - 60;
+  const doorY = exitRect ? exitRect.y - doorHeight + exitRect.h + 4 : yBase - doorHeight;
+  door = { x:doorX, y:doorY, w:doorWidth, h:doorHeight, unlocked:false, open:false, lift:0, glowUntil:0 };
+  state.door = door;
+  totalServersOnFloor = -1;
+  destroyedOnFloor = 0;
+  if(state.requiredBoxes <= 0){
+    state.missionComplete = true;
+    door.unlocked = true;
+  }
+
+  const startRect = walkwayMap.get(cellKey(startCell));
+  if(startRect){
+    player.x = startRect.x + startRect.w/2 - player.w/2;
+    player.y = startRect.y - player.h;
+  } else {
+    player.x = startX + player.w;
+    player.y = yBase - player.h - 20;
+  }
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  player.crouch = false;
+  player.climbing = false;
+
+  ventDungeonState = state;
+  notify(`${config.name}: Hotwire ${state.requiredBoxes} electrical boxes hidden in the vents.`);
+  centerNote(`Level ${floor} – ${config.name}`, 1800);
+  setAmbient('wind');
+  updateMusicForState();
+  updateHudCommon();
+}
+
 function makeTopDownMazeLevel(floor){
   floorTheme = getFloorTheme(floor);
   activePalette = computePaletteForFloor(floor);
@@ -4306,7 +4679,14 @@ function makeTopDownMazeLevel(floor){
   const cashCells = takeCells(8);
   for(const cell of cashCells){
     const center = topDownCellCenter(topDown, cell.col, cell.row);
-    topDown.loot.push({ type:'cash', amount: topDown.noteValue, x:center.x, y:center.y, collected:false });
+    topDown.loot.push({
+      type:'cash',
+      amount: topDown.noteValue,
+      noteLabel: topDown.noteLabel,
+      x:center.x,
+      y:center.y,
+      collected:false
+    });
   }
 
   const secretCells = takeCells(topDown.secretPhotos.length);
@@ -4554,8 +4934,14 @@ function interactTopDown(){
     if(loot.type === 'cash'){
       const amount = Math.round(loot.amount || td.noteValue || 1000);
       addChecking(amount);
-      centerNote(`Checking +$${fmtCurrency(amount)}`, 1200);
-      notify(`${td.noteLabel || '$1,000 Note'} recovered.`);
+      const noteLabel = loot.noteLabel || td.noteLabel || null;
+      if(noteLabel){
+        centerNote(`${noteLabel} +$${fmtCurrency(amount)}`, 1400);
+        notify(`${noteLabel} recovered.`);
+      } else {
+        centerNote(`Checking +$${fmtCurrency(amount)}`, 1200);
+        notify('Found cash.');
+      }
       beep({freq:600});
     } else if(loot.type === 'intel'){
       const amount = Math.max(1, loot.amount || 1);
@@ -4609,6 +4995,40 @@ function interactTopDown(){
   }
 
   notify('Nothing here to interact with.');
+}
+
+function interactVentDungeon(){
+  if(!ventDungeonState) return false;
+  const state = ventDungeonState;
+  const playerBox = { x: player.x, y: player.y, w: player.w, h: player.h };
+  for(const box of state.boxes){
+    if(box.activated) continue;
+    const interactBox = { x: box.x - 14, y: box.y - 14, w: box.w + 28, h: box.h + 28 };
+    if(rect(playerBox, interactBox)){
+      box.activated = true;
+      box.glowUntil = now() + 600;
+      state.hotwiredCount = Math.min(state.requiredBoxes, state.hotwiredCount + 1);
+      notify('Electrical box rerouted.');
+      centerNote('Electrical box hotwired', 1200);
+      chime();
+      if(state.hotwiredCount >= state.requiredBoxes && !state.missionComplete){
+        state.missionComplete = true;
+        if(state.door){
+          state.door.unlocked = true;
+          state.door.glowUntil = now() + 2200;
+        }
+        if(!state.missionAnnounced){
+          state.missionAnnounced = true;
+          notify('All boxes hotwired! Return to the elevator.');
+          centerNote('All boxes hotwired!', 1600);
+          chime();
+        }
+      }
+      updateHudCommon();
+      return true;
+    }
+  }
+  return false;
 }
 
 function handleTopDownAttack(){
@@ -4667,6 +5087,22 @@ function completeTopDownLevel(){
   restorePlayerFromTopDown(td);
   topDownState = null;
   setTimeout(()=>enterFloor(nextFloor, {}), 600);
+}
+
+function completeVentDungeonLevel(){
+  if(!ventDungeonState) return;
+  const state = ventDungeonState;
+  const total = state.internTotal || 0;
+  const killed = state.internsKilled || 0;
+  const floor = state.floor || currentFloor;
+  if(total > 0){
+    if(killed === 0){
+      unlockAchievement(`vent-pacifist-${floor}`, floor === 9 ? 'Vent Mercy I' : `Vent Mercy ${floor}`, 'Cleared the vents without harming interns');
+    } else if(killed === total){
+      unlockAchievement(`vent-menace-${floor}`, floor === 9 ? 'Intern Hunter I' : `Intern Hunter ${floor}`, 'Eliminated every intern in the vents');
+    }
+  }
+  ventDungeonState = null;
 }
 
 function drawTopDown(){
@@ -5597,6 +6033,9 @@ function interact(){
     interactTopDown();
     return;
   }
+  if(ventDungeonState && interactVentDungeon()){
+    return;
+  }
   const p={x:player.x, y:player.y, w:player.w, h:player.h};
   if(arcadeRampage && arcadeRampage.active) return;
 
@@ -5624,11 +6063,24 @@ function interact(){
     for(const it of pickups){
       if(it.type && rect(p,it)){
         if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
-        if(it.type==='ammo'){ addAmmo(it.amount||18); it.type=null; centerNote("Ammo +"+(it.amount||18)); beep({freq:520}); notify("Ammo restocked."); }
-        if(it.type==='medkit'){ addChecking(it.amount||40); it.type=null; centerNote('Medkit +' + (it.amount||40) + ' health'); chime(); notify('Medkit restored health.'); }
-        if(it.type==='cash'){ addChecking(it.amount||15); it.type=null; centerNote("Checking +$"+(it.amount||15)); beep({freq:600}); notify("Found cash."); }
-        if(it.type==='file'){ player.files++; it.type=null; centerNote("Collected file."); beep({freq:700}); notify("File collected."); evaluateWeaponUnlocks(); }
-        if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Collected intel."); beep({freq:820}); notify("Intel collected."); evaluateWeaponUnlocks(); }
+        if(it.type==='ammo'){ const amount = Math.round(it.amount || 18); addAmmo(amount); it.type=null; centerNote(`Ammo +${amount}`); beep({freq:520}); notify("Ammo restocked."); }
+        if(it.type==='medkit'){ const amount = Math.round(it.amount || 40); addChecking(amount); it.type=null; centerNote(`Medkit +${amount} health`); chime(); notify('Medkit restored health.'); }
+        if(it.type==='cash'){
+          const amount = Math.round(it.amount || 15);
+          addChecking(amount);
+          it.type=null;
+          const noteLabel = it.noteLabel || (ventDungeonState && ventDungeonState.noteLabel) || null;
+          if(noteLabel){
+            centerNote(`${noteLabel} +$${fmtCurrency(amount)}`, 1400);
+            notify(`${noteLabel} recovered.`);
+          } else {
+            centerNote(`Checking +$${fmtCurrency(amount)}`, 1200);
+            notify('Found cash.');
+          }
+          beep({freq:600});
+        }
+        if(it.type==='file'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.files += gain; it.type=null; centerNote(`Files +${gain}`); beep({freq:700}); notify('File collected.'); evaluateWeaponUnlocks(); }
+        if(it.type==='intel'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.intel += gain; it.type=null; centerNote(`Intel +${gain}`); beep({freq:820}); notify('Intel collected.'); evaluateWeaponUnlocks(); }
         if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; setFeatherRespawnSource(it); featherRespawnAt=0; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); }
         if(it.type==='special'){
           player.specialFiles = (player.specialFiles||0) + 1;
@@ -5648,6 +6100,31 @@ function interact(){
             centerNote('Arsenal dossier recovered.', 1400);
             notify('All weapons already unlocked, dossier secured.');
           }
+          chime();
+        }
+        if(it.type==='cache'){
+          const intelGain = Math.max(1, Math.round(it.intel || it.amount || 1));
+          const fileGain = Math.max(1, Math.round(it.files || it.alt || 1));
+          player.intel += intelGain;
+          player.files += fileGain;
+          it.type=null;
+          centerNote(`Intel +${intelGain} / Files +${fileGain}`, 1400);
+          notify('Combined intel cache recovered.');
+          evaluateWeaponUnlocks();
+          chime();
+        }
+        if(it.type==='weapon'){
+          const label = it.label || `Unlocked ${it.weapon}`;
+          unlockWeapon(it.weapon, label);
+          it.type=null;
+          chime();
+        }
+        if(it.type==='secret'){
+          player.specialFiles = (player.specialFiles || 0) + 1;
+          updateSpecialFileUI();
+          it.type=null;
+          centerNote('Secret file uncovered!', 1600);
+          notify(it.photo ? `Embarrassing photo recovered: ${it.photo} (Dr. Jeffstein’s Island).` : 'Secret file recovered.');
           chime();
         }
       }
@@ -5817,6 +6294,10 @@ function interact(){
           centerNote('Clear the board room before using the elevator.', 1600);
           lockedBuzz();
           notify('Board room still contested.');
+        } else if(ventDungeonState && !ventDungeonState.missionComplete){
+          centerNote('Hotwire every electrical box to power the elevator.', 1600);
+          lockedBuzz();
+          notify('Electrical boxes still active.');
         } else if(totalServersOnFloor > 0 && destroyedOnFloor < totalServersOnFloor){
           centerNote('Destroy remaining servers to unlock the elevator.', 1600);
           lockedBuzz();
@@ -5833,6 +6314,9 @@ function interact(){
           door.open=true;
           doorOpenSFX();
           setTimeout(()=>{
+            if(ventDungeonState){
+              completeVentDungeonLevel();
+            }
             if(currentFloor >= FLOORS){
               finishRun('victory', { message:'CEO eliminated! Tower reclaimed.', note:'Penthouse secured.' });
               return;
@@ -5843,9 +6327,17 @@ function interact(){
             player.x=initialSpawnX; player.y=0; player.vx=player.vy=0;
             makeLevel(currentFloor);
             handleFloorStart(currentFloor);
-            player.y = floorSlab.y - player.h;
-            player.prevBottom = player.y + player.h;
-            player.prevVy = 0;
+            if(topDownState){
+              player.prevBottom = player.y + player.h;
+              player.prevVy = 0;
+            } else if(ventDungeonState){
+              player.prevBottom = player.y + player.h;
+              player.prevVy = 0;
+            } else {
+              player.y = floorSlab.y - player.h;
+              player.prevBottom = player.y + player.h;
+              player.prevVy = 0;
+            }
             if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
           }, 700);
         }
@@ -6884,11 +7376,13 @@ function updateHudCommon(){
   if(serversEl){
     if(topDownState){
       serversEl.textContent = `Electrical Boxes: ${topDownState.hotwiredCount}/${topDownState.requiredBoxes}`;
+    } else if(ventDungeonState){
+      serversEl.textContent = `Electrical Boxes: ${ventDungeonState.hotwiredCount}/${ventDungeonState.requiredBoxes}`;
     } else {
       serversEl.textContent = `Servers: ${destroyedOnFloor}/${totalServersOnFloor}`;
     }
   }
-  if(alarmsEl) alarmsEl.textContent = topDownState ? 'Alarms: —' : (alarm ? 'Alarms: ACTIVE' : 'Alarms: OK');
+  if(alarmsEl) alarmsEl.textContent = (topDownState || ventDungeonState) ? 'Alarms: —' : (alarm ? 'Alarms: ACTIVE' : 'Alarms: OK');
   const inv=[]; if(player.hasScrew) inv.push('Screwdriver'); if(player.hasCharges) inv.push('Charges'); if(player.hasFeather) inv.push('Feather');
   if(invEl) invEl.textContent = `Inv: ${inv.join(', ')||'—'}`;
   const hpRatio = Math.min(1, Math.max(0, player.checking / (player.checkingMax || CHECKING_MAX)));
@@ -8265,6 +8759,22 @@ function draw(){
       ctx.fillRect(a.x+ox,a.y,a.w,a.h);
     }
 
+    if(ventDungeonState){
+      for(const box of ventDungeonState.boxes){
+        const bx = box.x + ox;
+        const glow = box.glowUntil && box.glowUntil > now();
+        if(glow){
+          const pulse = 0.35 + 0.2 * Math.sin(performance.now()/140 + bx*0.01);
+          ctx.fillStyle = `rgba(255,240,180,${pulse})`;
+          ctx.fillRect(bx-6, box.y-6, box.w+12, box.h+12);
+        }
+        ctx.fillStyle = box.activated ? 'rgba(130,255,190,0.85)' : 'rgba(255,220,150,0.85)';
+        ctx.fillRect(bx, box.y, box.w, box.h);
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(bx+6, box.y+6, box.w-12, box.h-12);
+      }
+    }
+
     // guards with flashlight cone
     for(const g of guards){
       const isCEO = g.type==='ceo' || g.ceo;
@@ -8439,6 +8949,27 @@ function draw(){
         ctx.fillStyle='#ffecc0';
         ctx.fillRect(x+6,y+6,it.w-12,it.h-12);
       }
+      if(it.type==='cache'){
+        ctx.fillStyle='#9fe7ff';
+        ctx.fillRect(x,y,it.w,it.h);
+        ctx.fillStyle='rgba(40,60,90,0.5)';
+        ctx.fillRect(x+4,y+4,it.w-8,it.h-8);
+      }
+      if(it.type==='weapon'){
+        ctx.fillStyle='#c07bff';
+        ctx.fillRect(x,y,it.w,it.h);
+        ctx.fillStyle='rgba(30,16,60,0.6)';
+        ctx.fillRect(x+3,y+3,it.w-6,it.h-6);
+        ctx.fillStyle='rgba(255,255,255,0.8)';
+        ctx.font='10px monospace';
+        ctx.fillText('W', x+3, y+it.h-4);
+      }
+      if(it.type==='secret'){
+        ctx.fillStyle='#ff7acb';
+        ctx.fillRect(x,y,it.w,it.h);
+        ctx.fillStyle='rgba(255,255,255,0.4)';
+        ctx.fillRect(x+4,y+4,it.w-8,it.h-8);
+      }
     }
 
     // player
@@ -8581,6 +9112,18 @@ function draw(){
       ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+10);
       ctx.lineTo(px + (dir>0?player.w+100:-100), spriteTop+36);
       ctx.closePath(); ctx.fill();
+    }
+  }
+  if(ventDungeonState){
+    ctx.fillStyle='rgba(255,255,255,0.9)';
+    ctx.textAlign='left';
+    ctx.font='16px monospace';
+    ctx.fillText(`Electrical Boxes: ${ventDungeonState.hotwiredCount}/${ventDungeonState.requiredBoxes}`, 24, 36);
+    ctx.font='13px monospace';
+    ctx.fillText(`Interns pacified: ${ventDungeonState.internsKilled}/${ventDungeonState.internTotal}`, 24, 56);
+    if(!ventDungeonState.missionComplete){
+      ctx.font='12px monospace';
+      ctx.fillText('Find and hotwire every electrical box to unlock the elevator.', 24, 74);
     }
   }
   if(activeHack){
