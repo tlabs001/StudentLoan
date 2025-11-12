@@ -3858,6 +3858,7 @@ function spawnHellscapeZombie(spawnX){
   const x = Number.isFinite(spawnX) ? spawnX : hellscapeSpawnX();
   const groundY = floorSlab ? floorSlab.y : (H - GUARD_HEIGHT - 40);
   const zombieHeight = 48;
+  const zombieSpeed = (hellscapeState && hellscapeState.zombieSpeed) ? hellscapeState.zombieSpeed : 0.48;
   const zombie = new Agent({
     x,
     y: groundY - zombieHeight,
@@ -3871,7 +3872,7 @@ function spawnHellscapeZombie(spawnX){
     weapon: 'melee',
     attackInterval: 1400,
     shotInterval: 0,
-    speed: 0.48,
+    speed: zombieSpeed,
     direction: Math.random()<0.5 ? -1 : 1,
     aggressive: true,
     chaser: true
@@ -3924,15 +3925,35 @@ function updateHellscape(dt){
   const activeZombies = guards.filter(g=>g && g.hp>0 && g.type==='zombie').length;
   const maxZombies = 10 + state.wave * 4;
   state.spawnTimer = (state.spawnTimer || 0) + dt;
-  const interval = Math.max(0.6, (state.spawnInterval || 1.6) - state.wave * 0.18);
+  const baseInterval = state.spawnInterval || (60/45);
+  const interval = Math.max(0.6, baseInterval - state.wave * 0.18);
   if(state.spawnTimer >= interval){
     if(activeZombies < maxZombies){
-      spawnHellscapeZombie();
+      const spawnNearPlayer = ((state.zombieSpawnCycle || 0) % 2) === 1;
+      let spawnX = null;
+      if(spawnNearPlayer){
+        const px = player.x + player.w/2;
+        const jitter = (Math.random()*180) - 90;
+        const minX = 60;
+        const maxX = Math.max(minX + 40, levelWidth() - 140);
+        spawnX = Math.max(minX, Math.min(maxX, px + jitter));
+      } else if(state.cemeterySpawnPoints && state.cemeterySpawnPoints.length){
+        const idx = state.cemeteryIndex || 0;
+        spawnX = state.cemeterySpawnPoints[idx % state.cemeterySpawnPoints.length];
+        state.cemeteryIndex = (idx + 1) % state.cemeterySpawnPoints.length;
+      }
+      spawnHellscapeZombie(spawnX);
       if(Math.random() < 0.35 + state.wave * 0.08 && activeZombies + 1 < maxZombies){
-        spawnHellscapeZombie();
+        let extraSpawnX = null;
+        if(spawnNearPlayer && state.cemeterySpawnPoints && state.cemeterySpawnPoints.length){
+          const rand = Math.floor(Math.random() * state.cemeterySpawnPoints.length);
+          extraSpawnX = state.cemeterySpawnPoints[rand];
+        }
+        spawnHellscapeZombie(extraSpawnX);
       }
     }
     state.spawnTimer = 0;
+    state.zombieSpawnCycle = (state.zombieSpawnCycle || 0) + 1;
   }
   state.commandCooldown = Math.max(0, (state.commandCooldown || 0) - dt);
   const activeCommandos = guards.filter(g=>g && g.hp>0 && g.type==='commando').length;
@@ -3950,11 +3971,15 @@ function makeCorporateHellscapeLevel(i){
     zombiesKilled: 0,
     commandosKilled: 0,
     spawnTimer: 0,
-    spawnInterval: 1.7,
+    spawnInterval: 60/45,
     commandCooldown: 4.6,
     disableFeather: true,
     hostages: [],
     spawnPoints: [],
+    cemeterySpawnPoints: [],
+    cemeteryIndex: 0,
+    zombieSpawnCycle: 0,
+    zombieSpeed: 0.48 * 1.25,
     snackFound: false,
     buffUntil: 0,
     goalComplete: false,
@@ -3972,32 +3997,51 @@ function makeCorporateHellscapeLevel(i){
   floorSlab = {x:0, y:yBase, w:span, h:24};
   backgroundFX.push({type:'hellscapeSky'});
 
-  const buildingCount = 9;
+  const baseBuildingCount = 9;
+  const buildingCount = Math.max(baseBuildingCount, Math.round(baseBuildingCount * 1.75));
   const segment = span / (buildingCount + 1);
   const hostages = hellscapeState.hostages;
   for(let b=0; b<buildingCount; b++){
-    const center = 160 + (b+1) * segment;
-    const width = 140 + Math.random()*120;
-    const roofY = yBase - (130 + Math.random()*90);
-    const startX = Math.max(80, Math.min(span - width - 120, center - width/2));
-    const midY = roofY + 70;
-    walls.push({x:startX, y:roofY, w:width, h:12, isPlatform:true});
-    walls.push({x:startX+20, y:midY, w:width-40, h:12, isPlatform:true});
-    ladders.push({x:startX + width/2 - 10, y:midY, w:20, h:yBase - midY});
-    ladders.push({x:startX + width/2 - 10, y:roofY, w:20, h:midY - roofY});
+    const center = 140 + (b+1) * segment;
+    const width = 130 + Math.random()*110;
+    const roofY = yBase - (160 + Math.random()*110);
+    const startX = Math.max(80, Math.min(span - width - 140, center - width/2));
+    const midY = roofY + 60 + Math.random()*24;
+    const lowerY = Math.min(yBase - 80, midY + 50 + Math.random()*28);
+    const catwalkY = roofY + 32 + Math.random()*24;
+    const roofPlatform = {x:startX, y:roofY, w:width, h:12, isPlatform:true};
+    const midPlatform = {x:startX + 18, y:midY, w:width - 36, h:12, isPlatform:true};
+    const lowerPlatform = {x:startX + 24, y:lowerY, w:width - 48, h:12, isPlatform:true};
+    const catwalkPlatform = {x:startX + 32, y:catwalkY, w:width - 64, h:10, isPlatform:true};
+    walls.push(roofPlatform);
+    walls.push(catwalkPlatform);
+    walls.push(midPlatform);
+    walls.push(lowerPlatform);
+    const ladderX = startX + width/2 - 10;
+    ladders.push({x:ladderX, y:roofY, w:20, h:lowerY - roofY + 12});
+    ladders.push({x:startX + 36, y:catwalkY, w:18, h:midY - catwalkY + 12});
+    ladders.push({x:startX + width - 54, y:midY, w:18, h:lowerY - midY + 12});
     hellscapeState.spawnPoints.push(startX + width/2);
-    backgroundFX.push({type:'hellscapeBuilding', x:startX, y:roofY-40, w:width, h:yBase - (roofY-40)});
-    const lootY = midY - 30;
+    hellscapeState.spawnPoints.push(startX + width/2 + 24 * (Math.random()<0.5?-1:1));
+    hellscapeState.spawnPoints.push(startX + width/2 - 36 * (Math.random()<0.5?-1:1));
+    backgroundFX.push({type:'hellscapeBuilding', x:startX - 10, y:roofY-60, w:width + 20, h:yBase - (roofY-60)});
+    const lootMidY = midY - 30;
+    const lootLowerY = lowerY - 34;
     if(b % 2 === 0){
-      pickups.push({type:'ammo', x:startX + width/2 - 10, y:lootY, w:20, h:20, amount:36});
+      pickups.push({type:'ammo', x:startX + width/2 - 10, y:lootMidY, w:20, h:20, amount:36});
+      pickups.push({type:'intel', x:startX + width/2 - 60, y:lootLowerY, w:20, h:20, amount:3});
     } else {
-      pickups.push({type:'medkit', x:startX + width/2 - 10, y:lootY, w:20, h:20, amount:65});
+      pickups.push({type:'medkit', x:startX + width/2 - 10, y:lootMidY, w:20, h:20, amount:65});
+      pickups.push({type:'cash', x:startX + width/2 + 40, y:lootLowerY, w:22, h:22, amount:420, noteLabel:'Hazard Pay'});
     }
-    if(b % 3 === 1){
-      hostages.push({x:startX + width/2, y:roofY + 8 + 42, h:42, freed:false});
+    if(Math.random()<0.5){
+      hostages.push({x:startX + width/2, y:midY + 42, h:42, freed:false});
     }
-    if(Math.random()<0.45){
-      backgroundFX.push({type:'hellscapeFire', x:startX + width/2, y:roofY + 12, h:80});
+    if(Math.random()<0.75){
+      backgroundFX.push({type:'hellscapeFire', x:startX + width/2, y:roofY + 10, h:92});
+    }
+    if(Math.random()<0.55){
+      backgroundFX.push({type:'hellscapeFire', x:startX + width/2 + 36 * (Math.random()<0.5?-1:1), y:midY + 6, h:70});
     }
   }
 
@@ -4005,7 +4049,9 @@ function makeCorporateHellscapeLevel(i){
   for(let g=0; g<graveyardCount; g++){
     const gx = 120 + g * (span/(graveyardCount+1));
     backgroundFX.push({type:'hellscapeGraveyard', x:gx, y:yBase, w:180});
-    hellscapeState.spawnPoints.push(gx + 90);
+    const spawnX = gx + 90;
+    hellscapeState.spawnPoints.push(spawnX);
+    hellscapeState.cemeterySpawnPoints.push(spawnX);
   }
 
   for(let t=0; t<18; t++){
@@ -4564,8 +4610,12 @@ function makeVentDungeonLevel(floor){
   const cellWidth = Math.max(120, config.cellWidth || 160);
   const cellHeight = Math.max(96, config.cellHeight || 120);
   const rng = makeSeededRandom(`vent-dungeon-${floor}-${Math.floor(now())}`);
+  const hasOptionalHellscape = (floor === 9 || floor === 34);
+  const optionalZoneWidth = hasOptionalHellscape ? 260 : 0;
+  const optionalZoneGap = hasOptionalHellscape ? 140 : 0;
 
-  setLevelWidth(Math.max(BASE_LEVEL_WIDTH * 2, cols * cellWidth + 260));
+  const optionalSpanBonus = hasOptionalHellscape ? 2 * (optionalZoneWidth + optionalZoneGap) : 0;
+  setLevelWidth(Math.max(BASE_LEVEL_WIDTH * 2, cols * cellWidth + 260 + optionalSpanBonus));
   const levelSpan = levelWidth();
   const yBase = H - 50;
   const walkwayHeight = 12;
@@ -4680,6 +4730,78 @@ function makeVentDungeonLevel(floor){
     cameraBounds:null,
     cameraBaseline:0
   };
+
+  if(hasOptionalHellscape){
+    const zones = [];
+    const anchorRow = 0;
+    const leftAnchor = walkwayMap.get(`${anchorRow}:0`);
+    const rightAnchor = walkwayMap.get(`${anchorRow}:${cols-1}`);
+    const createHellscapeZone = (side, anchorRect)=>{
+      if(!anchorRect || optionalZoneWidth <= 0) return null;
+      const baseY = anchorRect.y;
+      const zoneX = side==='left'
+        ? Math.max(40, anchorRect.x - optionalZoneGap - optionalZoneWidth)
+        : Math.min(levelSpan - optionalZoneWidth - 60, anchorRect.x + anchorRect.w + optionalZoneGap);
+      const platform = {x:zoneX, y:baseY, w:optionalZoneWidth, h:walkwayHeight, isPlatform:true};
+      walls.push(platform);
+      if(side==='left'){
+        const bridgeStart = zoneX + optionalZoneWidth;
+        const bridgeEnd = anchorRect.x;
+        if(bridgeEnd > bridgeStart){
+          walls.push({x:bridgeStart, y:baseY, w:bridgeEnd - bridgeStart, h:walkwayHeight, isPlatform:true});
+        }
+      } else {
+        const bridgeStart = anchorRect.x + anchorRect.w;
+        const bridgeEnd = zoneX;
+        if(bridgeEnd > bridgeStart){
+          walls.push({x:bridgeStart, y:baseY, w:bridgeEnd - bridgeStart, h:walkwayHeight, isPlatform:true});
+        }
+      }
+      const upperY = Math.max(baseY - 70, topBoundY + 60);
+      const upperPlatform = {x:zoneX + 24, y:upperY, w:optionalZoneWidth - 48, h:walkwayHeight, isPlatform:true};
+      walls.push(upperPlatform);
+      ladders.push({x:zoneX + optionalZoneWidth/2 - ladderWidth/2, y:upperY, w:ladderWidth, h:baseY - upperY + walkwayHeight});
+      const buildingTop = upperY - 120;
+      const buildingHeight = (baseY + 160) - buildingTop;
+      backgroundFX.push({type:'hellscapeBuilding', x:zoneX - 30, y:buildingTop, w:optionalZoneWidth + 60, h:buildingHeight});
+      backgroundFX.push({type:'hellscapeFire', x:zoneX + optionalZoneWidth/2, y:upperY - 20, h:90});
+      const graveX = side==='left' ? zoneX + optionalZoneWidth - 200 : zoneX + 20;
+      backgroundFX.push({type:'hellscapeGraveyard', x:graveX, y:baseY + walkwayHeight + 6, w:180});
+      const zone = {
+        side,
+        x: zoneX,
+        width: optionalZoneWidth,
+        platformY: baseY,
+        upperY,
+        spawnPoints: [],
+        activated: false
+      };
+      zone.spawnPoints.push(zoneX + optionalZoneWidth/2);
+      zone.spawnPoints.push(graveX + 90);
+      const lootBaseX = zoneX + optionalZoneWidth/2;
+      const lootUpperY = upperY - 34;
+      const lootLowerY = baseY - 32;
+      pickups.push({type:'ammo', x:lootBaseX - 12, y:lootUpperY, w:24, h:24, amount:48});
+      pickups.push({type:'intel', x:lootBaseX - 70, y:lootUpperY, w:22, h:22, amount:3});
+      const cashAmount = Math.round((ventState.noteValue || 1000) * 2.5);
+      pickups.push({type:'cash', x:lootBaseX + 38, y:lootLowerY, w:22, h:22, amount:cashAmount, noteLabel:ventState.noteLabel});
+      backgroundFX.push({type:'hellscapeFire', x:lootBaseX + (side==='left'?60:-60), y:baseY + 6, h:76});
+      return zone;
+    };
+    const leftZone = createHellscapeZone('left', leftAnchor);
+    const rightZone = createHellscapeZone('right', rightAnchor);
+    if(leftZone) zones.push(leftZone);
+    if(rightZone) zones.push(rightZone);
+    ventState.hellscapeZones = zones;
+    ventState.hellscapeShotsFired = 0;
+    ventState.hellscapeCombatUnlocked = false;
+    ventState.hellscapeCombatants = [];
+  } else {
+    ventState.hellscapeZones = [];
+    ventState.hellscapeShotsFired = 0;
+    ventState.hellscapeCombatUnlocked = false;
+    ventState.hellscapeCombatants = [];
+  }
 
   const cameraTop = Math.min(-40, topBoundY + 60);
   ventState.cameraBounds = { top: cameraTop, bottom: 0 };
@@ -4830,6 +4952,9 @@ function makeVentDungeonLevel(floor){
   ventDungeonState = ventState;
   resetVentCamera(ventState);
   notify(`${config.name}: Hotwire ${ventState.requiredBoxes} electrical boxes hidden in the vents.`);
+  if(ventState.hellscapeZones && ventState.hellscapeZones.length){
+    notify('Optional hellscape caches spotted along the far edges. Combatants stay dormant until you fire 3 bullets.');
+  }
   centerNote(`Level ${floor} – ${config.name}`, 1800);
   setAmbient('wind');
   updateMusicForState();
@@ -4850,6 +4975,46 @@ function computeVentCameraTarget(state){
 
 function resetVentCamera(state){
   camY = computeVentCameraTarget(state);
+}
+
+function activateVentHellscapeCombatants(){
+  if(!ventDungeonState || !Array.isArray(ventDungeonState.hellscapeZones)) return;
+  if(ventDungeonState.hellscapeCombatUnlocked) return;
+  const zones = ventDungeonState.hellscapeZones;
+  if(!zones.length) return;
+  ventDungeonState.hellscapeCombatUnlocked = true;
+  const zombieSpeed = 0.48 * 1.25;
+  for(const zone of zones){
+    if(!zone) continue;
+    zone.activated = true;
+    const baseY = zone.platformY || (floorSlab ? floorSlab.y : H - GUARD_HEIGHT - 40);
+    for(const spawnX of zone.spawnPoints || []){
+      const agent = new Agent({
+        x: spawnX,
+        y: baseY - GUARD_HEIGHT,
+        w: 24,
+        h: GUARD_HEIGHT,
+        vx: 0,
+        hp: 32,
+        maxHp: 32,
+        dmg: Math.round(GUARD_BASE_DAMAGE * 0.9),
+        type: 'zombie',
+        weapon: 'melee',
+        attackInterval: 1400,
+        shotInterval: 0,
+        speed: zombieSpeed,
+        direction: Math.random()<0.5 ? -1 : 1,
+        aggressive: true,
+        chaser: true
+      });
+      agent.flashlight = false;
+      agent.hellscape = true;
+      guards.push(agent);
+      ventDungeonState.hellscapeCombatants.push(agent);
+    }
+  }
+  notify('Hellscape combatants emerge from the optional zones.');
+  centerNote('Hellscape foes engaged!', 1500);
 }
 
 function makeTopDownMazeLevel(floor){
@@ -7838,6 +8003,16 @@ function interact(){
 }
 
 // Attacks / weapons
+function handlePlayerBulletFired(projectileType){
+  if(projectileType !== 'bullet') return;
+  if(!ventDungeonState || !Array.isArray(ventDungeonState.hellscapeZones)) return;
+  if(!ventDungeonState.hellscapeZones.length) return;
+  ventDungeonState.hellscapeShotsFired = (ventDungeonState.hellscapeShotsFired || 0) + 1;
+  if(!ventDungeonState.hellscapeCombatUnlocked && ventDungeonState.hellscapeShotsFired >= 3){
+    activateVentHellscapeCombatants();
+  }
+}
+
 function attack(){
   if(pause) return;
   if(topDownState){
@@ -7875,6 +8050,7 @@ function attack(){
     const bullet = {type:'bullet', x:bx, y:by, vx: dir*speed, vy:0, life:1000, from:'player'};
     if(player.weapon==='silenced'){ bullet.silent=true; }
     bullets.push(bullet);
+    handlePlayerBulletFired('bullet');
     stats.muzzleUntil = t + 80;
     if(player.weapon==='pistol' && !player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
   } else if(player.weapon==='flame'){
@@ -7911,6 +8087,7 @@ function attack(){
     const bx = player.x + (dir>0?player.w:0);
     const by = player.y + 18;
     bullets.push({type:'bullet', x:bx, y:by, vx: dir*14, vy:0, life:900, from:'player', rapid:true});
+    handlePlayerBulletFired('bullet');
     stats.muzzleUntil = t + 60;
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+5000; }
   } else if(player.weapon==='grenade'){
