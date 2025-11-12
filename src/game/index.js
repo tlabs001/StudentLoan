@@ -110,6 +110,12 @@ const OUTSIDE_FLOOR = 0;
 const OUTSIDE_KILL_TARGET = 20;
 const OUTSIDE_MAX_ACTIVE_GUARDS = 6;
 const OUTSIDE_SCOPE_RADIUS = Math.floor(Math.min(W, H) * 0.36);
+const JUMP_IN_RATES_DURATION_MS = 30 * 1000;
+const ITS_ONLY_MONEY_TOTAL_MS = 25 * 60 * 1000;
+const ITS_ONLY_MONEY_ALLY_JOIN_MS = 5 * 60 * 1000;
+const ITS_ONLY_MONEY_GORE_MS = 20 * 60 * 1000;
+const ITS_ONLY_MONEY_POLITICIAN_MS = 22 * 60 * 1000;
+const WARZONE_MAX_ACTIVE_ENEMIES = 100;
 const OUTSIDE_BUILDING = (()=>{
   const width = 520;
   const x = Math.floor((W - width) / 2);
@@ -1258,6 +1264,8 @@ function updateCanvasAimFromEvent(event){
     outsideAim.y = Math.max(0, Math.min(H, y));
   } else if(arcadeRampage && arcadeRampage.active){
     clampArcadeAim(x, y);
+  } else if(warzoneMissionState && warzoneMissionState.phase==='gun'){
+    warzoneMissionState.aimX = clamp(x / W, 0, 1);
   }
 }
 canvas.addEventListener('mousemove', updateCanvasAimFromEvent);
@@ -1403,6 +1411,8 @@ const ceoArenaState = {
 let topDownState = null;
 let ventDungeonState = null;
 let droneMissionState = null;
+let rooftopMissionState = null;
+let warzoneMissionState = null;
 
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
@@ -2884,6 +2894,8 @@ function startNewRun(name){
   if(runActive) return;
   currentPlayerName = name || 'Player';
   currentFloor = OUTSIDE_FLOOR;
+  rooftopMissionState = null;
+  warzoneMissionState = null;
   runStats = makeRunStats();
   runStats.start = performance.now();
   runStats.kills = 0; runStats.deaths = 0; runStats.refinances = 0;
@@ -2930,6 +2942,8 @@ function finishRun(outcome, { message=null, note=null }={}){
   outsideWorkers.length = 0;
   outsideWindowGuards.length = 0;
   outsideOccupiedSlots.clear();
+  rooftopMissionState = null;
+  warzoneMissionState = null;
   runActive=false;
   pause=true;
   stopMusic();
@@ -3232,9 +3246,11 @@ function damageWorker(worker, amount){
 // Input
 const keys={};
 let attackHeld=false;
-window.addEventListener('keydown', e=>{
+window.addEventListener('keydown', e=>{ 
   if(droneMissionState && handleDroneMissionKeyDown(e)) return;
   const k=e.key.toLowerCase();
+  if(rooftopMissionState && handleRooftopKeyDown(k, e)) return;
+  if(warzoneMissionState && handleWarzoneKeyDown(k, e)) return;
   if(activeHack){
     e.preventDefault();
     handleHackInput(k);
@@ -6654,6 +6670,697 @@ function drawDroneMission(){
   drawDronePhase(mission);
 }
 
+// ==== Rooftop: Jump in Rates ====
+function startRooftopMission(){
+  const rain = [];
+  for(let i=0; i<120; i++){
+    rain.push({ x: Math.random()*W, y: Math.random()*H, speed: 240 + Math.random()*220, drift: -60 + Math.random()*120 });
+  }
+  const skyline = [];
+  const baseLine = H * 0.72;
+  for(let i=0; i<14; i++){
+    const width = 50 + Math.random()*110;
+    const height = 160 + Math.random()*240;
+    const x = Math.random()*(W - width);
+    const lightRows = 4 + Math.floor(Math.random()*6);
+    skyline.push({ x, width, height, rows: lightRows, cols: 4 + Math.floor(Math.random()*4) });
+  }
+  rooftopMissionState = {
+    phase:'awaitHarness',
+    startedAt: now(),
+    playerX: W*0.5,
+    playerY: H*0.36,
+    duration: JUMP_IN_RATES_DURATION_MS,
+    zipStart: 0,
+    nextBulletAt: 0,
+    bullets: [],
+    rain,
+    skyline,
+    sway: 0,
+    hitFlashUntil: 0,
+    completed:false
+  };
+  warzoneMissionState = null;
+  state.playerWeaponsDisabled = true;
+  player.vx = 0;
+  player.vy = 0;
+  camX = 0;
+  camY = 0;
+  attackHeld = false;
+  notify('Elevator breach complete — New mission unlocked: Jump in Rates.');
+  centerNote('Press SPACE to clip into the zip line.', 2200);
+}
+
+function handleRooftopKeyDown(key, event){
+  const mission = rooftopMissionState;
+  if(!mission) return false;
+  if(key === ' '){
+    if(mission.phase === 'awaitHarness'){
+      mission.phase = 'zipline';
+      mission.zipStart = now();
+      mission.nextBulletAt = mission.zipStart + 500;
+      chime();
+      centerNote('Harness locked — ride the Jump in Rates zip line!', 2200);
+      notify('Zip line engaged. Dodge the hail of bullets!');
+      if(event){ event.preventDefault(); }
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateRooftopMission(dt){
+  const mission = rooftopMissionState;
+  if(!mission || mission.completed) return;
+  const nowTs = now();
+  mission.sway += dt * 0.8;
+  const input = (keys['arrowleft']||keys['a'] ? -1 : 0) + (keys['arrowright']||keys['d'] ? 1 : 0);
+  const moveSpeed = mission.phase === 'zipline' ? 260 : 140;
+  mission.playerX = clamp(mission.playerX + input * moveSpeed * dt, W*0.18, W*0.82);
+  for(const drop of mission.rain){
+    drop.x += drop.drift * dt;
+    drop.y += drop.speed * dt;
+    if(drop.y > H){
+      drop.y = -Math.random()*40;
+      drop.x = Math.random()*W;
+    }
+    if(drop.x < -40){ drop.x = W + Math.random()*20; }
+    if(drop.x > W + 40){ drop.x = -Math.random()*20; }
+  }
+  if(mission.phase === 'zipline'){
+    mission.elapsed = nowTs - mission.zipStart;
+    if(!mission.nextBulletAt){ mission.nextBulletAt = nowTs + 400; }
+    if(nowTs >= mission.nextBulletAt){
+      const spread = 70 + Math.random()*60;
+      mission.bullets.push({
+        x: mission.playerX + (Math.random()-0.5)*spread,
+        y: H + 40,
+        vx: (Math.random()-0.5)*120,
+        vy: - (220 + Math.random()*140)
+      });
+      mission.nextBulletAt = nowTs + 240 + Math.random()*420;
+    }
+  } else {
+    mission.elapsed = 0;
+  }
+  for(let i=mission.bullets.length-1; i>=0; i--){
+    const bullet = mission.bullets[i];
+    bullet.x += bullet.vx * dt;
+    bullet.y += bullet.vy * dt;
+    if(bullet.y < -60 || bullet.x < -80 || bullet.x > W + 80){
+      mission.bullets.splice(i,1);
+      continue;
+    }
+    if(mission.phase === 'zipline'){
+      const px = mission.playerX;
+      const py = mission.playerY;
+      if(Math.abs(bullet.x - px) < 20 && bullet.y < py + 14 && bullet.y > py - 38){
+        mission.bullets.splice(i,1);
+        mission.hitFlashUntil = nowTs + 240;
+        loseChecking(6);
+        player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 260);
+        notify('Incoming fire grazed you on the zip line! -$6');
+        beep({freq:320});
+        continue;
+      }
+    }
+  }
+  if(mission.phase === 'zipline' && mission.elapsed >= mission.duration){
+    completeRooftopMission();
+  }
+}
+
+function completeRooftopMission(){
+  const mission = rooftopMissionState;
+  if(!mission || mission.completed) return;
+  mission.completed = true;
+  notify('Zip line landing successful — prepare for ITS ONLY MONEY.');
+  centerNote('Landing zone secured. Advance to the streets.', 2200);
+  rooftopMissionState = null;
+  startWarzoneMission();
+}
+
+function drawRooftopMission(){
+  const mission = rooftopMissionState;
+  ctx.textAlign = 'left';
+  const gradient = ctx.createLinearGradient(0,0,0,H);
+  gradient.addColorStop(0,'#050a16');
+  gradient.addColorStop(1,'#0b1324');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0,0,W,H);
+  const baseLine = H*0.72;
+  if(mission && mission.skyline){
+    for(const building of mission.skyline){
+      ctx.fillStyle = '#121c30';
+      ctx.fillRect(building.x, baseLine - building.height, building.width, building.height);
+      ctx.fillStyle = 'rgba(40,60,90,0.6)';
+      ctx.fillRect(building.x+4, baseLine - building.height + 4, Math.max(0, building.width-8), Math.max(0, building.height-12));
+      ctx.fillStyle = 'rgba(255,225,140,0.22)';
+      const rowH = (building.height-40)/Math.max(1,building.rows);
+      const colW = (building.width-16)/Math.max(1,building.cols);
+      for(let r=0; r<building.rows; r++){
+        for(let c=0; c<building.cols; c++){
+          if(Math.random()<0.35) continue;
+          const winX = building.x + 8 + c*colW;
+          const winY = baseLine - building.height + 12 + r*rowH;
+          ctx.fillRect(winX, winY, Math.max(3, colW-6), Math.max(6, rowH-10));
+        }
+      }
+    }
+  }
+  ctx.strokeStyle = 'rgba(200,220,255,0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W*0.12, H*0.18);
+  ctx.lineTo(W*0.88, H*0.46);
+  ctx.stroke();
+  if(mission){
+    ctx.strokeStyle = 'rgba(130,160,220,0.38)';
+    ctx.lineWidth = 1.1;
+    for(const drop of mission.rain){
+      ctx.beginPath();
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x + drop.drift*0.04, drop.y + 16);
+      ctx.stroke();
+    }
+    const px = mission.playerX;
+    const py = mission.playerY;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.fillStyle = '#1f2f4a';
+    ctx.fillRect(-12, -6, 24, 32);
+    ctx.fillStyle = '#0d182d';
+    ctx.fillRect(-10, 26, 20, 32);
+    ctx.fillStyle = '#24395d';
+    ctx.fillRect(-14, 18, 28, 10);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,240,180,0.7)';
+    ctx.beginPath();
+    ctx.moveTo(px, py-4);
+    ctx.lineTo(px - W*0.38, H*0.18);
+    ctx.stroke();
+    ctx.fillStyle = '#ff644a';
+    for(const bullet of mission.bullets){
+      ctx.beginPath();
+      ctx.arc(bullet.x, bullet.y, 3, 0, Math.PI*2);
+      ctx.fill();
+    }
+    if(mission.hitFlashUntil && mission.hitFlashUntil > now()){
+      ctx.fillStyle = 'rgba(255,80,60,0.22)';
+      ctx.fillRect(0,0,W,H);
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.textAlign='center';
+    ctx.font = '26px monospace';
+    ctx.fillText('JUMP IN RATES', W/2, 46);
+    ctx.textAlign='left';
+    ctx.font = '15px monospace';
+    ctx.fillText('Objective: Survive the rooftop zip line barrage.', 24, 76);
+    if(mission.phase === 'awaitHarness'){
+      ctx.textAlign='center';
+      ctx.font = '18px monospace';
+      ctx.fillText('SPACE: Attach Safety Harness', W/2, H-80);
+      ctx.textAlign='left';
+    }
+    if(mission.phase === 'zipline'){
+      const progress = Math.max(0, Math.min(1, (mission.elapsed||0) / mission.duration));
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.strokeRect(W/2-180, H-64, 360, 20);
+      ctx.fillStyle = '#4ec6ff';
+      ctx.fillRect(W/2-180, H-64, 360*progress, 20);
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.font = '14px monospace';
+      ctx.textAlign='center';
+      ctx.fillText('Zip line remaining', W/2, H-72);
+      ctx.textAlign='left';
+    }
+  }
+}
+
+// ==== Warzone: ITS ONLY MONEY ====
+function startWarzoneMission(){
+  const rain = [];
+  for(let i=0; i<160; i++){
+    rain.push({ x: Math.random()*W, y: Math.random()*H, speed: 280 + Math.random()*240, drift: -80 + Math.random()*140 });
+  }
+  const skyline = [];
+  for(let i=0; i<16; i++){
+    const width = 70 + Math.random()*130;
+    const height = 180 + Math.random()*220;
+    skyline.push({ x: Math.random()*(W-width), width, height, tint: 0.3 + Math.random()*0.4 });
+  }
+  warzoneMissionState = {
+    phase:'sneak',
+    startedAt: now(),
+    distance: 0,
+    coverIndex: 0,
+    coverPositions: [140, 280, 420],
+    gunDistance: 560,
+    awaitingCover:false,
+    awaitingGun:false,
+    aimX:0.5,
+    fireCooldown:0,
+    muzzleFlashUntil:0,
+    enemies:[],
+    bloodBursts:[],
+    killCount:0,
+    enemyShotCounter:0,
+    totalEnemyShots:0,
+    playerHitFlashUntil:0,
+    alliesJoined:false,
+    goreUnlocked:false,
+    politician:null,
+    allyFireTimer:0,
+    elapsedMs:0,
+    rain,
+    skyline,
+    completed:false
+  };
+  rooftopMissionState = null;
+  state.playerWeaponsDisabled = true;
+  attackHeld = false;
+  player.weapon = 'machineGun';
+  notify('Mission Update: ITS ONLY MONEY. Sneak behind the cars and reach the mounted M60.');
+  centerNote('Move forward — sneak behind the cars.', 2400);
+}
+
+function handleWarzoneKeyDown(key, event){
+  const mission = warzoneMissionState;
+  if(!mission) return false;
+  if(key === ' '){
+    if(mission.phase === 'sneak' && mission.awaitingCover){
+      mission.awaitingCover = false;
+      mission.coverIndex++;
+      chime();
+      centerNote('Cover secured — keep advancing.', 1800);
+      notify('Slipped behind the car safely.');
+      if(event){ event.preventDefault(); }
+      return true;
+    }
+    if(mission.phase === 'gunPrep' && mission.awaitingGun){
+      mission.phase = 'gun';
+      mission.awaitingGun = false;
+      mission.phaseStart = now();
+      mission.elapsedMs = 0;
+      mission.fireCooldown = 0;
+      mission.enemies.length = 0;
+      for(let i=0; i<WARZONE_MAX_ACTIVE_ENEMIES; i++){
+        mission.enemies.push(spawnWarzoneEnemy());
+      }
+      chime();
+      centerNote('Machine gun mounted — hold the line!', 2200);
+      notify('ITS ONLY MONEY has begun. Hold fire and track incoming soldiers.');
+      if(event){ event.preventDefault(); }
+      return true;
+    }
+  }
+  return false;
+}
+
+function handleWarzoneFire(){
+  const mission = warzoneMissionState;
+  if(!mission || mission.phase !== 'gun') return;
+  const nowTs = now();
+  if(mission.fireCooldown > 0) return;
+  mission.fireCooldown = 0.065;
+  mission.muzzleFlashUntil = nowTs + 120;
+  let targetIndex = -1;
+  let targetEnemy = null;
+  for(let i=0; i<mission.enemies.length; i++){
+    const enemy = mission.enemies[i];
+    const width = enemy.kind === 'tank' ? 0.16 : 0.11;
+    if(Math.abs(enemy.x - mission.aimX) <= width){
+      if(!targetEnemy || enemy.distance < targetEnemy.distance){
+        targetEnemy = enemy;
+        targetIndex = i;
+      }
+    }
+  }
+  if(targetEnemy){
+    targetEnemy.hp -= 1;
+    if(targetEnemy.hp <= 0){
+      mission.enemies.splice(targetIndex,1);
+      mission.killCount++;
+      runStats.kills = (runStats.kills||0) + 1;
+      if(mission.goreUnlocked){
+        mission.bloodBursts.push({ x: targetEnemy.x, distance: targetEnemy.distance, life: 0.9 });
+      }
+    }
+  } else if(mission.politician){
+    const boss = mission.politician;
+    if(Math.abs(mission.aimX - boss.x) <= 0.2){
+      boss.hp = Math.max(boss.maxHp * 0.12, boss.hp - 40);
+      boss.lastHitAt = nowTs;
+    }
+  }
+}
+
+function spawnWarzoneEnemy(){
+  const kinds = ['soldier','specialOps','greenBeret','redBeret','tank'];
+  const kind = kinds[Math.floor(Math.random()*kinds.length)];
+  const enemy = {
+    kind,
+    x: Math.random(),
+    distance: 0.9 + Math.random()*0.9,
+    speed: 0.02 + Math.random()*0.025,
+    hp: 1,
+    fireInterval: 1.6 + Math.random()*1.6,
+    fireTimer: Math.random()*1.2
+  };
+  if(kind === 'specialOps'){
+    enemy.hp = 3;
+    enemy.speed = 0.028 + Math.random()*0.02;
+    enemy.fireInterval = 1.2 + Math.random()*1.2;
+  } else if(kind === 'tank'){
+    enemy.hp = 6;
+    enemy.speed = 0.012 + Math.random()*0.012;
+    enemy.fireInterval = 2.4 + Math.random()*1.2;
+  } else if(kind === 'greenBeret' || kind === 'redBeret'){
+    enemy.hp = 1;
+    enemy.speed = 0.024 + Math.random()*0.02;
+  }
+  return enemy;
+}
+
+function updateWarzoneMission(dt){
+  const mission = warzoneMissionState;
+  if(!mission || mission.completed) return;
+  const nowTs = now();
+  if(mission.rain){
+    for(const drop of mission.rain){
+      drop.x += drop.drift * dt;
+      drop.y += drop.speed * dt;
+      if(drop.y > H){ drop.y = -Math.random()*60; drop.x = Math.random()*W; }
+      if(drop.x < -40){ drop.x = W + Math.random()*30; }
+      if(drop.x > W + 40){ drop.x = -Math.random()*30; }
+    }
+  }
+  if(mission.phase === 'sneak'){
+    const forward = (keys['w']||keys['arrowup']) ? 1 : 0;
+    if(!mission.awaitingCover){
+      mission.distance = Math.min(mission.gunDistance, mission.distance + forward * 90 * dt);
+    }
+    const nextCover = mission.coverPositions[mission.coverIndex];
+    if(typeof nextCover === 'number' && mission.distance >= nextCover && !mission.awaitingCover){
+      mission.distance = nextCover;
+      mission.awaitingCover = true;
+      notify('Car ahead — press SPACE to duck behind it.');
+      centerNote('Press SPACE to duck behind the car.', 1800);
+    }
+    if(mission.coverIndex >= mission.coverPositions.length && mission.distance >= mission.gunDistance){
+      mission.phase = 'gunPrep';
+      mission.awaitingGun = true;
+      notify('Mounted M60 in sight. Press SPACE to deploy.');
+      centerNote('Press SPACE to mount the M60.', 2000);
+    }
+    return;
+  }
+  if(mission.phase === 'gunPrep'){
+    return;
+  }
+  if(mission.phase !== 'gun') return;
+  mission.elapsedMs = Math.max(0, nowTs - (mission.phaseStart || nowTs));
+  mission.fireCooldown = Math.max(0, mission.fireCooldown - dt);
+  const aimAdjust = (keys['arrowleft']||keys['a'] ? -1 : 0) + (keys['arrowright']||keys['d'] ? 1 : 0);
+  if(aimAdjust){
+    mission.aimX = clamp(mission.aimX + aimAdjust * dt * 0.8, 0.02, 0.98);
+  }
+  if(attackHeld && mission.fireCooldown <= 0){
+    handleWarzoneFire();
+  }
+  while(mission.enemies.length < WARZONE_MAX_ACTIVE_ENEMIES){
+    mission.enemies.push(spawnWarzoneEnemy());
+  }
+  for(let i=mission.enemies.length-1; i>=0; i--){
+    const enemy = mission.enemies[i];
+    enemy.distance = Math.max(0, enemy.distance - enemy.speed * dt);
+    enemy.fireTimer += dt;
+    if(enemy.fireTimer >= enemy.fireInterval){
+      enemy.fireTimer = 0;
+      mission.totalEnemyShots++;
+      if(mission.totalEnemyShots % 200 === 0){
+        loseChecking(8);
+        mission.playerHitFlashUntil = nowTs + 240;
+        player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 320);
+        notify('A stray bullet clips you through the storm! -$8');
+        beep({freq:260});
+      }
+    }
+    if(enemy.distance <= 0){
+      mission.enemies.splice(i,1);
+      loseChecking(12);
+      mission.playerHitFlashUntil = nowTs + 260;
+      notify('A soldier breaches the barricade! -$12');
+      beep({freq:320});
+      continue;
+    }
+  }
+  for(let i=mission.bloodBursts.length-1; i>=0; i--){
+    mission.bloodBursts[i].life -= dt * 0.6;
+    if(mission.bloodBursts[i].life <= 0){ mission.bloodBursts.splice(i,1); }
+  }
+  if(!mission.alliesJoined && mission.elapsedMs >= ITS_ONLY_MONEY_ALLY_JOIN_MS){
+    mission.alliesJoined = true;
+    notify('Reinforcements arrived! Fellow students have mounted the line.');
+    centerNote('"Thanks for liberating our loans, we are here to join the fight"', 2800);
+    chime();
+  }
+  if(mission.alliesJoined){
+    mission.allyFireTimer += dt;
+    if(mission.allyFireTimer >= 1.3){
+      mission.allyFireTimer = 0;
+      if(mission.enemies.length){
+        const index = Math.floor(Math.random()*mission.enemies.length);
+        const enemy = mission.enemies.splice(index,1)[0];
+        mission.killCount++;
+        runStats.kills = (runStats.kills||0) + 1;
+        if(mission.goreUnlocked){
+          mission.bloodBursts.push({ x: enemy.x, distance: enemy.distance, life: 0.9 });
+        }
+      }
+    }
+  }
+  if(!mission.goreUnlocked && mission.elapsedMs >= ITS_ONLY_MONEY_GORE_MS){
+    mission.goreUnlocked = true;
+    notify('Intensity escalates — gore floods the street.');
+    centerNote('INTENSE GORE UNLOCKED', 2200);
+  }
+  if(!mission.politician && mission.elapsedMs >= ITS_ONLY_MONEY_POLITICIAN_MS){
+    mission.politician = { spawnAt: nowTs, hp: 900, maxHp: 900, x: 0.5, progress: 0, lastHitAt: 0 };
+    notify('A towering politician lumbers onto the battlefield.');
+    centerNote('An enormous politician joins the fight!', 2400);
+  }
+  if(mission.politician){
+    const spanMs = ITS_ONLY_MONEY_TOTAL_MS - ITS_ONLY_MONEY_POLITICIAN_MS;
+    const progressMs = Math.max(0, mission.elapsedMs - ITS_ONLY_MONEY_POLITICIAN_MS);
+    mission.politician.progress = spanMs > 0 ? Math.min(0.75, (progressMs / spanMs) * 0.75) : 0.75;
+    mission.politician.hp = Math.min(mission.politician.maxHp, mission.politician.hp + 18 * dt);
+  }
+  if(mission.elapsedMs >= ITS_ONLY_MONEY_TOTAL_MS){
+    completeWarzoneMission();
+  }
+}
+
+function drawWarzoneMission(){
+  const mission = warzoneMissionState;
+  ctx.fillStyle = '#060a14';
+  ctx.fillRect(0,0,W,H);
+  if(!mission) return;
+  if(mission.skyline){
+    const baseY = H*0.72;
+    for(const building of mission.skyline){
+      ctx.fillStyle = `rgba(18,28,48,${0.55 + building.tint*0.3})`;
+      ctx.fillRect(building.x, baseY - building.height, building.width, building.height);
+      ctx.fillStyle = 'rgba(255,215,130,0.18)';
+      for(let r=0; r<4; r++){
+        const winY = baseY - building.height + 16 + r*(building.height/5);
+        ctx.fillRect(building.x + 6, winY, Math.max(0, building.width-12), 6);
+      }
+    }
+  }
+  if(mission.rain){
+    ctx.strokeStyle = 'rgba(120,150,220,0.35)';
+    ctx.lineWidth = 1.1;
+    for(const drop of mission.rain){
+      ctx.beginPath();
+      ctx.moveTo(drop.x, drop.y);
+      ctx.lineTo(drop.x + drop.drift*0.04, drop.y + 16);
+      ctx.stroke();
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.textAlign='center';
+  ctx.font = '26px monospace';
+  ctx.fillText('ITS ONLY MONEY', W/2, 42);
+  ctx.textAlign='left';
+  ctx.font = '18px monospace';
+  ctx.fillText(`Kill Count: ${mission.killCount}`, 24, 44);
+  if(mission.phase === 'sneak' || mission.phase === 'gunPrep'){
+    const roadTop = H*0.42;
+    ctx.fillStyle = '#111924';
+    ctx.fillRect(0, roadTop, W, H-roadTop);
+    ctx.fillStyle = '#1c2736';
+    ctx.fillRect(0, roadTop+40, W, H-roadTop-40);
+    const progress = mission.gunDistance > 0 ? mission.distance / mission.gunDistance : 0;
+    ctx.fillStyle = '#4ec6ff';
+    ctx.fillRect(24, H-34, Math.max(0, Math.min(W-48, (W-48)*progress)), 8);
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.strokeRect(24, H-34, W-48, 8);
+    for(const cover of mission.coverPositions){
+      if(cover < mission.distance) continue;
+      const relative = cover - mission.distance;
+      const normalized = Math.max(0, Math.min(1, relative / mission.gunDistance));
+      const carY = roadTop + 80 + normalized * 220;
+      const carW = 220 - normalized*120;
+      ctx.fillStyle = '#202f3f';
+      ctx.fillRect(W/2 - carW/2, carY, carW, 40);
+      ctx.fillStyle = '#0d141f';
+      ctx.fillRect(W/2 - carW/2 + 10, carY+26, carW-20, 12);
+    }
+    ctx.fillStyle = '#f1f5ff';
+    ctx.font = '16px monospace';
+    ctx.fillText('Advance to the mounted M60 without being spotted.', 24, 76);
+    if(mission.awaitingCover){
+      ctx.textAlign='center';
+      ctx.font = '20px monospace';
+      ctx.fillText('SPACE: Duck behind the car', W/2, H*0.82);
+      ctx.textAlign='left';
+    } else if(mission.phase === 'gunPrep' && mission.awaitingGun){
+      ctx.textAlign='center';
+      ctx.font = '20px monospace';
+      ctx.fillText('SPACE: Mount the M60', W/2, H*0.82);
+      ctx.textAlign='left';
+    }
+    return;
+  }
+  if(mission.phase !== 'gun') return;
+  const groundY = H*0.7;
+  ctx.fillStyle = '#101925';
+  ctx.fillRect(0, groundY, W, H-groundY);
+  ctx.fillStyle = '#0b121c';
+  ctx.fillRect(0, groundY-24, W, 24);
+  for(const enemy of mission.enemies){
+    const dist = Math.max(0, Math.min(1.2, enemy.distance));
+    const depth = 1 - Math.min(1, dist / 1.2);
+    const size = 26 + depth * 120;
+    const ex = 80 + enemy.x * (W-160);
+    const ey = groundY - 20 - depth * 180;
+    if(enemy.kind === 'tank'){
+      ctx.fillStyle = '#545a64';
+      ctx.fillRect(ex - size*0.6, ey, size*1.2, size*0.5);
+      ctx.fillStyle = '#40464f';
+      ctx.fillRect(ex - size*0.5, ey - size*0.2, size, size*0.3);
+    } else {
+      ctx.fillStyle = enemy.kind === 'specialOps' ? '#1a1a22' : enemy.kind === 'redBeret' ? '#2a3928' : '#2b3c2f';
+      ctx.fillRect(ex - size*0.18, ey - size*0.55, size*0.36, size*0.55);
+      ctx.fillStyle = enemy.kind === 'redBeret' ? '#ba2c2c' : enemy.kind === 'greenBeret' ? '#1f5a2c' : '#1a2331';
+      ctx.fillRect(ex - size*0.22, ey - size*0.68, size*0.44, size*0.18);
+    }
+  }
+  if(mission.goreUnlocked){
+    const goreLevel = Math.max(0, Math.min(1, (mission.elapsedMs - ITS_ONLY_MONEY_GORE_MS) / (3 * 60 * 1000)));
+    ctx.fillStyle = `rgba(180,12,32,${0.18 + goreLevel*0.35})`;
+    ctx.fillRect(0, groundY - goreLevel*120, W, goreLevel*160 + 40);
+    for(const burst of mission.bloodBursts){
+      const depth = 1 - Math.min(1, Math.max(0, burst.distance) / 1.2);
+      const size = 14 + depth * 60;
+      const ex = 80 + burst.x * (W-160);
+      const ey = groundY - depth * 180;
+      ctx.fillStyle = `rgba(220,32,48,${Math.max(0, burst.life)})`;
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, size, size*0.4, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+  if(mission.politician){
+    const boss = mission.politician;
+    const depth = boss.progress;
+    const width = 200 + depth * 220;
+    const height = 220 + depth * 180;
+    const cx = W/2;
+    const cy = groundY - 60 - depth * 160;
+    ctx.fillStyle = '#f5a142';
+    ctx.fillRect(cx - width/2, cy - height, width, height);
+    ctx.fillStyle = '#f2d15f';
+    ctx.fillRect(cx - width*0.35, cy - height - 28, width*0.7, 34);
+    ctx.fillStyle = '#1d3f7c';
+    ctx.fillRect(cx - width*0.4, cy - height*0.45, width*0.8, height*0.55);
+    ctx.fillStyle = '#f7c04d';
+    ctx.fillRect(cx - width*0.36, cy - height - 24, width*0.72, 12);
+    ctx.fillStyle = '#0c0c10';
+    ctx.fillRect(cx - width*0.2, cy - height - 20, width*0.4, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.textAlign='center';
+    ctx.font = '18px monospace';
+    ctx.fillText('POLITICIAN', cx, cy - height - 40);
+    const ratio = boss.maxHp > 0 ? Math.max(0, Math.min(1, boss.hp / boss.maxHp)) : 1;
+    ctx.fillStyle = 'rgba(40,50,70,0.8)';
+    ctx.fillRect(W/2-160, 72, 320, 18);
+    ctx.fillStyle = '#ff7043';
+    ctx.fillRect(W/2-160, 72, 320*ratio, 18);
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.strokeRect(W/2-160, 72, 320, 18);
+    if(boss.lastHitAt && boss.lastHitAt + 200 > now()){
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(cx - width/2, cy - height, width, height);
+    }
+  }
+  ctx.textAlign='left';
+  ctx.font = '15px monospace';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.fillText('Hold the line for twenty-five minutes. 100 enemies approach at all times.', 24, 74);
+  if(mission.alliesJoined){
+    ctx.textAlign='right';
+    ctx.fillText('Allied students provide suppressive fire.', W-24, 74);
+    ctx.textAlign='left';
+  }
+  const crossX = 80 + mission.aimX * (W-160);
+  const crossY = H*0.42;
+  ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+  ctx.beginPath();
+  ctx.moveTo(crossX-18, crossY);
+  ctx.lineTo(crossX+18, crossY);
+  ctx.moveTo(crossX, crossY-18);
+  ctx.lineTo(crossX, crossY+18);
+  ctx.stroke();
+  if(mission.muzzleFlashUntil && mission.muzzleFlashUntil > now()){
+    ctx.fillStyle = 'rgba(255,220,140,0.45)';
+    ctx.beginPath();
+    ctx.arc(W/2, groundY+10, 46, 0, Math.PI);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#2a3444';
+  ctx.fillRect(W/2-140, groundY+6, 280, 36);
+  ctx.fillStyle = '#1c2534';
+  ctx.fillRect(W/2-200, groundY+36, 400, 26);
+  if(mission.alliesJoined){
+    ctx.fillStyle = '#222c3c';
+    ctx.fillRect(W*0.18 - 26, groundY+2, 52, 38);
+    ctx.fillRect(W*0.82 - 26, groundY+2, 52, 38);
+    ctx.fillStyle = '#38475e';
+    ctx.fillRect(W*0.18 - 18, groundY - 48, 36, 52);
+    ctx.fillRect(W*0.82 - 18, groundY - 48, 36, 52);
+  }
+  if(mission.playerHitFlashUntil && mission.playerHitFlashUntil > now()){
+    ctx.fillStyle = 'rgba(255,80,80,0.25)';
+    ctx.fillRect(0,0,W,H);
+  }
+}
+
+function completeWarzoneMission(){
+  const mission = warzoneMissionState;
+  if(!mission || mission.completed) return;
+  mission.completed = true;
+  notify('ITS ONLY MONEY complete — the plaza is yours.');
+  centerNote('Mission complete. The politicians retreat in fear.', 2600);
+  warzoneMissionState = null;
+  rooftopMissionState = null;
+  finishRun('victory', {
+    message:'ITS ONLY MONEY COMPLETE',
+    note:'Jump in Rates cleared and the warzone held for twenty-five minutes.'
+  });
+}
+
 function drawTetrisHack(mission){
   const state = mission.tetris;
   ctx.fillStyle = '#05090f';
@@ -8290,7 +8997,9 @@ function interact(){
               completeVentDungeonLevel();
             }
             if(currentFloor >= FLOORS){
-              finishRun('victory', { message:'CEO eliminated! Tower reclaimed.', note:'Penthouse secured.' });
+              if(!rooftopMissionState && !warzoneMissionState){
+                startRooftopMission();
+              }
               return;
             }
             currentFloor = Math.min(FLOORS, currentFloor+1);
@@ -8358,6 +9067,11 @@ function handlePlayerBulletFired(projectileType){
 
 function attack(){
   if(pause) return;
+  if(rooftopMissionState) return;
+  if(warzoneMissionState){
+    handleWarzoneFire();
+    return;
+  }
   if(topDownState){
     handleTopDownAttack();
     return;
@@ -8671,6 +9385,14 @@ function maybeRespawnFeather(){
 
 function update(dt){
   if(!runActive) return;
+  if(rooftopMissionState){
+    updateRooftopMission(dt);
+    return;
+  }
+  if(warzoneMissionState){
+    updateWarzoneMission(dt);
+    return;
+  }
   const frameNow = now();
   manageFlamethrowerHeat(frameNow);
   maybeRespawnFeather();
@@ -10429,6 +11151,14 @@ function drawOutside(){
 }
 
 function draw(){
+  if(rooftopMissionState){
+    drawRooftopMission();
+    return;
+  }
+  if(warzoneMissionState){
+    drawWarzoneMission();
+    return;
+  }
   if(droneMissionState){
     drawDroneMission();
     return;
