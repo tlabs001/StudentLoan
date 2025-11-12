@@ -159,6 +159,11 @@ const OUTSIDE_WINDOW_GUARD_SLOTS = [
 
 const ARCADE_BEATDOWN_FLOORS = new Set([13, 14, 23]);
 const CORPORATE_HELLSCAPE_FLOORS = new Set([17, 25, 29]);
+const HELL_WAVE_GOALS = {
+  17: 5,
+  25: 7,
+  29: 9
+};
 const VENT_DUNGEON_FLOORS = new Set([9, 34]);
 const VENT_DUNGEON_CONFIG = {
   9: {
@@ -3853,20 +3858,73 @@ function hellscapeSpawnX(){
   return Math.max(minX, Math.min(maxX, choice + jitter));
 }
 
-function spawnHellscapeZombie(spawnX){
+function hellscapeWaveTarget(wave){
+  return Math.max(10, wave * 10);
+}
+
+function hellscapeTotalKillTarget(goalWave){
+  const n = Math.max(1, goalWave);
+  return Math.round(10 * (n * (n + 1)) / 2);
+}
+
+function hellscapeStrengthForWave(wave){
+  const index = Math.max(0, (wave||1) - 1);
+  const growth = 1 + index * 0.025;
+  return {
+    hp: Math.min(3, growth),
+    speed: Math.min(2.5, growth)
+  };
+}
+
+function resolveHellscapeSpawnX(rawX){
+  if(!hellscapeState){
+    return rawX;
+  }
+  const minX = 60;
+  const maxX = Math.max(minX + 40, levelWidth() - 140);
+  const playerCenter = player.x + player.w/2;
+  const viewStart = camX;
+  const viewEnd = camX + W;
+  let spawnX = Number.isFinite(rawX) ? rawX : hellscapeSpawnX();
+  const minPlayerDistance = W * 0.5;
+  if(Math.abs(spawnX - playerCenter) < minPlayerDistance){
+    const dir = spawnX < playerCenter ? -1 : 1;
+    spawnX = playerCenter + dir * minPlayerDistance;
+  }
+  if(spawnX > viewStart - 40 && spawnX < viewEnd + 40){
+    const dir = spawnX < playerCenter ? -1 : 1;
+    spawnX = dir > 0 ? viewEnd + 80 : viewStart - 80;
+  }
+  if(spawnX < minX){ spawnX = minX; }
+  if(spawnX > maxX){ spawnX = maxX; }
+  return spawnX;
+}
+
+function spawnHellscapeZombie(spawnX, options={}){
   if(!hellscapeState) return null;
-  const x = Number.isFinite(spawnX) ? spawnX : hellscapeSpawnX();
+  const minX = 60;
+  const maxX = Math.max(minX + 40, levelWidth() - 140);
+  const x = options.forcePosition
+    ? Math.max(minX, Math.min(maxX, Number.isFinite(spawnX) ? spawnX : hellscapeSpawnX()))
+    : resolveHellscapeSpawnX(spawnX);
   const groundY = floorSlab ? floorSlab.y : (H - GUARD_HEIGHT - 40);
   const zombieHeight = 48;
-  const zombieSpeed = (hellscapeState && hellscapeState.zombieSpeed) ? hellscapeState.zombieSpeed : 0.48;
+  const baseSpeed = (hellscapeState && hellscapeState.zombieSpeed) ? hellscapeState.zombieSpeed : 0.48;
+  const baseHp = (hellscapeState && hellscapeState.zombieHp) ? hellscapeState.zombieHp : 32;
+  const wave = (hellscapeState && hellscapeState.wave) ? hellscapeState.wave : 1;
+  const strength = hellscapeStrengthForWave(wave);
+  const hpRoll = strength.hp <= 1 ? 1 : (1 + Math.random() * (strength.hp - 1));
+  const speedRoll = strength.speed <= 1 ? 1 : (1 + Math.random() * (strength.speed - 1));
+  const zombieHp = Math.round(baseHp * hpRoll);
+  const zombieSpeed = baseSpeed * speedRoll;
   const zombie = new Agent({
     x,
     y: groundY - zombieHeight,
     w: 24,
     h: zombieHeight,
     vx: 0,
-    hp: 32,
-    maxHp: 32,
+    hp: zombieHp,
+    maxHp: zombieHp,
     dmg: Math.round(GUARD_BASE_DAMAGE * 0.9),
     type: 'zombie',
     weapon: 'melee',
@@ -3880,6 +3938,7 @@ function spawnHellscapeZombie(spawnX){
   zombie.flashlight = false;
   zombie.spawnOrigin = x;
   zombie.hellscape = true;
+  zombie.wave = wave;
   guards.push(zombie);
   return zombie;
 }
@@ -3913,27 +3972,168 @@ function spawnHellscapeCommando(spawnX){
   return commando;
 }
 
+function completeHellscapeGoal(){
+  if(!hellscapeState || hellscapeState.goalComplete) return;
+  const state = hellscapeState;
+  state.goalComplete = true;
+  state.awaitingNextWave = false;
+  state.nextWaveAt = 0;
+  state.spawnTimer = 0;
+  state.commandCooldown = 0;
+  state.waveKills = state.waveTarget || state.waveKills || 0;
+  state.waveSpawns = state.waveTarget || state.waveSpawns || 0;
+  if(door){
+    door.unlocked = true;
+    door.glowUntil = now() + 4000;
+  }
+  centerNote('All zombie waves cleared — Exit Break Room unlocked!', 2400);
+  notify('All zombie waves neutralized. Elevator unlocked.');
+}
+
+function advanceHellscapeWave(nextWaveIndex){
+  if(!hellscapeState) return;
+  const state = hellscapeState;
+  const current = state.wave || 1;
+  const nextWave = Number.isFinite(nextWaveIndex) ? nextWaveIndex : current + 1;
+  if(state.goalWave && nextWave > state.goalWave){
+    completeHellscapeGoal();
+    return;
+  }
+  state.wave = Math.max(1, nextWave);
+  state.waveKills = 0;
+  state.waveSpawns = 0;
+  state.waveTarget = hellscapeWaveTarget(state.wave);
+  state.awaitingNextWave = false;
+  state.waveClearedAt = 0;
+  state.nextWaveAt = 0;
+  state.spawnTimer = 0;
+  state.zombieSpawnCycle = 0;
+  notify(`Wave ${state.wave} incoming — ${state.waveTarget} zombies detected.`);
+  centerNote(`Wave ${state.wave} incoming!`, 2000);
+}
+
+function recordHellscapeZombieKill(){
+  if(!hellscapeState) return { waveCleared:false, goalCompleted:false };
+  const state = hellscapeState;
+  const previousTotal = state.zombiesKilled || 0;
+  const killTarget = state.killTarget || Infinity;
+  state.zombiesKilled = Math.min(killTarget, previousTotal + 1);
+  state.waveKills = (state.waveKills || 0) + 1;
+  const waveTarget = state.waveTarget || hellscapeWaveTarget(state.wave || 1);
+  let waveCleared = false;
+  let goalCompleted = false;
+  if(state.waveKills >= waveTarget){
+    state.waveKills = waveTarget;
+    waveCleared = true;
+    state.waveClearedAt = now();
+    if(state.goalWave && (state.wave || 1) >= state.goalWave){
+      completeHellscapeGoal();
+      goalCompleted = true;
+    } else if(!state.awaitingNextWave){
+      state.awaitingNextWave = true;
+      state.nextWaveAt = state.waveClearedAt + 2600;
+      notify(`Wave ${state.wave} cleared — brace for the next wave.`);
+      centerNote(`Wave ${state.wave} cleared!`, 2000);
+    }
+  }
+  return { waveCleared, goalCompleted };
+}
+
+function damageHellscapeHostage(hostage, damage){
+  if(!hellscapeState || !hostage || hostage.removed || hostage.safe) return false;
+  const dmg = Math.max(0, damage || 0);
+  if(dmg <= 0) return false;
+  hostage.hp = Math.max(0, (hostage.hp || 0) - dmg);
+  hostage.hitFlashUntil = now() + 220;
+  if(hostage.hp <= 0){
+    convertHostageToZombie(hostage);
+    return true;
+  }
+  return false;
+}
+
+function convertHostageToZombie(hostage){
+  if(!hellscapeState || !hostage) return;
+  hostage.removed = true;
+  hellscapeState.hostagesLost = (hellscapeState.hostagesLost || 0) + 1;
+  notify('A freed hostage was devoured and turned.');
+  centerNote('Hostage devoured — new zombie rising!', 1800);
+  const zombie = spawnHellscapeZombie(hostage.x, { forcePosition:true });
+  if(zombie){
+    zombie.y = (floorSlab ? floorSlab.y : (H - GUARD_HEIGHT - 40)) - zombie.h;
+  }
+}
+
+function updateHellscapeHostages(dt){
+  if(!hellscapeState || !hellscapeState.hostages) return;
+  const groundY = floorSlab ? floorSlab.y : (H - 60);
+  for(const hostage of hellscapeState.hostages){
+    if(!hostage || hostage.removed) continue;
+    if(!hostage.maxHp){
+      hostage.maxHp = 300;
+    }
+    if(typeof hostage.hp !== 'number'){ hostage.hp = hostage.maxHp; }
+    if(hostage.freed){
+      hostage.vy = (hostage.vy || 0) + GRAV * 0.8;
+      hostage.y += hostage.vy;
+      if(hostage.y >= groundY){
+        hostage.y = groundY;
+        hostage.vy = 0;
+        hostage.onGround = true;
+      } else {
+        hostage.onGround = false;
+      }
+      if(hostage.onGround){
+        const dir = hostage.escapeDir || -1;
+        const speed = hostage.speed || 1.4;
+        hostage.escapeDir = dir;
+        hostage.vx = dir * speed;
+        hostage.x += hostage.vx;
+        const safeThreshold = 36;
+        if((dir < 0 && hostage.x <= safeThreshold) || (dir > 0 && hostage.x >= levelWidth() - safeThreshold)){
+          hostage.safe = true;
+          hostage.removed = true;
+          hellscapeState.hostagesRescued = (hellscapeState.hostagesRescued || 0) + 1;
+          notify('A freed hostage escaped the horde.');
+        }
+      }
+    } else {
+      hostage.idlePhase = (hostage.idlePhase || 0) + dt * 2.2;
+    }
+  }
+  hellscapeState.hostages = hellscapeState.hostages.filter(h=>h && !h.removed);
+}
+
 function updateHellscape(dt){
   if(!hellscapeState) return;
   const state = hellscapeState;
-  if(state.zombiesKilled >= state.killTarget){
+  updateHellscapeHostages(dt);
+  const nowTs = now();
+  const activeZombies = guards.filter(g=>g && g.hp>0 && g.type==='zombie').length;
+  if(state.awaitingNextWave){
+    const cleared = activeZombies === 0;
+    if(cleared && (!state.nextWaveAt || nowTs >= state.nextWaveAt)){
+      advanceHellscapeWave();
+    }
+  }
+  if(state.goalComplete){
     state.spawnTimer = 0;
     state.commandCooldown = 0;
     return;
   }
-  state.wave = Math.min(5, Math.floor(state.zombiesKilled / 20));
-  const activeZombies = guards.filter(g=>g && g.hp>0 && g.type==='zombie').length;
-  const maxZombies = 10 + state.wave * 4;
+  const difficulty = Math.max(0, (state.wave || 1) - 1);
+  const maxZombies = Math.min(60, 12 + (state.wave || 1) * 4);
+  const remainingSpawns = Math.max(0, (state.waveTarget || 0) - (state.waveSpawns || 0));
   state.spawnTimer = (state.spawnTimer || 0) + dt;
   const baseInterval = state.spawnInterval || (60/45);
-  const interval = Math.max(0.6, baseInterval - state.wave * 0.18);
-  if(state.spawnTimer >= interval){
+  const interval = Math.max(0.55, baseInterval - difficulty * 0.12);
+  if(!state.awaitingNextWave && remainingSpawns > 0 && state.spawnTimer >= interval){
     if(activeZombies < maxZombies){
       const spawnNearPlayer = ((state.zombieSpawnCycle || 0) % 2) === 1;
       let spawnX = null;
       if(spawnNearPlayer){
         const px = player.x + player.w/2;
-        const jitter = (Math.random()*180) - 90;
+        const jitter = (Math.random()*220) - 110;
         const minX = 60;
         const maxX = Math.max(minX + 40, levelWidth() - 140);
         spawnX = Math.max(minX, Math.min(maxX, px + jitter));
@@ -3942,14 +4142,22 @@ function updateHellscape(dt){
         spawnX = state.cemeterySpawnPoints[idx % state.cemeterySpawnPoints.length];
         state.cemeteryIndex = (idx + 1) % state.cemeterySpawnPoints.length;
       }
-      spawnHellscapeZombie(spawnX);
-      if(Math.random() < 0.35 + state.wave * 0.08 && activeZombies + 1 < maxZombies){
+      if(state.waveSpawns < state.waveTarget){
+        const spawned = spawnHellscapeZombie(spawnX);
+        if(spawned){
+          state.waveSpawns = (state.waveSpawns || 0) + 1;
+        }
+      }
+      if(state.waveSpawns < state.waveTarget && Math.random() < 0.32 + difficulty * 0.06 && activeZombies + 1 < maxZombies){
         let extraSpawnX = null;
         if(spawnNearPlayer && state.cemeterySpawnPoints && state.cemeterySpawnPoints.length){
           const rand = Math.floor(Math.random() * state.cemeterySpawnPoints.length);
           extraSpawnX = state.cemeterySpawnPoints[rand];
         }
-        spawnHellscapeZombie(extraSpawnX);
+        const spawnedExtra = spawnHellscapeZombie(extraSpawnX);
+        if(spawnedExtra){
+          state.waveSpawns = (state.waveSpawns || 0) + 1;
+        }
       }
     }
     state.spawnTimer = 0;
@@ -3957,17 +4165,23 @@ function updateHellscape(dt){
   }
   state.commandCooldown = Math.max(0, (state.commandCooldown || 0) - dt);
   const activeCommandos = guards.filter(g=>g && g.hp>0 && g.type==='commando').length;
-  const desiredCommandos = Math.min(4, 1 + Math.floor(state.zombiesKilled / 30));
-  if(state.commandCooldown <= 0 && activeCommandos < desiredCommandos){
+  const desiredCommandos = Math.min(6, 1 + Math.floor((state.wave || 1) / 2));
+  if(!state.awaitingNextWave && state.commandCooldown <= 0 && activeCommandos < desiredCommandos){
     spawnHellscapeCommando();
-    state.commandCooldown = Math.max(3.5, 6 - state.wave * 0.7);
+    state.commandCooldown = Math.max(3, 5.6 - difficulty * 0.45);
   }
 }
 
 function makeCorporateHellscapeLevel(i){
+  const goalWave = HELL_WAVE_GOALS[i] || 5;
   hellscapeState = {
     floor: i,
-    killTarget: 100,
+    goalWave,
+    wave: 1,
+    waveTarget: hellscapeWaveTarget(1),
+    waveSpawns: 0,
+    waveKills: 0,
+    killTarget: hellscapeTotalKillTarget(goalWave),
     zombiesKilled: 0,
     commandosKilled: 0,
     spawnTimer: 0,
@@ -3975,15 +4189,20 @@ function makeCorporateHellscapeLevel(i){
     commandCooldown: 4.6,
     disableFeather: true,
     hostages: [],
+    hostagesRescued: 0,
+    hostagesLost: 0,
     spawnPoints: [],
+    fieldSpawnPoints: [],
     cemeterySpawnPoints: [],
     cemeteryIndex: 0,
     zombieSpawnCycle: 0,
-    zombieSpeed: 0.48 * 1.25,
+    zombieSpeed: 0.48 * 1.1,
+    zombieHp: 32,
     snackFound: false,
     buffUntil: 0,
     goalComplete: false,
-    wave: 0
+    awaitingNextWave: false,
+    nextWaveAt: 0
   };
   serverObjective = false;
   inflationActive = false;
@@ -3999,51 +4218,117 @@ function makeCorporateHellscapeLevel(i){
 
   const baseBuildingCount = 9;
   const buildingCount = Math.max(baseBuildingCount, Math.round(baseBuildingCount * 1.75));
-  const segment = span / (buildingCount + 1);
+  const clusterSizes = [12, 7, 3, 1];
+  const clusterPlan = [];
+  let remainingBuildings = buildingCount;
+  while(remainingBuildings > 0){
+    const options = clusterSizes.filter(size=>size <= remainingBuildings);
+    const size = options[Math.floor(Math.random()*options.length)] || 1;
+    clusterPlan.push(size);
+    remainingBuildings -= size;
+  }
+  const clusterSpacing = span / (clusterPlan.length + 1);
   const hostages = hellscapeState.hostages;
-  for(let b=0; b<buildingCount; b++){
-    const center = 140 + (b+1) * segment;
-    const width = 130 + Math.random()*110;
-    const roofY = yBase - (160 + Math.random()*110);
-    const startX = Math.max(80, Math.min(span - width - 140, center - width/2));
-    const midY = roofY + 60 + Math.random()*24;
-    const lowerY = Math.min(yBase - 80, midY + 50 + Math.random()*28);
-    const catwalkY = roofY + 32 + Math.random()*24;
-    const roofPlatform = {x:startX, y:roofY, w:width, h:12, isPlatform:true};
-    const midPlatform = {x:startX + 18, y:midY, w:width - 36, h:12, isPlatform:true};
-    const lowerPlatform = {x:startX + 24, y:lowerY, w:width - 48, h:12, isPlatform:true};
-    const catwalkPlatform = {x:startX + 32, y:catwalkY, w:width - 64, h:10, isPlatform:true};
-    walls.push(roofPlatform);
-    walls.push(catwalkPlatform);
-    walls.push(midPlatform);
-    walls.push(lowerPlatform);
-    const ladderX = startX + width/2 - 10;
-    ladders.push({x:ladderX, y:roofY, w:20, h:lowerY - roofY + 12});
-    ladders.push({x:startX + 36, y:catwalkY, w:18, h:midY - catwalkY + 12});
-    ladders.push({x:startX + width - 54, y:midY, w:18, h:lowerY - midY + 12});
-    hellscapeState.spawnPoints.push(startX + width/2);
-    hellscapeState.spawnPoints.push(startX + width/2 + 24 * (Math.random()<0.5?-1:1));
-    hellscapeState.spawnPoints.push(startX + width/2 - 36 * (Math.random()<0.5?-1:1));
-    backgroundFX.push({type:'hellscapeBuilding', x:startX - 10, y:roofY-60, w:width + 20, h:yBase - (roofY-60)});
-    const lootMidY = midY - 30;
-    const lootLowerY = lowerY - 34;
-    if(b % 2 === 0){
-      pickups.push({type:'ammo', x:startX + width/2 - 10, y:lootMidY, w:20, h:20, amount:36});
-      pickups.push({type:'intel', x:startX + width/2 - 60, y:lootLowerY, w:20, h:20, amount:3});
-    } else {
-      pickups.push({type:'medkit', x:startX + width/2 - 10, y:lootMidY, w:20, h:20, amount:65});
-      pickups.push({type:'cash', x:startX + width/2 + 40, y:lootLowerY, w:22, h:22, amount:420, noteLabel:'Hazard Pay'});
+  const fieldZones = [];
+  let previousEdge = 80;
+  clusterPlan.forEach((clusterSize, idx)=>{
+    const clusterCenter = 120 + (idx+1) * clusterSpacing;
+    const avgWidth = 120 + Math.random()*110;
+    const gap = 30 + Math.random()*28;
+    const totalWidth = clusterSize * avgWidth + (clusterSize-1) * gap;
+    let start = clusterCenter - totalWidth/2;
+    start = Math.max(60, Math.min(span - totalWidth - 160, start));
+    if(start - previousEdge > 140){
+      fieldZones.push({ x: previousEdge, w: start - previousEdge });
     }
-    if(Math.random()<0.5){
-      hostages.push({x:startX + width/2, y:midY + 42, h:42, freed:false});
+    let cursor = start;
+    for(let n=0; n<clusterSize; n++){
+      const width = Math.max(90, avgWidth * (0.8 + Math.random()*0.5));
+      const roofY = yBase - (150 + Math.random()*130);
+      const midY = roofY + 58 + Math.random()*28;
+      const lowerY = Math.min(yBase - 76, midY + 48 + Math.random()*30);
+      const catwalkY = roofY + 28 + Math.random()*26;
+      const buildingStart = Math.max(80, Math.min(span - width - 140, cursor));
+      const roofPlatform = {x:buildingStart, y:roofY, w:width, h:12, isPlatform:true};
+      const midPlatform = {x:buildingStart + 18, y:midY, w:width - 36, h:12, isPlatform:true};
+      const lowerPlatform = {x:buildingStart + 26, y:lowerY, w:width - 52, h:12, isPlatform:true};
+      const catwalkPlatform = {x:buildingStart + 34, y:catwalkY, w:width - 68, h:10, isPlatform:true};
+      walls.push(roofPlatform, catwalkPlatform, midPlatform, lowerPlatform);
+      const ladderCenter = buildingStart + width/2 - 10;
+      ladders.push({x:ladderCenter, y:roofY, w:20, h:lowerY - roofY + 12});
+      ladders.push({x:buildingStart + 32, y:catwalkY, w:18, h:midY - catwalkY + 12});
+      ladders.push({x:buildingStart + width - 52, y:midY, w:18, h:lowerY - midY + 12});
+      const centerX = buildingStart + width/2;
+      hellscapeState.spawnPoints.push(centerX);
+      hellscapeState.spawnPoints.push(centerX + 40 * (Math.random()<0.5?-1:1));
+      hellscapeState.spawnPoints.push(centerX + 64 * (Math.random()<0.5?-1:1));
+      backgroundFX.push({type:'hellscapeBuilding', x:buildingStart - 12, y:roofY-66, w:width + 24, h:yBase - (roofY-66)});
+      if(Math.random() < 0.7){
+        backgroundFX.push({type:'hellscapeFire', x:centerX, y:roofY + 12, h:94 + Math.random()*22});
+      }
+      if(Math.random() < 0.6){
+        backgroundFX.push({type:'hellscapeFire', x:centerX + 32 * (Math.random()<0.5?-1:1), y:midY + 4, h:70 + Math.random()*18});
+      }
+      if(Math.random() < 0.8){
+        backgroundFX.push({type:'hellscapeSmoke', x:buildingStart - 36, y:roofY + 18, w:32, h:120 + Math.random()*40, drift:0.3 + Math.random()*0.35});
+      }
+      if(Math.random() < 0.75){
+        backgroundFX.push({type:'hellscapeSmoke', x:buildingStart + width + 18, y:midY + 12, w:28, h:110 + Math.random()*40, drift:0.25 + Math.random()*0.3});
+      }
+      const lootMidY = midY - 28;
+      const lootLowerY = lowerY - 36;
+      if((idx + n) % 2 === 0){
+        pickups.push({type:'ammo', x:centerX - 10, y:lootMidY, w:20, h:20, amount:36});
+        pickups.push({type:'intel', x:centerX - 58, y:lootLowerY, w:20, h:20, amount:3});
+      } else {
+        pickups.push({type:'medkit', x:centerX - 10, y:lootMidY, w:20, h:20, amount:65});
+        pickups.push({type:'cash', x:centerX + 46, y:lootLowerY, w:22, h:22, amount:420, noteLabel:'Hazard Pay'});
+      }
+      if(Math.random() < 0.55){
+        hostages.push({
+          x: centerX,
+          y: midY + 42,
+          h: 42,
+          freed: false,
+          hp: 300,
+          maxHp: 300,
+          escapeDir: Math.random()<0.5 ? -1 : 1,
+          speed: 1.2 + Math.random()*0.5
+        });
+      }
+      cursor = buildingStart + width + gap;
     }
-    if(Math.random()<0.75){
-      backgroundFX.push({type:'hellscapeFire', x:startX + width/2, y:roofY + 10, h:92});
-    }
-    if(Math.random()<0.55){
-      backgroundFX.push({type:'hellscapeFire', x:startX + width/2 + 36 * (Math.random()<0.5?-1:1), y:midY + 6, h:70});
+    previousEdge = Math.max(previousEdge, cursor + 80);
+  });
+  if(span - previousEdge > 160){
+    fieldZones.push({ x: previousEdge, w: span - previousEdge - 120 });
+  }
+
+  for(const field of fieldZones){
+    if(field.w <= 0) continue;
+    backgroundFX.push({type:'hellscapeField', x:field.x, y:yBase, w:field.w, h:60});
+    hellscapeState.fieldSpawnPoints.push(field.x + field.w/2);
+    const trees = Math.max(5, Math.round(field.w / 40));
+    for(let t=0; t<trees; t++){
+      const tx = field.x + 20 + Math.random()*Math.max(20, field.w - 40);
+      const height = 70 + Math.random()*90;
+      backgroundFX.push({type:'hellscapeTree', x:tx, base:yBase, h:height});
+      if(Math.random() < 0.35){
+        backgroundFX.push({type:'hellscapeSmoke', x:tx + (Math.random()<0.5?-30:30), y:yBase - height + 20, w:24, h:90 + Math.random()*40, drift:0.2 + Math.random()*0.25});
+      }
+      if(Math.random() < 0.4){
+        hellscapeState.spawnPoints.push(tx);
+      }
     }
   }
+
+  const turretWidth = 160;
+  const turretHeight = 120;
+  const turretX = Math.max(160, Math.min(span - turretWidth - 160, span/2 - turretWidth/2));
+  const turretY = yBase - turretHeight - 18;
+  const turretStation = { x: turretX, y: turretY, w: turretWidth, h: turretHeight, used:false, promptShown:false, theme:'hellscape' };
+  arcadeStations.push(turretStation);
+  backgroundFX.push({type:'hellscapeGunMount', x:turretX, y:turretY, w:turretWidth, h:turretHeight});
 
   const graveyardCount = 3;
   for(let g=0; g<graveyardCount; g++){
@@ -4054,7 +4339,7 @@ function makeCorporateHellscapeLevel(i){
     hellscapeState.cemeterySpawnPoints.push(spawnX);
   }
 
-  for(let t=0; t<18; t++){
+  for(let t=0; t<22; t++){
     const tx = 40 + Math.random()*(span-80);
     const height = 60 + Math.random()*50;
     backgroundFX.push({type:'hellscapeTree', x:tx, base:yBase, h:height});
@@ -4105,8 +4390,8 @@ function makeCorporateHellscapeLevel(i){
   featherRespawnAt = 0;
   featherRespawnLocation = null;
 
-  notify('Corporate Hellscape breach — commandos and zombies are swarming the campus.');
-  centerNote('Objective: Slay 100 zombies, free hostages, grab the snack (optional), then reach the Exit Break Room.', 3600);
+  notify(`Corporate Hellscape breach — ${goalWave} zombie wave${goalWave===1?'':'s'} inbound.`);
+  centerNote(`Objective: Survive ${goalWave} zombie wave${goalWave===1?'':'s'}, free hostages, grab the snack (optional), then reach the Exit Break Room.`, 3600);
 }
 
 function makeLevel(i){
@@ -6976,22 +7261,41 @@ function makeArcadeBeatdownLevel(floor, yBase){
   destroyedOnFloor = 0;
 }
 
-function startArcadeRampage(station){
-  if(!isArcadeBeatdownFloor(currentFloor)) return;
+function startArcadeRampage(station, options={}){
+  const theme = options.theme || (station && station.theme) || 'office';
+  if(theme !== 'hellscape' && !isArcadeBeatdownFloor(currentFloor)) return;
   if(arcadeRampage && arcadeRampage.active) return;
   if(station) station.used = true;
-  const target = currentFloor >= 23 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 12 : currentFloor >= 14 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 6 : ARCADE_RAMPAGE_TARGET_DEFAULT;
-  const maxSimultaneous = currentFloor >= 23 ? 7 : currentFloor >= 14 ? 6 : 5;
+  let target;
+  let maxSimultaneous;
+  let cooldown = 90;
+  if(theme === 'hellscape'){
+    const remaining = hellscapeState ? Math.max(0, (hellscapeState.waveTarget || 0) - (hellscapeState.waveKills || 0)) : ARCADE_RAMPAGE_TARGET_DEFAULT;
+    if(remaining <= 0){
+      if(station){ station.used = false; }
+      centerNote('Perimeter gun idle — wave already cleared.', 1600);
+      notify('No zombies in range — save the ammunition.');
+      return;
+    }
+    target = Math.max(1, remaining || 10);
+    const wave = hellscapeState ? hellscapeState.wave || 1 : 1;
+    maxSimultaneous = Math.min(10, 4 + Math.floor(wave / 2));
+    cooldown = 70;
+  } else {
+    target = currentFloor >= 23 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 12 : currentFloor >= 14 ? ARCADE_RAMPAGE_TARGET_DEFAULT + 6 : ARCADE_RAMPAGE_TARGET_DEFAULT;
+    maxSimultaneous = currentFloor >= 23 ? 7 : currentFloor >= 14 ? 6 : 5;
+  }
   arcadeRampage = {
     active:true,
     station,
+    theme,
     kills:0,
     target,
-    thugs:[],
+    targets:[],
     spawnTimer:0,
     nextSpawn:0.5,
     lastShot:0,
-    cooldown:90,
+    cooldown,
     muzzleFlashUntil:0,
     screenShake:0,
     bgScroll:0,
@@ -7005,27 +7309,43 @@ function startArcadeRampage(station){
   player.onGround = true;
   player.hidden = false;
   player.crouch = false;
-  centerNote('Machine gun nest engaged! Aim with mouse or arrows and hold E or mouse to fire.', 2400);
-  notify('Mounted the machine gun — office thugs approaching!');
+  if(theme === 'hellscape'){
+    centerNote('Perimeter gun online! Aim with mouse or arrows and hold E or mouse to fire.', 2400);
+    notify('Mounted the perimeter gun — zombies closing in!');
+  } else {
+    centerNote('Machine gun nest engaged! Aim with mouse or arrows and hold E or mouse to fire.', 2400);
+    notify('Mounted the machine gun — office thugs approaching!');
+  }
 }
 
-function spawnArcadeRampageThug(){
+function spawnArcadeRampageTarget(){
   if(!arcadeRampage || arcadeRampage.completed) return;
-  const laneOptions = [-1, 0, 1];
-  const lane = laneOptions[Math.floor(Math.random()*laneOptions.length)];
-  const difficulty = arcadeRampage.kills || 0;
-  const hp = 3;
-  const speed = 0.32 + Math.random()*0.12 + Math.min(0.18, difficulty*0.01);
-  arcadeRampage.thugs.push({ lane, distance: 1.4 + Math.random()*0.35, speed, hp, maxHp:hp, wobble:Math.random()*Math.PI*2 });
+  const theme = arcadeRampage.theme || 'office';
+  if(theme === 'hellscape'){
+    const wave = hellscapeState ? hellscapeState.wave || 1 : 1;
+    const laneOptions = [-1, -0.5, 0, 0.5, 1];
+    const lane = laneOptions[Math.floor(Math.random()*laneOptions.length)];
+    const baseHp = 2 + Math.random()*2 + (wave-1)*0.4;
+    const hp = Math.max(2, Math.round(baseHp));
+    const speed = 0.34 + Math.random()*0.16 + Math.min(0.22, (wave-1)*0.02);
+    arcadeRampage.targets.push({ lane, distance: 1.5 + Math.random()*0.4, speed, hp, maxHp:hp, wobble:Math.random()*Math.PI*2 });
+  } else {
+    const laneOptions = [-1, 0, 1];
+    const lane = laneOptions[Math.floor(Math.random()*laneOptions.length)];
+    const difficulty = arcadeRampage.kills || 0;
+    const hp = 3;
+    const speed = 0.32 + Math.random()*0.12 + Math.min(0.18, difficulty*0.01);
+    arcadeRampage.targets.push({ lane, distance: 1.4 + Math.random()*0.35, speed, hp, maxHp:hp, wobble:Math.random()*Math.PI*2 });
+  }
 }
 
-function arcadeThugScreenRect(thug){
-  const progress = clamp(1 - (thug.distance || 1), 0, 1);
+function arcadeTargetScreenRect(target){
+  const progress = clamp(1 - (target.distance || 1), 0, 1);
   const scale = 0.6 + progress * 3.1;
   const width = 42 * scale;
   const height = 78 * scale;
-  const wobble = Math.sin(thug.wobble||0) * (12 * (1-progress));
-  const laneOffset = (thug.lane || 0) * 140 * (1 - progress * 0.4);
+  const wobble = Math.sin(target.wobble||0) * (12 * (1-progress));
+  const laneOffset = (target.lane || 0) * 140 * (1 - progress * 0.4);
   const x = W/2 + laneOffset + wobble - width/2;
   const y = H - 160 - height + progress * 50;
   return { x, y, w: width, h: height, progress };
@@ -7039,24 +7359,29 @@ function fireArcadeRampage(){
   arcadeRampage.lastShot = t;
   arcadeRampage.muzzleFlashUntil = t + 90;
   arcadeRampage.screenShake = Math.min(0.65, (arcadeRampage.screenShake||0) + 0.18);
-  if(!arcadeRampage.thugs.length) return;
-  const sorted = [...arcadeRampage.thugs].sort((a,b)=> (a.distance||0) - (b.distance||0));
+  if(!arcadeRampage.targets.length) return;
+  const sorted = [...arcadeRampage.targets].sort((a,b)=> (a.distance||0) - (b.distance||0));
   const aim = arcadeAim;
   const tolerance = 14;
   let target = null;
-  for(const thug of sorted){
-    const rect = arcadeThugScreenRect(thug);
+  for(const candidate of sorted){
+    const rect = arcadeTargetScreenRect(candidate);
     if(aim.x >= rect.x - tolerance && aim.x <= rect.x + rect.w + tolerance && aim.y >= rect.y - tolerance && aim.y <= rect.y + rect.h + tolerance){
-      target = thug;
+      target = candidate;
       break;
     }
   }
   if(!target) return;
   target.hp -= 1;
   if(target.hp <= 0){
-    const index = arcadeRampage.thugs.indexOf(target);
-    if(index>=0){ arcadeRampage.thugs.splice(index,1); }
+    const index = arcadeRampage.targets.indexOf(target);
+    if(index>=0){ arcadeRampage.targets.splice(index,1); }
     arcadeRampage.kills++;
+    if(arcadeRampage.theme === 'hellscape'){
+      recordHellscapeZombieKill();
+      addChecking(5);
+      notify('+$5 (zombie)');
+    }
     if(arcadeRampage.kills >= arcadeRampage.target){
       completeArcadeRampage();
     }
@@ -7079,23 +7404,23 @@ function updateArcadeRampage(dt){
   if(arcadeRampage.spawnTimer >= (arcadeRampage.nextSpawn || 0.6)){
     arcadeRampage.spawnTimer = 0;
     arcadeRampage.nextSpawn = Math.max(0.35, 0.55 - Math.min(0.2, (arcadeRampage.kills||0)*0.01)) + Math.random()*0.15;
-    if(arcadeRampage.thugs.length < (arcadeRampage.maxSimultaneous || 5)){
-      spawnArcadeRampageThug();
+    if(arcadeRampage.targets.length < (arcadeRampage.maxSimultaneous || 5)){
+      spawnArcadeRampageTarget();
     }
   }
   const nowTs = now();
-  for(const thug of arcadeRampage.thugs){
-    thug.distance -= dt * thug.speed;
-    thug.wobble = (thug.wobble || 0) + dt * 4.2;
-    if(thug.distance <= 0){
+  for(const target of arcadeRampage.targets){
+    target.distance -= dt * target.speed;
+    target.wobble = (target.wobble || 0) + dt * 4.2;
+    if(target.distance <= 0){
       damage();
       player.screenFlashUntil = Math.max(player.screenFlashUntil, nowTs + 240);
       arcadeRampage.screenShake = Math.max(arcadeRampage.screenShake||0, 0.45);
-      thug.distance = 0;
-      thug.reached = true;
+      target.distance = 0;
+      target.reached = true;
     }
   }
-  arcadeRampage.thugs = arcadeRampage.thugs.filter(t=>!t.reached && t.hp>0);
+  arcadeRampage.targets = arcadeRampage.targets.filter(t=>!t.reached && t.hp>0);
   if(arcadeRampage.muzzleFlashUntil && nowTs > arcadeRampage.muzzleFlashUntil){
     arcadeRampage.muzzleFlashUntil = 0;
   }
@@ -7108,9 +7433,21 @@ function completeArcadeRampage(){
   if(!arcadeRampage || arcadeRampage.completed) return;
   arcadeRampage.completed = true;
   arcadeRampage.active = false;
-  arcadeRampage.thugs = [];
+  arcadeRampage.targets = [];
   arcadeRampage.muzzleFlashUntil = 0;
   arcadeRampage.screenShake = 0;
+  const theme = arcadeRampage.theme || 'office';
+  if(theme === 'hellscape'){
+    if(arcadeRampage.station){
+      arcadeRampage.station.used = false;
+      arcadeRampage.station.promptShown = false;
+    }
+    attackHeld = false;
+    centerNote('Perimeter gun disengaged.', 1600);
+    notify('Perimeter gun cools down — stay on the move.');
+    arcadeRampage = null;
+    return;
+  }
   destroyedOnFloor = 0;
   totalServersOnFloor = 0;
   if(door){
@@ -7654,10 +7991,16 @@ function interact(){
         const height = hostage.h || 42;
         const bounds = { x: hostage.x - 18, y: (hostage.y || 0) - height - 12, w: 36, h: height + 16 };
         if(rect(p, bounds)){
+          if(!hostage.maxHp){ hostage.maxHp = 300; }
+          if(typeof hostage.hp !== 'number'){ hostage.hp = hostage.maxHp; }
           hostage.freed = true;
+          const edgeDir = hostage.escapeDir || (hostage.x > levelWidth()/2 ? 1 : -1);
+          hostage.escapeDir = edgeDir;
+          hostage.vy = -7.5;
+          hostage.onGround = false;
           addChecking(30);
           centerNote('Hostage freed!', 1600);
-          notify('Hostage escorted out of the burning office.');
+          notify('Hostage freed — protect their escape route!');
           beep({freq:720});
         }
       }
@@ -7667,7 +8010,7 @@ function interact(){
       if(station && !station.used){
         const bounds = { x: station.x-20, y: station.y-20, w: station.w+40, h: station.h+40 };
         if(rect(p, bounds)){
-          startArcadeRampage(station);
+          startArcadeRampage(station, { theme: station.theme });
           return;
         }
       }
@@ -8353,8 +8696,9 @@ function update(dt){
       const dy = Math.abs((player.y + player.h/2) - sy);
       if(dx <= promptRangeX && dy <= promptRangeY){
         station.promptShown = true;
-        notify('Press SPACE to mount the machine gun.');
-        centerNote('Press SPACE to mount the machine gun.', 1400);
+        const prompt = station.theme==='hellscape' ? 'Press SPACE to control the perimeter gun.' : 'Press SPACE to mount the machine gun.';
+        notify(prompt);
+        centerNote(prompt, 1400);
       }
     }
   }
@@ -8679,11 +9023,29 @@ function update(dt){
       g.t += dt*TIME_SCALE;
       const evacBoost = (evacuationActive && now()<evacuationUntil) ? 1.25 : 1;
       if(hellscapeState && g.type==='zombie'){
-        const chaseDir = px > g.x ? 1 : -1;
-        const chaseSpeed = Math.max(0.2, g.speed || 0.48);
+        const hostages = hellscapeState.hostages || [];
+        let targetHostage = null;
+        let best = Infinity;
+        for(const hostage of hostages){
+          if(!hostage || !hostage.freed || hostage.safe || hostage.removed || hostage.hp<=0) continue;
+          const hHeight = hostage.h || 42;
+          const hx = hostage.x;
+          const hy = (hostage.y || 0) - hHeight/2;
+          const dxHost = hx - (g.x + g.w/2);
+          const dyHost = hy - (g.y + g.h/2);
+          const dist = Math.abs(dxHost) + Math.abs(dyHost)*0.45;
+          if(dist < best){
+            best = dist;
+            targetHostage = hostage;
+          }
+        }
+        const targetX = targetHostage ? targetHostage.x : px;
+        const chaseDir = targetX > g.x ? 1 : -1;
+        const chaseSpeed = Math.max(0.22, g.speed || 0.48);
         g.vx = chaseDir * chaseSpeed;
         g.direction = chaseDir;
         g.flashlight = false;
+        g.huntingHostage = !!targetHostage;
       } else if(hellscapeState && g.type==='commando'){
         const chaseDir = px > g.x ? 1 : -1;
         const chaseSpeed = Math.max(0.7, g.speed || 1.2);
@@ -8728,6 +9090,20 @@ function update(dt){
       let stomped = false;
       const nowMs = now();
       const zombieImmune = !!(hellscapeState && g.type==='zombie' && hellscapeState.buffUntil && hellscapeState.buffUntil > nowMs);
+      if(hellscapeState && g.type==='zombie'){
+        const hostages = hellscapeState.hostages || [];
+        for(const hostage of hostages){
+          if(!hostage || !hostage.freed || hostage.safe || hostage.removed || hostage.hp<=0) continue;
+          const hHeight = hostage.h || 42;
+          const bounds = { x: hostage.x - 12, y: (hostage.y || 0) - hHeight, w: 24, h: hHeight };
+          if(rect(bounds, g)){
+            if(!hostage.lastHitAt || nowMs - hostage.lastHitAt >= 800){
+              hostage.lastHitAt = nowMs;
+              damageHellscapeHostage(hostage, g.dmg || Math.round(GUARD_BASE_DAMAGE * 0.9));
+            }
+          }
+        }
+      }
       if(overlapping && !shielded){
         const guardTop = g.y;
         const cameFromAbove = player.prevBottom <= guardTop + 6 && player.prevVy > 0.5;
@@ -8794,8 +9170,7 @@ function update(dt){
           const dropX = defeated.x + (defeated.w||20)/2 - 10;
           const dropY = defeated.y + (defeated.h||40) - 24;
           if(defeated.type==='zombie'){
-            const prior = hellscapeState.zombiesKilled || 0;
-            hellscapeState.zombiesKilled = Math.min(hellscapeState.killTarget, prior + 1);
+            recordHellscapeZombieKill();
             addChecking(5);
             notify('+$5 (zombie)');
             if(Math.random() < 0.28){
@@ -8804,15 +9179,6 @@ function update(dt){
               if(dropType==='ammo'){ pickup.amount = 30; }
               if(dropType==='medkit'){ pickup.amount = 45; }
               pickups.push(pickup);
-            }
-            if(hellscapeState.zombiesKilled >= hellscapeState.killTarget && !hellscapeState.goalComplete){
-              hellscapeState.goalComplete = true;
-              if(door){
-                door.unlocked = true;
-                door.glowUntil = now() + 4000;
-              }
-              centerNote('Horde repelled — Exit Break Room unlocked!', 2200);
-              notify('100 zombies destroyed. Elevator unlocked at the Exit Break Room.');
             }
             rewardHandled = true;
           } else if(defeated.type==='commando'){
@@ -9365,6 +9731,7 @@ function drawPlatformBlock(ctx, x, y, width, height, palette){
 
 function drawArcadeRampage(){
   const state = arcadeRampage || {};
+  const theme = state.theme || 'office';
   const nowTs = now();
   const shake = state.screenShake || 0;
   const shakeX = shake ? (Math.random()-0.5) * 12 * shake : 0;
@@ -9372,85 +9739,131 @@ function drawArcadeRampage(){
   ctx.save();
   ctx.translate(shakeX, shakeY);
 
-  const gradient = ctx.createLinearGradient(0,0,0,H);
-  gradient.addColorStop(0, '#10192f');
-  gradient.addColorStop(1, '#05070f');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0,0,W,H);
-
-  const scroll = state.bgScroll || 0;
-  for(let band=0; band<3; band++){
-    const bandHeight = 70;
-    const y = H - 220 - band * bandHeight;
-    const depth = 0.35 - band * 0.08;
-    ctx.fillStyle = `rgba(38,52,92,${depth})`;
-    ctx.fillRect(0, y, W, bandHeight);
-    const offset = (scroll * (0.4 + band*0.12)) % 200;
-    for(let x=-offset; x<W+200; x+=200){
-      ctx.fillStyle = 'rgba(60,84,140,0.28)';
-      ctx.fillRect(x, y+10, 160, bandHeight-20);
-      ctx.fillStyle = 'rgba(24,36,70,0.35)';
-      ctx.fillRect(x+10, y+16, 140, bandHeight-32);
-      ctx.fillStyle = 'rgba(110,150,220,0.2)';
-      ctx.fillRect(x+10, y+16, 2, bandHeight-32);
-      ctx.fillRect(x+30, y+16, 2, bandHeight-32);
-      ctx.fillRect(x+120, y+16, 2, bandHeight-32);
+  if(theme === 'hellscape'){
+    const gradient = ctx.createLinearGradient(0,0,0,H);
+    gradient.addColorStop(0, '#320909');
+    gradient.addColorStop(0.4, '#4a0f12');
+    gradient.addColorStop(1, '#120203');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0,0,W,H);
+    const scroll = state.bgScroll || 0;
+    for(let band=0; band<3; band++){
+      const bandHeight = 80;
+      const y = H - 240 - band * bandHeight;
+      ctx.fillStyle = `rgba(40,18,18,${0.35 - band*0.08})`;
+      ctx.fillRect(0, y, W, bandHeight);
+      const offset = (scroll * (0.25 + band*0.1)) % 240;
+      for(let x=-offset; x<W+240; x+=240){
+        ctx.fillStyle = 'rgba(120,40,32,0.25)';
+        ctx.fillRect(x, y+12, 180, bandHeight-24);
+        ctx.fillStyle = 'rgba(240,120,60,0.2)';
+        ctx.fillRect(x+8, y+bandHeight-32, 180, 6);
+      }
     }
+    ctx.fillStyle = '#150405';
+    ctx.fillRect(0, H-140, W, 160);
+    ctx.fillStyle = '#2a0f10';
+    ctx.fillRect(0, H-156, W, 16);
+  } else {
+    const gradient = ctx.createLinearGradient(0,0,0,H);
+    gradient.addColorStop(0, '#10192f');
+    gradient.addColorStop(1, '#05070f');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0,0,W,H);
+    const scroll = state.bgScroll || 0;
+    for(let band=0; band<3; band++){
+      const bandHeight = 70;
+      const y = H - 220 - band * bandHeight;
+      const depth = 0.35 - band * 0.08;
+      ctx.fillStyle = `rgba(38,52,92,${depth})`;
+      ctx.fillRect(0, y, W, bandHeight);
+      const offset = (scroll * (0.4 + band*0.12)) % 200;
+      for(let x=-offset; x<W+200; x+=200){
+        ctx.fillStyle = 'rgba(60,84,140,0.28)';
+        ctx.fillRect(x, y+10, 160, bandHeight-20);
+        ctx.fillStyle = 'rgba(24,36,70,0.35)';
+        ctx.fillRect(x+10, y+16, 140, bandHeight-32);
+        ctx.fillStyle = 'rgba(110,150,220,0.2)';
+        ctx.fillRect(x+10, y+16, 2, bandHeight-32);
+        ctx.fillRect(x+30, y+16, 2, bandHeight-32);
+        ctx.fillRect(x+120, y+16, 2, bandHeight-32);
+      }
+    }
+    for(let i=0;i<3;i++){
+      const chartX = 120 + i * 240;
+      ctx.fillStyle = 'rgba(255,210,120,0.24)';
+      ctx.fillRect(chartX, 86, 120, 90);
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.strokeRect(chartX, 86, 120, 90);
+      ctx.beginPath();
+      ctx.moveTo(chartX+12, 160);
+      ctx.lineTo(chartX+40, 130);
+      ctx.lineTo(chartX+72, 148);
+      ctx.lineTo(chartX+108, 112);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,80,80,0.4)';
+      ctx.fillRect(chartX+40, 130, 6, 30);
+      ctx.fillStyle = 'rgba(90,200,255,0.35)';
+      ctx.fillRect(chartX+70, 148, 6, 12);
+    }
+    ctx.fillStyle = '#0b0f18';
+    ctx.fillRect(0, H-120, W, 140);
+    ctx.fillStyle = '#1a2438';
+    ctx.fillRect(0, H-138, W, 18);
   }
 
-  for(let i=0;i<3;i++){
-    const chartX = 120 + i * 240;
-    ctx.fillStyle = 'rgba(255,210,120,0.24)';
-    ctx.fillRect(chartX, 86, 120, 90);
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-    ctx.strokeRect(chartX, 86, 120, 90);
-    ctx.beginPath();
-    ctx.moveTo(chartX+12, 160);
-    ctx.lineTo(chartX+40, 130);
-    ctx.lineTo(chartX+72, 148);
-    ctx.lineTo(chartX+108, 112);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,80,80,0.4)';
-    ctx.fillRect(chartX+40, 130, 6, 30);
-    ctx.fillStyle = 'rgba(90,200,255,0.35)';
-    ctx.fillRect(chartX+70, 148, 6, 12);
-  }
-
-  ctx.fillStyle = '#0b0f18';
-  ctx.fillRect(0, H-120, W, 140);
-  ctx.fillStyle = '#1a2438';
-  ctx.fillRect(0, H-138, W, 18);
-
-  const thugsToDraw = [...(state.thugs || [])].sort((a,b)=> (b.distance||0) - (a.distance||0));
-  for(const thug of thugsToDraw){
-    const progress = clamp(1 - (thug.distance || 1), 0, 1);
+  const targetsToDraw = [...(state.targets || [])].sort((a,b)=> (b.distance||0) - (a.distance||0));
+  for(const target of targetsToDraw){
+    const progress = clamp(1 - (target.distance || 1), 0, 1);
     const scale = 0.6 + progress * 3.1;
     const width = 42 * scale;
     const height = 78 * scale;
-    const wobble = Math.sin((thug.wobble||0)) * (12 * (1-progress));
-    const laneOffset = thug.lane * 140 * (1 - progress * 0.4);
+    const wobble = Math.sin((target.wobble||0)) * (12 * (1-progress));
+    const laneOffset = (target.lane || 0) * 140 * (1 - progress * 0.4);
     const x = W/2 + laneOffset + wobble - width/2;
     const y = H - 160 - height + progress * 50;
-    ctx.fillStyle = '#3c2924';
-    ctx.fillRect(x, y, width, height);
-    ctx.fillStyle = '#7a4338';
-    ctx.fillRect(x+width/2 - width*0.18, y+height*0.2, width*0.36, height*0.4);
-    ctx.fillStyle = '#f3cda8';
-    ctx.fillRect(x+width/2 - width*0.12, y+height*0.08, width*0.24, height*0.22);
-    ctx.fillStyle = '#2b1c18';
-    ctx.fillRect(x+width/2 - width*0.15, y+height*0.05, width*0.3, height*0.04);
-    ctx.fillStyle = '#7a4338';
-    ctx.fillRect(x- width*0.18, y+height*0.28, width*0.2, height*0.32);
-    ctx.fillRect(x+width- width*0.02, y+height*0.28, width*0.2, height*0.32);
-    ctx.fillStyle = '#f3cda8';
-    ctx.fillRect(x- width*0.18, y+height*0.55, width*0.18, height*0.12);
-    ctx.fillRect(x+width, y+height*0.55, width*0.18, height*0.12);
-    if(thug.hp && thug.maxHp){
-      const ratio = Math.max(0, Math.min(1, thug.hp / thug.maxHp));
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
-      ctx.fillRect(x, y-10, width, 4);
-      ctx.fillStyle = '#ff5656';
-      ctx.fillRect(x, y-10, width*ratio, 4);
+    if(theme === 'hellscape'){
+      ctx.fillStyle = '#22331f';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = '#3d5c2e';
+      ctx.fillRect(x+width*0.28, y+height*0.2, width*0.24, height*0.36);
+      ctx.fillStyle = '#6bb65a';
+      ctx.fillRect(x+width*0.34, y+height*0.08, width*0.16, height*0.18);
+      ctx.fillStyle = '#1b2414';
+      ctx.fillRect(x- width*0.14, y+height*0.32, width*0.18, height*0.34);
+      ctx.fillRect(x+width- width*0.04, y+height*0.32, width*0.18, height*0.34);
+      ctx.fillStyle = '#5a1b1b';
+      ctx.fillRect(x- width*0.12, y+height*0.62, width*0.14, height*0.16);
+      ctx.fillRect(x+width- width*0.02, y+height*0.62, width*0.14, height*0.16);
+      if(target.hp && target.maxHp){
+        const ratio = Math.max(0, Math.min(1, target.hp / target.maxHp));
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(x, y-10, width, 4);
+        ctx.fillStyle = '#88ff6e';
+        ctx.fillRect(x, y-10, width*ratio, 4);
+      }
+    } else {
+      ctx.fillStyle = '#3c2924';
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = '#7a4338';
+      ctx.fillRect(x+width/2 - width*0.18, y+height*0.2, width*0.36, height*0.4);
+      ctx.fillStyle = '#f3cda8';
+      ctx.fillRect(x+width/2 - width*0.12, y+height*0.08, width*0.24, height*0.22);
+      ctx.fillStyle = '#2b1c18';
+      ctx.fillRect(x+width/2 - width*0.15, y+height*0.05, width*0.3, height*0.04);
+      ctx.fillStyle = '#7a4338';
+      ctx.fillRect(x- width*0.18, y+height*0.28, width*0.2, height*0.32);
+      ctx.fillRect(x+width- width*0.02, y+height*0.28, width*0.2, height*0.32);
+      ctx.fillStyle = '#f3cda8';
+      ctx.fillRect(x- width*0.18, y+height*0.55, width*0.18, height*0.12);
+      ctx.fillRect(x+width, y+height*0.55, width*0.18, height*0.12);
+      if(target.hp && target.maxHp){
+        const ratio = Math.max(0, Math.min(1, target.hp / target.maxHp));
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(x, y-10, width, 4);
+        ctx.fillStyle = '#ff5656';
+        ctx.fillRect(x, y-10, width*ratio, 4);
+      }
     }
   }
 
@@ -9486,18 +9899,27 @@ function drawArcadeRampage(){
   ctx.textAlign = 'left';
   ctx.fillStyle = '#f0f6ff';
   ctx.font = '20px monospace';
-  ctx.fillText(`Thugs down: ${state.kills||0}/${state.target||ARCADE_RAMPAGE_TARGET_DEFAULT}`, 24, 36);
-  ctx.font = '14px monospace';
-  ctx.fillText('Move mouse or arrow keys to aim the gun', 24, 60);
-  ctx.fillText('Hold E or mouse to fire the machine gun', 24, 76);
-  ctx.fillText('Press SPACE to dismount after the horde is clear', 24, 92);
-  if(state.completed){
+  if(theme === 'hellscape'){
+    ctx.fillText(`Zombies neutralized: ${state.kills||0}/${state.target||0}`, 24, 36);
+    ctx.font = '14px monospace';
+    ctx.fillText('Move mouse or arrow keys to adjust aim', 24, 60);
+    ctx.fillText('Hold E or mouse to fire the perimeter gun', 24, 76);
+  } else {
+    ctx.fillText(`Thugs down: ${state.kills||0}/${state.target||ARCADE_RAMPAGE_TARGET_DEFAULT}`, 24, 36);
+    ctx.font = '14px monospace';
+    ctx.fillText('Move mouse or arrow keys to aim the gun', 24, 60);
+    ctx.fillText('Hold E or mouse to fire the machine gun', 24, 76);
+    ctx.fillText('Press SPACE to dismount after the horde is clear', 24, 92);
+  }
+  if(state.completed && theme!=='hellscape'){
     ctx.fillStyle = '#9ef7ff';
     ctx.font = '18px monospace';
     ctx.fillText('Horde cleared! Elevator unlocked.', W/2 - 160, H - 40);
   }
 
-  drawArcadePixelOverlay(ctx);
+  if(theme !== 'hellscape'){
+    drawArcadePixelOverlay(ctx);
+  }
 }
 
 
@@ -10083,6 +10505,15 @@ function draw(){
         ctx.fillRect(fx.x+12+ox, fx.y+fx.h-36, fx.w-24, 30);
         ctx.fillStyle='#3e4c6a';
         ctx.fillRect(fx.x+20+ox, fx.y+8, fx.w-40, fx.h-52);
+      } else if(fx.type==='hellscapeGunMount'){
+        ctx.fillStyle = '#1f1412';
+        ctx.fillRect(fx.x+ox, fx.y, fx.w, fx.h);
+        ctx.fillStyle = '#3a2520';
+        ctx.fillRect(fx.x+12+ox, fx.y+fx.h-32, fx.w-24, 28);
+        ctx.fillStyle = '#5c3a2e';
+        ctx.fillRect(fx.x+18+ox, fx.y+12, fx.w-36, fx.h-60);
+        ctx.fillStyle = 'rgba(255,140,40,0.25)';
+        ctx.fillRect(fx.x+18+ox, fx.y+12, fx.w-36, 6);
       } else if(fx.type==='hellscapeSky'){
         const gradient = ctx.createLinearGradient(0,0,0,H);
         gradient.addColorStop(0,'#14090c');
@@ -10101,6 +10532,17 @@ function draw(){
           const wy = fx.y + 24 + row*36;
           ctx.fillRect(fxX+12, wy, Math.max(0,(fx.w||180)-24), 8);
         }
+      } else if(fx.type==='hellscapeField'){
+        const baseY = fx.y || floorSlab.y;
+        const width = fx.w || 200;
+        const height = fx.h || 60;
+        ctx.fillStyle = 'rgba(42,30,20,0.65)';
+        ctx.fillRect(fx.x+ox, baseY - height, width, height);
+        ctx.fillStyle = 'rgba(76,46,24,0.45)';
+        for(let row=0; row<5; row++){
+          const ry = baseY - height + 10 + row * ((height-20)/4);
+          ctx.fillRect(fx.x+ox, ry, width, 4);
+        }
       } else if(fx.type==='hellscapeFire'){
         const baseY = (fx.y || floorSlab.y-60) + (fx.h || 80);
         const flicker = Math.sin(performance.now()/180 + fx.x*0.02) * 6;
@@ -10115,6 +10557,19 @@ function draw(){
         ctx.moveTo(fx.x+ox, baseY);
         ctx.quadraticCurveTo(fx.x-10+ox, (fx.y||baseY-80) + 18 - flicker*0.5, fx.x+ox, (fx.y||baseY-80) + 4);
         ctx.quadraticCurveTo(fx.x+10+ox, (fx.y||baseY-80) + 22 + flicker*0.5, fx.x+ox, baseY);
+        ctx.fill();
+      } else if(fx.type==='hellscapeSmoke'){
+        const height = fx.h || 100;
+        const baseY = fx.y || (floorSlab ? floorSlab.y - height : H - height - 80);
+        const drift = fx.drift || 0.3;
+        const sway = Math.sin(performance.now()/900 * drift + (fx.x||0)*0.01) * 12;
+        ctx.fillStyle = 'rgba(180,180,180,0.18)';
+        ctx.beginPath();
+        ctx.moveTo(fx.x+ox + sway*0.3, baseY);
+        ctx.bezierCurveTo(fx.x+ox - 20 + sway*0.6, baseY - height*0.4, fx.x+ox + 20 - sway*0.2, baseY - height*0.7, fx.x+ox + sway*0.4, baseY - height);
+        ctx.quadraticCurveTo(fx.x+ox + 12, baseY - height*1.1, fx.x+ox + 6, baseY - height*1.25);
+        ctx.quadraticCurveTo(fx.x+ox - 18, baseY - height*0.8, fx.x+ox + sway*0.2, baseY - height*0.4);
+        ctx.closePath();
         ctx.fill();
       } else if(fx.type==='hellscapeTree'){
         const baseY = fx.base || floorSlab.y;
@@ -10503,21 +10958,44 @@ function draw(){
       drawWorkerSprite(ctx, worker, ox);
     }
     if(hellscapeState){
+      const nowTs = now();
       for(const hostage of hellscapeState.hostages){
         if(!hostage) continue;
         const hx = hostage.x + ox;
         const baseY = hostage.y || 0;
         const freed = !!hostage.freed;
+        const escaped = !!hostage.safe;
+        const fallen = (!!hostage.removed && !escaped) || (hostage.hp!==undefined && hostage.hp<=0);
         const height = hostage.h || 42;
         ctx.fillStyle = 'rgba(0,0,0,0.35)';
         ctx.fillRect(hx-12, baseY-6, 24, 6);
-        ctx.fillStyle = freed ? 'rgba(120,255,180,0.85)' : 'rgba(255,210,160,0.85)';
+        let bodyColor = 'rgba(255,210,160,0.85)';
+        if(fallen){ bodyColor = 'rgba(200,80,80,0.75)'; }
+        else if(freed){ bodyColor = 'rgba(120,255,180,0.85)'; }
+        ctx.fillStyle = bodyColor;
         ctx.fillRect(hx-10, baseY-height+6, 20, height-6);
+        if(hostage.hitFlashUntil && hostage.hitFlashUntil > nowTs){
+          ctx.fillStyle = 'rgba(255,255,255,0.45)';
+          ctx.fillRect(hx-10, baseY-height+6, 20, height-6);
+        }
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(hx-10, baseY-height+6, 20, 6);
-        ctx.fillStyle = freed ? 'rgba(120,255,180,0.75)' : 'rgba(255,255,255,0.75)';
+        ctx.fillStyle = freed ? 'rgba(160,255,200,0.85)' : 'rgba(255,255,255,0.8)';
         ctx.font = '11px monospace';
-        ctx.fillText(freed ? 'FREED' : 'HELP', hx-18, baseY-height-2);
+        let label = 'HELP';
+        if(fallen){ label = 'TURNED'; }
+        else if(escaped){ label = 'ESCAPE'; }
+        else if(freed){ label = 'RUN!'; }
+        ctx.fillText(label, hx-18, baseY-height-2);
+        if(freed && !fallen && !escaped){
+          const hp = Math.max(0, hostage.hp || 0);
+          const maxHp = Math.max(1, hostage.maxHp || 300);
+          const ratio = Math.max(0, Math.min(1, hp / maxHp));
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(hx-16, baseY-height-10, 32, 4);
+          ctx.fillStyle = '#6bff94';
+          ctx.fillRect(hx-16, baseY-height-10, 32 * ratio, 4);
+        }
       }
     }
 
@@ -11015,24 +11493,33 @@ function draw(){
   }
   if(hellscapeState){
     const nowTs = now();
+    const wave = hellscapeState.wave || 1;
+    const goalWave = hellscapeState.goalWave || 1;
+    const waveKills = hellscapeState.waveKills || 0;
+    const waveTarget = hellscapeState.waveTarget || hellscapeWaveTarget(wave);
     ctx.fillStyle='rgba(255,255,255,0.9)';
     ctx.textAlign='left';
     ctx.font='16px monospace';
-    ctx.fillText(`Hellscape Kills: ${hellscapeState.zombiesKilled}/${hellscapeState.killTarget}`, 24, 32);
+    ctx.fillText(`Wave ${wave}/${goalWave}: ${waveKills}/${waveTarget} zombies`, 24, 32);
     ctx.font='13px monospace';
-    ctx.fillText('Goal: Eliminate 100 zombies and reach the Exit Break Room elevator.', 24, 52);
+    ctx.fillText(`Total eliminated: ${hellscapeState.zombiesKilled || 0}/${hellscapeState.killTarget || 0}`, 24, 52);
     if(hellscapeState.snackFound){
       ctx.fillText('Optional snack recovered ✓', 24, 70);
     } else {
       ctx.fillText('Optional: Locate the break room snack.', 24, 70);
     }
-    if(hellscapeState.hostages && hellscapeState.hostages.length){
-      const freed = hellscapeState.hostages.filter(h=>h && h.freed).length;
-      ctx.fillText(`Hostages freed: ${freed}/${hellscapeState.hostages.length}`, 24, 86);
+    if((hellscapeState.hostages && hellscapeState.hostages.length) || hellscapeState.hostagesRescued || hellscapeState.hostagesLost){
+      const freedNow = hellscapeState.hostages ? hellscapeState.hostages.filter(h=>h && h.freed).length : 0;
+      const totalFreed = freedNow + (hellscapeState.hostagesRescued || 0);
+      const totalHostages = (hellscapeState.hostages ? hellscapeState.hostages.length : 0) + (hellscapeState.hostagesRescued || 0) + (hellscapeState.hostagesLost || 0);
+      ctx.fillText(`Hostages freed: ${totalFreed}/${totalHostages}`, 24, 86);
+      if(hellscapeState.hostagesLost){
+        ctx.fillText(`Hostages turned: ${hellscapeState.hostagesLost}`, 24, 102);
+      }
     }
     if(hellscapeState.buffUntil && hellscapeState.buffUntil > nowTs){
       const remaining = Math.max(0, Math.ceil((hellscapeState.buffUntil - nowTs)/1000));
-      ctx.fillText(`Zombie Anecdote immunity: ${remaining}s`, 24, 102);
+      ctx.fillText(`Zombie Anecdote immunity: ${remaining}s`, 24, 118);
     }
   }
   if(activeHack){
