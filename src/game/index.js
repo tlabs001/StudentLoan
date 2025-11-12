@@ -1291,7 +1291,8 @@ const ceoArenaState = {
   ceoActive:false,
   lockAnnounced:false,
   introShown:false,
-  shockwaves:[]
+  shockwaves:[],
+  lastSupplyWave:-1
 };
 
 // Time helpers (driven by GAME_PARAMS.timing)
@@ -3171,6 +3172,9 @@ function makeCeoPenthouseArena(yBase){
   backgroundFX.push({ type:'coliseumBanner', x:arenaLeft + arenaWidth/2 - 200, y:yBase-230, w:400, h:56 });
   backgroundFX.push({ type:'coliseumStatue', x:arenaLeft-140, y:yBase-160, h:160 });
   backgroundFX.push({ type:'coliseumStatue', x:arenaRight+20, y:yBase-160, h:160, flip:true });
+  backgroundFX.push({ type:'coliseumHero', x:arenaLeft + arenaWidth/2 - 240, y:yBase-210, h:190 });
+  backgroundFX.push({ type:'coliseumHero', x:arenaLeft + arenaWidth/2 + 120, y:yBase-210, h:190, flip:true });
+  backgroundFX.push({ type:'coliseumFountain', x:arenaLeft + arenaWidth/2 - 90, y:yBase-116, w:180, h:110 });
   for(let t=0;t<4;t++){
     const tx = arenaLeft + 80 + t * ((arenaWidth-120)/3);
     backgroundFX.push({ type:'coliseumTorch', x:tx, y:yBase-128, h:110 });
@@ -3198,6 +3202,7 @@ function makeCeoPenthouseArena(yBase){
   ceoArenaState.lockAnnounced = false;
   ceoArenaState.introShown = true;
   ceoArenaState.shockwaves = [];
+  ceoArenaState.lastSupplyWave = -1;
 
   notify('The penthouse reveals a marble coliseum. Step into the arena to begin the gauntlet.');
   centerNote('CEO Coliseum — enter the arena.', 2000);
@@ -3222,6 +3227,7 @@ function resetCeoArenaState(){
   ceoArenaState.introShown = false;
   ceoArenaState.shockwaves = [];
   ceoArenaState.currentBoss = null;
+  ceoArenaState.lastSupplyWave = -1;
 }
 
 function spawnCeoBoss(){
@@ -3280,6 +3286,19 @@ function spawnCeoArenaEnemy(){
   guard.vx = Math.abs(guard.speed || guard.vx || 0.9);
   guard.wave = ceoArenaState.waveIndex;
   guards.push(guard);
+}
+
+function spawnCeoArenaSupplyDrop(){
+  if(!floorSlab || !ceoArenaState.bounds) return;
+  const groundY = floorSlab.y;
+  const centerX = (ceoArenaState.bounds.left + ceoArenaState.bounds.right) / 2;
+  const baseY = groundY - 26;
+  const ammoX = centerX - 48;
+  const medkitX = centerX + 22;
+  pickups.push({ type:'ammo', x: ammoX, y: baseY, w:20, h:20, amount:30 });
+  pickups.push({ type:'medkit', x: medkitX, y: baseY, w:20, h:20, amount:40 });
+  centerNote('Supply drop delivered.', 1400);
+  notify('Arena resupply: ammo and medkit available.');
 }
 
 function beginCeoArenaWave(index){
@@ -3415,6 +3434,12 @@ function updateCeoArena(dt){
           ceoArenaState.completed = true;
           ceoArenaState.active = false;
           ceoArenaState.ceoActive = false;
+          if(door){
+            door.unlocked = true;
+            door.open = true;
+            door.lift = 1;
+            door.glowUntil = now()+4000;
+          }
           if(runActive){
             notify('CEO defeated! Debt tyranny ends tonight.');
             endGame('victory');
@@ -3424,6 +3449,10 @@ function updateCeoArena(dt){
         ceoArenaState.betweenWaves = true;
         ceoArenaState.nextWaveAt = now() + 1500;
         notify('Wave cleared! Ready for the next assault.');
+        if(ceoArenaState.lastSupplyWave !== ceoArenaState.waveIndex){
+          spawnCeoArenaSupplyDrop();
+          ceoArenaState.lastSupplyWave = ceoArenaState.waveIndex;
+        }
       }
     }
   }
@@ -4319,6 +4348,7 @@ function interact(){
       if(it.type && rect(p,it)){
         if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
         if(it.type==='ammo'){ addAmmo(it.amount||18); it.type=null; centerNote("Ammo +"+(it.amount||18)); beep({freq:520}); notify("Ammo restocked."); }
+        if(it.type==='medkit'){ addChecking(it.amount||40); it.type=null; centerNote('Medkit +' + (it.amount||40) + ' health'); chime(); notify('Medkit restored health.'); }
         if(it.type==='cash'){ addChecking(it.amount||15); it.type=null; centerNote("Checking +$"+(it.amount||15)); beep({freq:600}); notify("Found cash."); }
         if(it.type==='file'){ player.files++; it.type=null; centerNote("Collected file."); beep({freq:700}); notify("File collected."); evaluateWeaponUnlocks(); }
         if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Collected intel."); beep({freq:820}); notify("Intel collected."); evaluateWeaponUnlocks(); }
@@ -4997,7 +5027,8 @@ function update(dt){
     }
     if(!spotlightHit){ spotlightDetection = Math.max(0, spotlightDetection - dt*0.5); }
     if(now()>alarmUntil) alarm=false;
-    if(now()>elevatorLockedUntil && destroyedOnFloor===totalServersOnFloor && !door.unlocked){
+    const arenaElevatorLocked = (currentFloor === FLOORS && ceoArenaState && ceoArenaState.triggered && !ceoArenaState.completed);
+    if(now()>elevatorLockedUntil && destroyedOnFloor===totalServersOnFloor && !door.unlocked && !arenaElevatorLocked){
       door.unlocked=true; door.glowUntil = now()+2000;
     }
     if(evacuationActive && now()>evacuationUntil){ evacuationActive=false; }
@@ -6123,6 +6154,41 @@ function draw(){
         ctx.fillStyle='rgba(170,170,180,0.4)';
         ctx.fillRect(6, 10, width-12, fx.h-20);
         ctx.restore();
+      } else if(fx.type==='coliseumHero'){
+        const width = 36;
+        const flip = fx.flip ? -1 : 1;
+        ctx.save();
+        ctx.translate(fx.x+ox + (flip<0?width:0), fx.y);
+        ctx.scale(flip, 1);
+        ctx.fillStyle='rgba(205,205,218,0.58)';
+        ctx.fillRect(6, fx.h-26, width-12, 26);
+        ctx.fillStyle='rgba(180,180,195,0.45)';
+        ctx.fillRect(0, 0, width, fx.h-20);
+        ctx.fillStyle='rgba(150,150,168,0.35)';
+        ctx.fillRect(8, 12, width-16, fx.h-48);
+        ctx.fillStyle='rgba(235,235,245,0.4)';
+        ctx.fillRect(width/2 - 8, 16, 16, 20);
+        ctx.fillRect(width/2 - 4, 34, 8, fx.h-68);
+        ctx.restore();
+      } else if(fx.type==='coliseumFountain'){
+        ctx.fillStyle='rgba(190,200,220,0.4)';
+        ctx.fillRect(fx.x+ox, fx.y+fx.h-24, fx.w, 24);
+        ctx.fillStyle='rgba(160,170,190,0.45)';
+        ctx.fillRect(fx.x+12+ox, fx.y+fx.h-44, fx.w-24, 20);
+        ctx.fillStyle='rgba(120,180,220,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(fx.x+fx.w/2+ox, fx.y+fx.h-46, fx.w/2-28, 16, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle='rgba(150,200,240,0.28)';
+        ctx.beginPath();
+        ctx.ellipse(fx.x+fx.w/2+ox, fx.y+fx.h-72, fx.w/2-44, 12, 0, 0, Math.PI*2);
+        ctx.fill();
+        const ripple = Math.sin(performance.now()/400) * 4;
+        ctx.strokeStyle='rgba(220,240,255,0.4)';
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.ellipse(fx.x+fx.w/2+ox, fx.y+fx.h-48, fx.w/2-36 + ripple*0.3, 10 + ripple*0.2, 0, 0, Math.PI*2);
+        ctx.stroke();
       } else if(fx.type==='coliseumTorch'){
         ctx.fillStyle='rgba(170,120,60,0.8)';
         ctx.fillRect(fx.x-8+ox, fx.y+fx.h-32, 16, 32);
@@ -6537,6 +6603,13 @@ function draw(){
       const x=it.x+ox, y=it.y;
       if(it.type==='screw'){ ctx.fillStyle='#d9d9d9'; ctx.fillRect(x,y,it.w,it.h); }
       if(it.type==='ammo'){ ctx.fillStyle='#ffd24a'; ctx.fillRect(x,y,it.w,it.h); }
+      if(it.type==='medkit'){
+        ctx.fillStyle='#ff6f6f';
+        ctx.fillRect(x,y,it.w,it.h);
+        ctx.fillStyle='rgba(255,255,255,0.85)';
+        ctx.fillRect(x + it.w/2 - 2, y + 4, 4, it.h-8);
+        ctx.fillRect(x + 4, y + it.h/2 - 2, it.w-8, 4);
+      }
       if(it.type==='cash'){ ctx.fillStyle='#6fff6f'; ctx.fillRect(x,y,it.w,it.h); }
       if(it.type==='file'){ ctx.fillStyle='#9ec7ff'; ctx.fillRect(x,y,it.w,it.h); }
       if(it.type==='intel'){ ctx.fillStyle='#c89eff'; ctx.fillRect(x,y,it.w,it.h); }
