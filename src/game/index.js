@@ -81,8 +81,11 @@ const RUN = GAME_PARAMS.player.runSpeed;
 const JUMP = GAME_PARAMS.player.jumpStrength;
 const SPRINT = GAME_PARAMS.player.sprintMultiplier;
 const FLASH_DIST = GAME_PARAMS.player.flashlightRange;
-const LEVEL_WIDTH = 3 * W;
-const GUARD_SAFE_DISTANCE = LEVEL_WIDTH * 0.25;
+const BASE_LEVEL_WIDTH = 3 * W;
+let activeLevelWidth = BASE_LEVEL_WIDTH;
+function levelWidth(){ return activeLevelWidth; }
+function setLevelWidth(width){ activeLevelWidth = Math.max(W, width || BASE_LEVEL_WIDTH); }
+function guardSafeDistance(){ return levelWidth() * 0.25; }
 const GUARD_SEPARATION = 160;
 const GUARD_SPAWN_MARGIN = 80;
 const PLAYER_BULLET_DAMAGE = GAME_PARAMS.player.damages.bullet;
@@ -1161,18 +1164,22 @@ const block = new Set([' ', 'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Spac
 window.addEventListener('keydown',(e)=>{ if(block.has(e.key) || block.has(e.code)) e.preventDefault(); },{passive:false});
 const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); canvas.focus();
 window.addEventListener('click', ()=>{ canvas.focus(); getAC(); });
-function updateOutsideAimFromEvent(event){
+function updateCanvasAimFromEvent(event){
   if(!canvas) return;
   const rect = canvas.getBoundingClientRect();
   const scaleX = rect.width ? canvas.width / rect.width : 1;
   const scaleY = rect.height ? canvas.height / rect.height : 1;
   const x = (event.clientX - rect.left) * scaleX;
   const y = (event.clientY - rect.top) * scaleY;
-  outsideAim.x = Math.max(0, Math.min(W, x));
-  outsideAim.y = Math.max(0, Math.min(H, y));
+  if(outsideMode){
+    outsideAim.x = Math.max(0, Math.min(W, x));
+    outsideAim.y = Math.max(0, Math.min(H, y));
+  } else if(arcadeRampage && arcadeRampage.active){
+    clampArcadeAim(x, y);
+  }
 }
-canvas.addEventListener('mousemove', updateOutsideAimFromEvent);
-canvas.addEventListener('mousedown', updateOutsideAimFromEvent);
+canvas.addEventListener('mousemove', updateCanvasAimFromEvent);
+canvas.addEventListener('mousedown', updateCanvasAimFromEvent);
 
 // ===== Canvas & Timing =====
 let last=performance.now();
@@ -1193,6 +1200,8 @@ let outsideKillCount = 0;
 let outsideGuards = [];
 let outsideWorkers = [];
 let outsideWindowGuards = [];
+let outsideCounterSnipers = [];
+let outsideNextCounterSniperAt = 0;
 let outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
 let outsideAim = { x: W/2, y: H/2 };
 let outsideLastShot = 0;
@@ -1338,6 +1347,7 @@ let lightingCondition='normal', lightingPulse=0, lightingPhase=0;
 let floorTheme=null, boardRoomActive=false, ninjaRound=false, serverObjective=false, inflationActive=false, bonusFloorActive=false;
 let boardMemberDefeated=false;
 let arcadeBeatdownActive=false, arcadePixelOverlay=false, arcadeRampage=null;
+let arcadeAim={x:W/2,y:H*0.55};
 let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0, sprinklersActiveUntil=0;
 let spotlightDetection=0, elevatorLockedUntil=0;
 let interestDrainTimer=0;
@@ -1350,6 +1360,39 @@ let minimapUnlocked=false, minimapVisible=false;
 let deckVisible=false;
 const unlockedDeckFloors = new Set();
 let floorBannerTimeout=null;
+const FEATHER_RESPAWN_DELAY_MS = 1500;
+let featherRespawnPickup=null;
+let featherRespawnLocation=null;
+let featherRespawnAt=0;
+
+function setFeatherRespawnSource(source){
+  if(source && typeof source.x === 'number' && typeof source.y === 'number'){
+    if(source.type !== undefined){
+      featherRespawnPickup = source;
+    } else {
+      featherRespawnPickup = null;
+    }
+    featherRespawnLocation = { x: source.x, y: source.y };
+  } else if(player){
+    const span = levelWidth();
+    const x = clamp(player.x + player.w/2 - 10, 40, span - 40);
+    const y = player.y - 24;
+    featherRespawnPickup = null;
+    featherRespawnLocation = { x, y };
+  } else {
+    featherRespawnPickup = null;
+    featherRespawnLocation = null;
+  }
+}
+
+function clampArcadeAim(x, y){
+  const minX = W * 0.08;
+  const maxX = W * 0.92;
+  const minY = H * 0.2;
+  const maxY = H * 0.88;
+  arcadeAim.x = clamp(x, minX, maxX);
+  arcadeAim.y = clamp(y, minY, maxY);
+}
 
 function placeFloorFeather(layerYs, yBase){
   const candidates = [];
@@ -1363,8 +1406,10 @@ function placeFloorFeather(layerYs, yBase){
     const platform = walls.find(w=>w.isPlatform && Math.abs((w.y||0) - targetY) < 1);
     if(platform){ targetX = platform.x + platform.w/2 - 10; }
   }
-  targetX = clamp(targetX, 60, 3*W - 80);
-  pickups.push({type:'feather', x:targetX, y:targetY-24, w:20, h:20});
+  targetX = clamp(targetX, 60, levelWidth() - 80);
+  const pickup = {type:'feather', x:targetX, y:targetY-24, w:20, h:20};
+  pickups.push(pickup);
+  setFeatherRespawnSource(pickup);
 }
 
 function clearFeather(reason){
@@ -1379,6 +1424,9 @@ function clearFeather(reason){
     notify('A hit knocked away your feather.');
   } else if(reason==='elevator'){
     notify('Feather winds fade between floors.');
+  }
+  if(reason==='damage' && (featherRespawnPickup || featherRespawnLocation) && !featherRespawnAt){
+    featherRespawnAt = now() + FEATHER_RESPAWN_DELAY_MS;
   }
   return true;
 }
@@ -2183,6 +2231,7 @@ function resetPlayerState(){
   player.savings=Math.min(player.savingsMax, GAME_PARAMS.player.savingsStart);
   player.hasScrew=false; player.hasCharges=true;
   player.hasFeather=false; player.featherEnergy=0; player.featherMax=100; player.featherRecharge=12; player.lastFlap=0; player.flapCooldown=120;
+  featherRespawnPickup=null; featherRespawnLocation=null; featherRespawnAt=0;
   player.files=0; player.intel=0; player.specialFiles=0; player.codexUnlocked=false; player.weapon='pistol';
   player.weaponsUnlocked = { pistol:true, silenced:true, flame:true, melee:true, grenade:false, saber:false, machineGun:false };
   player.pistol.mag=GAME_PARAMS.player.pistol.magazine;
@@ -2425,12 +2474,36 @@ function initOutsideWindowGuards(){
   }).filter(Boolean);
 }
 
+function spawnOutsideCounterSniper(){
+  const windows = OUTSIDE_WINDOW_LAYOUT.positions;
+  if(!windows || !windows.length) return;
+  const slot = windows[Math.floor(Math.random() * windows.length)];
+  const sniperWidth = Math.max(14, slot.w * 0.6);
+  const sniperHeight = Math.max(22, slot.h * 0.85);
+  const baseBottom = slot.y + slot.h - 4;
+  const nowTs = now();
+  outsideCounterSnipers.push({
+    window: slot,
+    x: slot.x + slot.w/2 - sniperWidth/2,
+    y: baseBottom - sniperHeight,
+    w: sniperWidth,
+    h: sniperHeight,
+    spawnAt: nowTs,
+    fireAt: nowTs + 2000,
+    dead: false,
+    fired: false,
+    removeAt: 0,
+    hitUntil: 0
+  });
+}
+
 function initOutsideRound(){
   outsideMode = true;
   outsideKillCount = 0;
   outsideGuards.length = 0;
   outsideWorkers.length = 0;
   outsideWindowGuards.length = 0;
+  outsideCounterSnipers.length = 0;
   outsideOccupiedSlots.clear();
   outsideSpawnTimer = 0;
   outsideLastShot = 0;
@@ -2438,6 +2511,7 @@ function initOutsideRound(){
   outsideShotPulseUntil = 0;
   outsideScope = { x: W/2, y: H/2, radius: OUTSIDE_SCOPE_RADIUS };
   outsideAim = { x: W/2, y: H/2 };
+  outsideNextCounterSniperAt = now() + 10000;
   initOutsideWorkers();
   initOutsideWindowGuards();
   const initialGuards = Math.min(OUTSIDE_MAX_ACTIVE_GUARDS, 4);
@@ -2445,8 +2519,8 @@ function initOutsideRound(){
   if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(OUTSIDE_FLOOR);
   showFloorBanner(OUTSIDE_FLOOR);
   updateMinimapHighlight();
-  notify('Outside perimeter: use arrow keys to aim and eliminate 20 guards.');
-  centerNote('Arrow keys to aim. Eliminate 20 guards.', 2000);
+  notify('Outside perimeter: counter snipers fire every 10s. Aim with mouse or arrows and eliminate 20 guards. Workers award +$10.');
+  centerNote('Counter snipers in the Loan Tower! Aim with mouse or arrows.', 2400);
   updateHudForOutside();
   startMusic('outsideSpy');
 }
@@ -2460,17 +2534,37 @@ function fireOutsideShot(){
   const aimX = outsideScope.x;
   const aimY = outsideScope.y;
   let hit = false;
-  for(const guard of outsideGuards){
-    if(guard.dead) continue;
-    const halfW = (guard.width || 24) / 2;
-    const top = guard.renderY - (guard.height || 42);
-    if(aimX >= guard.renderX - halfW && aimX <= guard.renderX + halfW && aimY >= top && aimY <= guard.renderY){
-      guard.dead = true;
-      guard.hitUntil = t + 160;
-      guard.removeAt = t + 260;
+  let workerBonus = false;
+  for(const sniper of outsideCounterSnipers){
+    if(!sniper || sniper.dead) continue;
+    const left = sniper.x;
+    const right = left + sniper.w;
+    const top = sniper.y;
+    const bottom = top + sniper.h;
+    if(aimX >= left && aimX <= right && aimY >= top && aimY <= bottom){
+      sniper.dead = true;
+      sniper.hitUntil = t + 160;
+      sniper.removeAt = t + 1200;
       outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
       hit = true;
       break;
+    }
+  }
+  if(hit){
+    // fall through for sound handling below
+  } else {
+    for(const guard of outsideGuards){
+      if(guard.dead) continue;
+      const halfW = (guard.width || 24) / 2;
+      const top = guard.renderY - (guard.height || 42);
+      if(aimX >= guard.renderX - halfW && aimX <= guard.renderX + halfW && aimY >= top && aimY <= guard.renderY){
+        guard.dead = true;
+        guard.hitUntil = t + 160;
+        guard.removeAt = t + 260;
+        outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
+        hit = true;
+        break;
+      }
     }
   }
   if(!hit){
@@ -2499,8 +2593,30 @@ function fireOutsideShot(){
       }
     }
   }
+  if(!hit){
+    for(const worker of outsideWorkers){
+      if(!worker || !worker.alive) continue;
+      const width = worker.w || 18;
+      const left = worker.x;
+      const right = left + width;
+      const top = worker.y - 6;
+      const bottom = worker.y + (worker.h || 38);
+      if(aimX >= left && aimX <= right && aimY >= top && aimY <= bottom){
+        worker.alive = false;
+        worker.hitFlashUntil = t + 160;
+        addChecking(10);
+        centerNote('Worker payout! +$10', 1200);
+        notify('Collected $10 from the worker.');
+        hit = true;
+        workerBonus = true;
+        break;
+      }
+    }
+  }
   if(hit){
-    beep({freq:720,dur:0.08});
+    const freq = workerBonus ? 540 : 720;
+    const dur = workerBonus ? 0.07 : 0.08;
+    beep({freq, dur});
   } else {
     beep({freq:260,dur:0.05});
   }
@@ -2524,6 +2640,10 @@ function updateOutside(dt){
     outsideSpawnTimer = 0;
   }
   const t = now();
+  if(outsideNextCounterSniperAt && t >= outsideNextCounterSniperAt){
+    spawnOutsideCounterSniper();
+    outsideNextCounterSniperAt = t + 10000;
+  }
   for(let i=outsideGuards.length-1; i>=0; i--){
     const guard = outsideGuards[i];
     guard.phase += dt * guard.speed;
@@ -2534,6 +2654,25 @@ function updateOutside(dt){
       outsideOccupiedSlots.delete(guard.slot);
       outsideGuards.splice(i,1);
       outsideSpawnTimer = 0;
+    }
+  }
+  for(let i=outsideCounterSnipers.length-1; i>=0; i--){
+    const sniper = outsideCounterSnipers[i];
+    if(sniper.hitUntil && t > sniper.hitUntil){ sniper.hitUntil = 0; }
+    if(sniper.dead){
+      if(!sniper.removeAt){ sniper.removeAt = t + 900; }
+      if(t >= sniper.removeAt){ outsideCounterSnipers.splice(i,1); }
+      continue;
+    }
+    if(!sniper.fired && t >= sniper.fireAt){
+      loseChecking(10);
+      clearFeather('damage');
+      player.hurtUntil = Math.max(player.hurtUntil||0, t + 160);
+      notify('Counter sniper shot you! -$10');
+      centerNote('Counter sniper hit! -$10', 1400);
+      sniper.fired = true;
+      sniper.dead = true;
+      sniper.removeAt = t + 1500;
     }
   }
   for(const worker of outsideWorkers){
@@ -2574,11 +2713,13 @@ function completeOutsideRound(){
   outsideGuards.length = 0;
   outsideWorkers.length = 0;
   outsideWindowGuards.length = 0;
+  outsideCounterSnipers.length = 0;
   outsideOccupiedSlots.clear();
   outsideSpawnTimer = 0;
   outsideLastShot = 0;
   outsideCrosshairFlashUntil = 0;
   outsideShotPulseUntil = 0;
+  outsideNextCounterSniperAt = 0;
   enterFloor(1, { fromOutside:true });
 }
 
@@ -2588,12 +2729,14 @@ function enterFloor(targetFloor, options={}){
   const previous = currentFloor;
   outsideMode = false;
   outsideGuards.length = 0;
+  outsideCounterSnipers.length = 0;
   outsideOccupiedSlots.clear();
   outsideSpawnTimer = 0;
   outsideLastShot = 0;
   outsideCrosshairFlashUntil = 0;
   outsideShotPulseUntil = 0;
   outsideKillCount = 0;
+  outsideNextCounterSniperAt = 0;
   currentFloor = floor;
   camX = 0;
   seenDoor = false;
@@ -3008,6 +3151,7 @@ window.addEventListener('keydown', e=>{
       return;
     }
   }
+  const wasDown = !!keys[k];
   keys[k]=true;
   if(k==='r'){
     const couldReload = reloadWeapon();
@@ -3024,7 +3168,7 @@ window.addEventListener('keydown', e=>{
   if(k==='5') setWeapon('grenade');
   if(k==='6') setWeapon('saber');
   if(k==='7') setWeapon('machineGun');
-  if(k==='e'){ attackHeld=true; attack(); }
+  if(k==='e' && !wasDown){ attackHeld=true; attack(); }
   if(k===' '){ interact(); }
 },{passive:false});
 window.addEventListener('keyup', e=>{
@@ -3196,15 +3340,17 @@ function applyGuardDamage(guard, amount){
 function pickGuardSpawn(existing = []){
   const margin = GUARD_SPAWN_MARGIN;
   const avoidDoorRadius = 260;
+  const span = levelWidth();
+  const safeDistance = guardSafeDistance();
   for(let attempt=0; attempt<80; attempt++){
-    const spawnX = margin + Math.random() * (LEVEL_WIDTH - 2 * margin);
-    if(Math.abs(spawnX - player.x) < GUARD_SAFE_DISTANCE) continue;
-    if(Math.abs(spawnX - initialSpawnX) < GUARD_SAFE_DISTANCE) continue;
+    const spawnX = margin + Math.random() * Math.max(0, span - 2 * margin);
+    if(Math.abs(spawnX - player.x) < safeDistance) continue;
+    if(Math.abs(spawnX - initialSpawnX) < safeDistance) continue;
     if(door && Math.abs((spawnX + 10) - (door.x + door.w/2)) < avoidDoorRadius) continue;
     if(existing.some(pos => Math.abs(pos - spawnX) < GUARD_SEPARATION)) continue;
     return spawnX;
   }
-  return player.x < LEVEL_WIDTH / 2 ? LEVEL_WIDTH - margin : margin;
+  return player.x < span / 2 ? span - margin : margin;
 }
 
 
@@ -3244,10 +3390,10 @@ function makeCeoPenthouseArena(yBase){
   boardTables.length = 0;
   boardMembers.length = 0;
 
-  floorSlab = { x:0, y:yBase, w:3*W, h:22 };
+  floorSlab = { x:0, y:yBase, w:levelWidth(), h:22 };
 
   const arenaLeft = 0.68 * W;
-  const arenaRight = 3*W - 180;
+  const arenaRight = levelWidth() - 180;
   const arenaWidth = Math.max(320, arenaRight - arenaLeft);
   backgroundFX.push({ type:'coliseumBackdrop', x:0.4*W, y:70, w:2.2*W, h:240 });
   backgroundFX.push({ type:'coliseumFloor', x:arenaLeft-40, y:yBase-72, w:arenaWidth+80, h:72 });
@@ -3323,9 +3469,9 @@ function resetCeoArenaState(){
 function spawnCeoBoss(){
   const ceoWidth = Math.round(GUARD_WIDTH * 5);
   const ceoHeight = Math.round(GUARD_HEIGHT * 4.5);
-  const bounds = ceoArenaState.bounds || { left:80, right:3*W-120 };
+  const bounds = ceoArenaState.bounds || { left:80, right:levelWidth()-120 };
   const center = (bounds.left + bounds.right) / 2;
-  const spawnX = clamp(center - ceoWidth/2, 80, 3*W - ceoWidth - 80);
+  const spawnX = clamp(center - ceoWidth/2, 80, levelWidth() - ceoWidth - 80);
   const spawnY = (floorSlab ? floorSlab.y : (H-50)) - ceoHeight;
   const ceo = new Agent({
     x: spawnX,
@@ -3429,7 +3575,7 @@ function beginCeoArenaWave(index){
 
 function updateCeoBoss(ceo, dt, playerCenterX){
   if(!ceo) return false;
-  const bounds = ceoArenaState.bounds || { left:40, right:3*W-120 };
+  const bounds = ceoArenaState.bounds || { left:40, right:levelWidth()-120 };
   const speed = Math.max(0.3, ceo.speed || 0.5);
   const center = ceo.x + ceo.w/2;
   if(ceo.smashPhase !== 'windup' && ceo.smashPhase !== 'slam'){
@@ -3596,16 +3742,21 @@ function makeLevel(i){
   arcadeBeatdownActive = false;
   arcadePixelOverlay = false;
   arcadeRampage = null;
+  arcadeAim = {x:W/2, y:H*0.55};
   setAmbientForFloor(i);
   sprinklersActiveUntil = 0;
   resetCeoArenaState();
 
+  const doubleWidth = isArcadeBeatdownFloor(i);
+  setLevelWidth(doubleWidth ? BASE_LEVEL_WIDTH * 2 : BASE_LEVEL_WIDTH);
+
   floorTheme = getFloorTheme(i);
+  const levelSpan = levelWidth();
   boardRoomActive = isBoardFloor(i);
   ninjaRound = (i===21);
   if(i === ECO_BOSS_FLOOR){
     spawnEcoBossRoom(i);
-    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
     return;
   }
   serverObjective = isServerFloor(i);
@@ -3664,25 +3815,25 @@ function makeLevel(i){
 
   const yBase = H-50;
 
-  walls.push({x:0,y:0,w:3*W,h:H});
-  floorSlab={x:0,y:yBase,w:3*W,h:16};
+  walls.push({x:0,y:0,w:levelSpan,h:H});
+  floorSlab={x:0,y:yBase,w:levelSpan,h:16};
 
   if(i === FLOORS){
     makeCeoPenthouseArena(yBase);
     totalServersOnFloor = servers.length;
-    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
     return;
   }
 
   if(isArcadeBeatdownFloor(i)){
     makeArcadeBeatdownLevel(i, yBase);
-    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
     return;
   }
 
   const windowRows = boardRoomActive ? 2 : 3;
   const cols=18;
-  const spacingX=(3*W-200)/cols;
+  const spacingX=(levelSpan-200)/cols;
   const startX=80;
   for(let r=0;r<windowRows;r++){
     for(let c=0;c<cols;c++){
@@ -3694,7 +3845,7 @@ function makeLevel(i){
   if(boardRoomActive){
     makeBoardRoomLevel(i, yBase);
     totalServersOnFloor = servers.length;
-    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
     return;
   }
 
@@ -3716,7 +3867,7 @@ function makeLevel(i){
       const segments = 2 + Math.floor(Math.random()*2);
       for(let s=0;s<segments;s++){
         const segW = 0.5*W;
-        const wx = 0.2*W + s*((3*W-0.4*W)/(segments+1));
+        const wx = 0.2*W + s*((levelSpan-0.4*W)/(segments+1));
         walls.push({x:wx, y:ly, w:segW, h:10, isPlatform:true});
         if(Math.random()<0.35){
           movingPlatforms.push({x:wx+segW+30, y:ly-32, w:90, h:10, vx:(Math.random()<0.5?-1:1)*1.05, range:130, cx:0});
@@ -3727,7 +3878,7 @@ function makeLevel(i){
 
   const deskCount = 6 + Math.floor(i/4) + (floorTheme && floorTheme.guard && floorTheme.guard.countMod ? Math.max(0, Math.round(-floorTheme.guard.countMod)) : 0);
   for(let d=0; d<deskCount; d++){
-    const x=120 + d* ( (3*W-240)/Math.max(1, deskCount) );
+    const x=120 + d* ( (levelSpan-240)/Math.max(1, deskCount) );
     const w=70,h=38; const y=yBase - h;
     desks.push({x,y,w,h});
     deskDrawers.push({x:x+10,y:y+6,w:14,h:12, used:false});
@@ -3736,7 +3887,7 @@ function makeLevel(i){
 
   const plantCount = 3 + Math.floor(Math.random()*4);
   for(let p=0;p<plantCount;p++){
-    const x=200 + p* ( (3*W-400)/Math.max(1,plantCount-1) );
+    const x=200 + p* ( (levelSpan-400)/Math.max(1,plantCount-1) );
     const y=yBase-30;
     plants.push({x,y,w:24,h:30});
   }
@@ -3766,7 +3917,7 @@ function makeLevel(i){
     const onPlatform = layerYs.length>0 && Math.random()<0.6;
     const platformY = layerYs.length>0 ? layerYs[Math.floor(Math.random()*layerYs.length)] : yBase;
     const y = onPlatform ? (platformY - 22) : (yBase - 24);
-    const x = 120 + Math.random()*(3*W-240);
+    const x = 120 + Math.random()*(levelSpan-240);
     let amount = undefined;
     if(type==='cash'){
       const base = bonusFloorActive ? (40 + Math.random()*80) : (10 + Math.random()*20);
@@ -3785,7 +3936,7 @@ function makeLevel(i){
     for(let s=0;s<scount;s++){
       const layerIndex = layerYs.length>0 ? (s % layerYs.length) : -1;
       const sy = layerIndex>=0 ? layerYs[layerIndex]-26 : (yBase-36);
-      const sx = 160 + Math.random()*(3*W-320);
+      const sx = 160 + Math.random()*(levelSpan-320);
       serverPool.push({x:sx, y:sy, w:28, h:26, hp: 12 + Math.floor(i/4), destroyed:false, armed:false, armTime:0});
     }
   }
@@ -3813,7 +3964,7 @@ function makeLevel(i){
 
   const themeVisuals = floorTheme && floorTheme.visuals ? floorTheme.visuals : {};
   if(themeVisuals.floatingPapers){
-    for(let p=0;p<12;p++){ floatingPapers.push({x:Math.random()*3*W, y:40+Math.random()*200, sway:Math.random()*Math.PI*2}); }
+    for(let p=0;p<12;p++){ floatingPapers.push({x:Math.random()*levelSpan, y:40+Math.random()*200, sway:Math.random()*Math.PI*2}); }
   }
   if(themeVisuals.billboards){
     billboardScreens.push({x:0.5*W, y:90, w:220, h:60});
@@ -3823,7 +3974,7 @@ function makeLevel(i){
     backgroundFX.push({type:'ticker', y:46});
   }
   if(themeVisuals.sparks){
-    hazards.push({type:'spark', x:Math.random()*3*W, y:yBase-60, w:36, h:20, t:0});
+    hazards.push({type:'spark', x:Math.random()*levelSpan, y:yBase-60, w:36, h:20, t:0});
   }
   if(themeVisuals.redAccent){
     lightingCondition = 'minimal';
@@ -3857,7 +4008,7 @@ function makeLevel(i){
     notify('Black market contact spotted on this floor.');
   }
 
-  door = { x: 3*W-160, y: yBase-120, w:120, h:120, unlocked: bonusFloorActive || totalServersOnFloor===0, open:false, lift:0, glowUntil:0 };
+  door = { x: levelSpan-160, y: yBase-120, w:120, h:120, unlocked: bonusFloorActive || totalServersOnFloor===0, open:false, lift:0, glowUntil:0 };
 
   let gcount = bonusFloorActive ? 0 : (7 + Math.min(6, Math.floor(i/3)));
   if(floorTheme && floorTheme.guard && typeof floorTheme.guard.countMod==='number'){
@@ -3899,7 +4050,7 @@ function makeLevel(i){
       }
     }
   }
-  workerZones.push({min: 80, max: 3*W - 198, y: yBase - 38});
+  workerZones.push({min: 80, max: levelSpan - 198, y: yBase - 38});
   const workerCount = bonusFloorActive ? 0 : Math.max(4, Math.min(8, workerZones.length ? workerZones.length * 2 : 4));
   for(let w=0; w<workerCount; w++){
     const zone = workerZones[w % workerZones.length];
@@ -3956,10 +4107,11 @@ function makeLevel(i){
     }
   }
 
-  camX = clamp(player.x - W*0.45, 0, 3*W - W);
+  camX = clamp(player.x - W*0.45, 0, levelSpan - W);
 }
 
 function makeArcadeBeatdownLevel(floor, yBase){
+  const levelSpan = levelWidth();
   arcadeBeatdownActive = true;
   arcadePixelOverlay = true;
   lightingCondition = 'neon';
@@ -3968,7 +4120,7 @@ function makeArcadeBeatdownLevel(floor, yBase){
   backgroundFX.push({type:'arcadeGrid'});
 
   const cubicleBands = 9;
-  const cubicleWidth = (3*W - 180) / cubicleBands;
+  const cubicleWidth = (levelSpan - 180) / cubicleBands;
   for(let i=0;i<cubicleBands;i++){
     const cx = 90 + i * cubicleWidth;
     backgroundFX.push({type:'arcadeCubicle', x:cx, y:yBase-150, w:cubicleWidth-24, h:92});
@@ -3977,7 +4129,7 @@ function makeArcadeBeatdownLevel(floor, yBase){
   const chartCount = 4;
   for(let i=0;i<chartCount;i++){
     const ratio = chartCount===1 ? 0.5 : i/Math.max(1, chartCount-1);
-    const chartX = 160 + ratio * (3*W - 320);
+    const chartX = 160 + ratio * (levelSpan - 320);
     backgroundFX.push({type:'arcadeChart', x:chartX, y:120, w:140, h:88, flip:i%2===0});
   }
 
@@ -3985,7 +4137,7 @@ function makeArcadeBeatdownLevel(floor, yBase){
   const deskWidth = 96;
   const deskHeight = 38;
   const laneStart = 100;
-  const laneEnd = 3*W - 320;
+  const laneEnd = levelSpan - 320;
   for(let d=0; d<deskCount; d++){
     const t = deskCount===1 ? 0.5 : d/Math.max(1, deskCount-1);
     const dx = laneStart + t * (laneEnd - laneStart);
@@ -4021,7 +4173,7 @@ function makeArcadeBeatdownLevel(floor, yBase){
   const winWidth = 46;
   const winHeight = 26;
   const winStartX = 80;
-  const winGap = (3*W - winStartX*2 - winWidth) / Math.max(1, windowCols-1);
+  const winGap = (levelSpan - winStartX*2 - winWidth) / Math.max(1, windowCols-1);
   for(let r=0;r<windowRows;r++){
     for(let c=0;c<windowCols;c++){
       const wx = winStartX + c * winGap;
@@ -4074,8 +4226,8 @@ function makeArcadeBeatdownLevel(floor, yBase){
   spotlights.push({x:0.6*W, y:yBase-150, w:90, h:18, range:240, t:0, speed:0.8});
   spotlights.push({x:1.6*W, y:yBase-150, w:90, h:18, range:240, t:Math.PI/2, speed:0.7});
 
-  floorSlab = {x:0, y:yBase, w:3*W, h:18};
-  door = { x: 3*W-160, y: yBase-120, w:120, h:120, unlocked:false, open:false, lift:0, glowUntil:0 };
+  floorSlab = {x:0, y:yBase, w:levelSpan, h:18};
+  door = { x: levelSpan-160, y: yBase-120, w:120, h:120, unlocked:false, open:false, lift:0, glowUntil:0 };
   totalServersOnFloor = -1;
   destroyedOnFloor = 0;
 }
@@ -4103,12 +4255,13 @@ function startArcadeRampage(station){
     completed:false
   };
   attackHeld = false;
+  clampArcadeAim(W/2, H*0.55);
   player.vx = 0;
   player.vy = 0;
   player.onGround = true;
   player.hidden = false;
   player.crouch = false;
-  centerNote('Machine gun nest engaged! Hold E or mouse to fire.', 2200);
+  centerNote('Machine gun nest engaged! Aim with mouse or arrows and hold E or mouse to fire.', 2400);
   notify('Mounted the machine gun — office thugs approaching!');
 }
 
@@ -4117,9 +4270,21 @@ function spawnArcadeRampageThug(){
   const laneOptions = [-1, 0, 1];
   const lane = laneOptions[Math.floor(Math.random()*laneOptions.length)];
   const difficulty = arcadeRampage.kills || 0;
-  const hp = 2 + Math.floor(Math.random()*2) + Math.floor(difficulty/12);
+  const hp = 3;
   const speed = 0.32 + Math.random()*0.12 + Math.min(0.18, difficulty*0.01);
   arcadeRampage.thugs.push({ lane, distance: 1.4 + Math.random()*0.35, speed, hp, maxHp:hp, wobble:Math.random()*Math.PI*2 });
+}
+
+function arcadeThugScreenRect(thug){
+  const progress = clamp(1 - (thug.distance || 1), 0, 1);
+  const scale = 0.6 + progress * 3.1;
+  const width = 42 * scale;
+  const height = 78 * scale;
+  const wobble = Math.sin(thug.wobble||0) * (12 * (1-progress));
+  const laneOffset = (thug.lane || 0) * 140 * (1 - progress * 0.4);
+  const x = W/2 + laneOffset + wobble - width/2;
+  const y = H - 160 - height + progress * 50;
+  return { x, y, w: width, h: height, progress };
 }
 
 function fireArcadeRampage(){
@@ -4131,11 +4296,22 @@ function fireArcadeRampage(){
   arcadeRampage.muzzleFlashUntil = t + 90;
   arcadeRampage.screenShake = Math.min(0.65, (arcadeRampage.screenShake||0) + 0.18);
   if(!arcadeRampage.thugs.length) return;
-  arcadeRampage.thugs.sort((a,b)=>a.distance-b.distance);
-  const target = arcadeRampage.thugs[0];
+  const sorted = [...arcadeRampage.thugs].sort((a,b)=> (a.distance||0) - (b.distance||0));
+  const aim = arcadeAim;
+  const tolerance = 14;
+  let target = null;
+  for(const thug of sorted){
+    const rect = arcadeThugScreenRect(thug);
+    if(aim.x >= rect.x - tolerance && aim.x <= rect.x + rect.w + tolerance && aim.y >= rect.y - tolerance && aim.y <= rect.y + rect.h + tolerance){
+      target = thug;
+      break;
+    }
+  }
+  if(!target) return;
   target.hp -= 1;
   if(target.hp <= 0){
-    arcadeRampage.thugs.shift();
+    const index = arcadeRampage.thugs.indexOf(target);
+    if(index>=0){ arcadeRampage.thugs.splice(index,1); }
     arcadeRampage.kills++;
     if(arcadeRampage.kills >= arcadeRampage.target){
       completeArcadeRampage();
@@ -4145,6 +4321,15 @@ function fireArcadeRampage(){
 
 function updateArcadeRampage(dt){
   if(!arcadeRampage || !arcadeRampage.active) return;
+  const aimInputX = (keys['arrowleft'] ? -1 : 0) + (keys['arrowright'] ? 1 : 0) + (keys['a'] ? -1 : 0) + (keys['d'] ? 1 : 0);
+  const aimInputY = (keys['arrowup'] ? -1 : 0) + (keys['arrowdown'] ? 1 : 0) + (keys['w'] ? -1 : 0) + (keys['s'] ? 1 : 0);
+  if(aimInputX !== 0 || aimInputY !== 0){
+    const length = Math.hypot(aimInputX, aimInputY) || 1;
+    const aimSpeed = 420;
+    const nextX = arcadeAim.x + (aimInputX / length) * aimSpeed * dt;
+    const nextY = arcadeAim.y + (aimInputY / length) * aimSpeed * dt;
+    clampArcadeAim(nextX, nextY);
+  }
   arcadeRampage.bgScroll = (arcadeRampage.bgScroll || 0) + dt * 120;
   arcadeRampage.spawnTimer += dt;
   if(arcadeRampage.spawnTimer >= (arcadeRampage.nextSpawn || 0.6)){
@@ -4205,14 +4390,15 @@ function spawnEcoBossRoom(floor){
   backgroundFX.push({type:'serverParallax'});
   const yBase = H - 70;
   const upperPlatform = yBase - 140;
-  walls.push({x:0,y:0,w:3*W,h:H});
-  floorSlab = {x:0,y:yBase,w:3*W,h:18};
+  const levelSpan = levelWidth();
+  walls.push({x:0,y:0,w:levelSpan,h:H});
+  floorSlab = {x:0,y:yBase,w:levelSpan,h:18};
   walls.push({x:0.35*W, y:upperPlatform, w:0.5*W, h:12, isPlatform:true});
   walls.push({x:1.25*W, y:upperPlatform-60, w:0.6*W, h:12, isPlatform:true});
   walls.push({x:2.15*W, y:upperPlatform, w:0.5*W, h:12, isPlatform:true});
   plants.push({x:0.48*W, y:yBase-32, w:24, h:32});
   plants.push({x:2.32*W, y:yBase-32, w:24, h:32});
-  door = { x: 3*W-200, y: yBase-200, w:160, h:200, unlocked:false, open:false, lift:0, glowUntil:0 };
+  door = { x: levelSpan-200, y: yBase-200, w:160, h:200, unlocked:false, open:false, lift:0, glowUntil:0 };
   ecoBoss = {
     x: 1.5*W - 90,
     y: upperPlatform - 220,
@@ -4395,17 +4581,18 @@ function onEcoBossDeath(){
 }
 
 function makeBoardRoomLevel(floor, yBase){
+  const levelSpan = levelWidth();
   const tableTop = yBase - 150;
   floorSlab.x = 0;
   floorSlab.y = tableTop;
-  floorSlab.w = 3*W;
+  floorSlab.w = levelSpan;
   floorSlab.h = 22;
 
   backgroundFX.length = 0;
   backgroundFX.push({type:'boardCharts'});
 
   const tableX = 0.2*W;
-  const tableWidth = 3*W - 0.4*W;
+  const tableWidth = levelSpan - 0.4*W;
   const tableHeight = 26;
   const legs = [
     {x: tableX + 42, y: tableTop, w:28, h:96},
@@ -4681,7 +4868,7 @@ function handleHackInput(key){
 function activateSprinklers(yBase, until){
   sprinklers.length = 0;
   const count = 8;
-  const span = 3*W - 160;
+  const span = levelWidth() - 160;
   for(let i=0;i<count;i++){
     const x = 80 + (count===1? span/2 : (i/(count-1))*span);
     sprinklers.push({
@@ -4729,7 +4916,7 @@ function interact(){
         if(it.type==='cash'){ addChecking(it.amount||15); it.type=null; centerNote("Checking +$"+(it.amount||15)); beep({freq:600}); notify("Found cash."); }
         if(it.type==='file'){ player.files++; it.type=null; centerNote("Collected file."); beep({freq:700}); notify("File collected."); evaluateWeaponUnlocks(); }
         if(it.type==='intel'){ player.intel++; it.type=null; centerNote("Collected intel."); beep({freq:820}); notify("Intel collected."); evaluateWeaponUnlocks(); }
-        if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); }
+        if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; setFeatherRespawnSource(it); featherRespawnAt=0; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); }
         if(it.type==='special'){
           player.specialFiles = (player.specialFiles||0) + 1;
           it.type=null;
@@ -4817,6 +5004,8 @@ function interact(){
           } else if(reward==='feather'){
             player.hasFeather=true;
             player.featherEnergy=player.featherMax;
+            setFeatherRespawnSource(null);
+            featherRespawnAt=0;
             centerNote('Feather stashed in drawer!', 1400);
             notify('Feather recovered — air mobility boosted.');
             chime();
@@ -4958,7 +5147,7 @@ function interact(){
         const targetX = (entryVentWorld? entryVentWorld.x : 0.6*W+40);
         const targetY = (entryVentWorld? entryVentWorld.y : floorSlab.y-160);
         player.x = targetX; player.y = targetY - player.h;
-        camX = clamp(player.x - W*0.45, 0, 3*W - W);
+        camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
         player.prevBottom = player.y + player.h;
         player.prevVy = 0;
         sub=null; entryVentWorld=null;
@@ -5113,7 +5302,7 @@ function attack(){
 
 // continuous fire for flame while held
 function tickContinuous(){
-  if(attackHeld){ attack(); }
+  if(attackHeld && !outsideMode){ attack(); }
   setTimeout(tickContinuous, 80);
 }
 tickContinuous();
@@ -5252,10 +5441,32 @@ function canUnlockElevator(){
 }
 
 // ========= Update =========
+function maybeRespawnFeather(){
+  if(!featherRespawnAt) return;
+  const nowTs = now();
+  if(nowTs < featherRespawnAt) return;
+  if(player && player.hasFeather){ featherRespawnAt = 0; return; }
+  if(pickups.some(p=>p && p.type==='feather')){ featherRespawnAt = 0; return; }
+  if(!featherRespawnLocation){ featherRespawnAt = 0; return; }
+  if(featherRespawnPickup){
+    featherRespawnPickup.type = 'feather';
+    featherRespawnPickup.x = featherRespawnLocation.x;
+    featherRespawnPickup.y = featherRespawnLocation.y;
+  } else {
+    const pickup = { type:'feather', x: featherRespawnLocation.x, y: featherRespawnLocation.y, w:20, h:20 };
+    pickups.push(pickup);
+    featherRespawnPickup = pickup;
+  }
+  setFeatherRespawnSource(featherRespawnPickup || featherRespawnLocation);
+  featherRespawnAt = 0;
+  notify('Feather drifts back within reach.');
+}
+
 function update(dt){
   if(!runActive) return;
   const frameNow = now();
   manageFlamethrowerHeat(frameNow);
+  maybeRespawnFeather();
   if(outsideMode){
     updateOutside(dt);
     return;
@@ -5404,7 +5615,7 @@ function update(dt){
 
   if(!inSub){
     // Bounds
-    player.x = clamp(player.x, 0, 3*W - player.w);
+    player.x = clamp(player.x, 0, levelWidth() - player.w);
 
     // Floor & platforms
     let dropActive = false;
@@ -5601,7 +5812,7 @@ function update(dt){
       g.x += g.vx;
       const arenaBounds = (currentFloor === FLOORS && ceoArenaState.triggered && ceoArenaState.bounds) ? ceoArenaState.bounds : null;
       const guardLeftBound = arenaBounds ? arenaBounds.left : 40;
-      const guardRightBound = arenaBounds ? arenaBounds.right - (g.w || 20) : 3*W - (g.w || 20) - 40;
+      const guardRightBound = arenaBounds ? arenaBounds.right - (g.w || 20) : levelWidth() - (g.w || 20) - 40;
       const baseMove = Math.max(0.1, g.speed || Math.abs(g.vx) || 0.6);
       if(g.x < guardLeftBound){
         g.x = guardLeftBound;
@@ -5746,7 +5957,7 @@ function update(dt){
     // Door anim & camera
     if(door.open){ door.lift = Math.min(1, door.lift + 0.06); }
     else { door.lift = Math.max(0, door.lift - 0.04); }
-    camX = clamp(player.x - W*0.45, 0, 3*W - W);
+    camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
 
   } else {
     // Sublevel physics
@@ -5831,7 +6042,7 @@ function update(dt){
       b.x += b.vx; b.y += b.vy; b.life -= 16;
     }
     if(!inSub){
-      if(b.x<0 || b.x>3*W || b.life<=0) b.life=0;
+      if(b.x<0 || b.x>levelWidth() || b.life<=0) b.life=0;
       if(b.from==='player'){
         for(const g of guards){
           const box={x:g.x,y:g.y,w:g.w,h:g.h};
@@ -6249,7 +6460,8 @@ function drawArcadeRampage(){
   ctx.fillStyle = '#1a2438';
   ctx.fillRect(0, H-138, W, 18);
 
-  for(const thug of state.thugs || []){
+  const thugsToDraw = [...(state.thugs || [])].sort((a,b)=> (b.distance||0) - (a.distance||0));
+  for(const thug of thugsToDraw){
     const progress = clamp(1 - (thug.distance || 1), 0, 1);
     const scale = 0.6 + progress * 3.1;
     const width = 42 * scale;
@@ -6286,20 +6498,26 @@ function drawArcadeRampage(){
     ctx.fillRect(W/2-160, H-200, 320, 160);
   }
 
+  const aimOffsetX = clamp((arcadeAim.x - W/2) * 0.28, -80, 80);
+  const aimOffsetY = clamp((arcadeAim.y - H*0.6) * 0.24, -60, 40);
   ctx.fillStyle = '#1c232f';
-  ctx.fillRect(W/2-32, H-150, 64, 90);
+  ctx.fillRect(W/2-32 + aimOffsetX*0.25, H-150 + aimOffsetY*0.15, 64, 90);
   ctx.fillStyle = '#0f141e';
-  ctx.fillRect(W/2-16, H-220, 32, 90);
+  ctx.fillRect(W/2-16 + aimOffsetX*0.45, H-220 + aimOffsetY*0.3, 32, 90);
   ctx.fillStyle = '#3c4c66';
-  ctx.fillRect(W/2-6, H-220, 12, 60);
+  ctx.fillRect(W/2-6 + aimOffsetX*0.58, H-220 + aimOffsetY*0.3, 12, 60);
 
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(W/2-40, H/2);
-  ctx.lineTo(W/2+40, H/2);
-  ctx.moveTo(W/2, H/2-40);
-  ctx.lineTo(W/2, H/2+40);
+  ctx.moveTo(arcadeAim.x-40, arcadeAim.y);
+  ctx.lineTo(arcadeAim.x+40, arcadeAim.y);
+  ctx.moveTo(arcadeAim.x, arcadeAim.y-40);
+  ctx.lineTo(arcadeAim.x, arcadeAim.y+40);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(arcadeAim.x, arcadeAim.y, 8, 0, Math.PI*2);
   ctx.stroke();
 
   ctx.restore();
@@ -6309,8 +6527,9 @@ function drawArcadeRampage(){
   ctx.font = '20px monospace';
   ctx.fillText(`Thugs down: ${state.kills||0}/${state.target||ARCADE_RAMPAGE_TARGET_DEFAULT}`, 24, 36);
   ctx.font = '14px monospace';
-  ctx.fillText('Hold E or mouse to fire the machine gun', 24, 60);
-  ctx.fillText('Press SPACE to dismount after the horde is clear', 24, 80);
+  ctx.fillText('Move mouse or arrow keys to aim the gun', 24, 60);
+  ctx.fillText('Hold E or mouse to fire the machine gun', 24, 76);
+  ctx.fillText('Press SPACE to dismount after the horde is clear', 24, 92);
   if(state.completed){
     ctx.fillStyle = '#9ef7ff';
     ctx.font = '18px monospace';
@@ -6666,6 +6885,18 @@ function drawOutside(){
     drawWindowGuard(ctx, guard, nowTs);
   }
 
+  for(const sniper of outsideCounterSnipers){
+    if(!sniper) continue;
+    const flash = sniper.hitUntil && sniper.hitUntil > nowTs;
+    const baseColor = sniper.dead ? 'rgba(120,20,20,0.7)' : flash ? '#ffb2b2' : '#1b2538';
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(sniper.x, sniper.y, sniper.w, sniper.h);
+    ctx.fillStyle = '#0a0f1a';
+    ctx.fillRect(sniper.x + sniper.w/2 - 4, sniper.y + sniper.h*0.3, 8, sniper.h*0.4);
+    ctx.fillStyle = 'rgba(255,80,60,0.8)';
+    ctx.fillRect(sniper.x + sniper.w/2 - 3, sniper.y + sniper.h*0.12, 6, 6);
+  }
+
   ctx.fillStyle = '#2b3a55';
   for(const span of OUTSIDE_PLATFORM_SPANS){
     ctx.fillRect(span.x, span.y, span.w, 6);
@@ -6848,14 +7079,14 @@ function draw(){
     for(const fx of backgroundFX){
       if(fx.type==='ticker'){
         ctx.fillStyle='rgba(255,215,90,0.35)';
-        ctx.fillRect(80+ox, fx.y, 3*W-160, 8);
+        ctx.fillRect(80+ox, fx.y, levelWidth()-160, 8);
       } else if(fx.type==='arcadeBackdrop'){
         ctx.fillStyle='rgba(16,24,38,0.92)';
         ctx.fillRect(0,0,W,H);
       } else if(fx.type==='arcadeGrid'){
         const offset = (camX*0.3)%140;
         ctx.fillStyle='rgba(40,60,100,0.18)';
-        for(let x=-offset; x<3*W; x+=140){
+        for(let x=-offset; x<levelWidth(); x+=140){
           ctx.fillRect(x+ox, 60, 2, floorSlab.y-120);
         }
       } else if(fx.type==='arcadeCubicle'){
@@ -6882,7 +7113,7 @@ function draw(){
         ctx.fillRect(fx.x+20+ox, fx.y+8, fx.w-40, fx.h-52);
       } else if(fx.type==='cubiclesParallax'){
         const offset = (camX*0.25)%160;
-        for(let x=-offset;x<3*W;x+=160){
+        for(let x=-offset;x<levelWidth();x+=160){
           ctx.fillStyle='rgba(200,200,210,0.18)';
           ctx.fillRect(x+ox, floorSlab.y-200, 120, 90);
           ctx.fillStyle='rgba(180,180,190,0.12)';
@@ -6890,7 +7121,7 @@ function draw(){
         }
       } else if(fx.type==='serverParallax'){
         const offset = (camX*0.3)%200;
-        for(let x=-offset;x<3*W;x+=200){
+        for(let x=-offset;x<levelWidth();x+=200){
           ctx.fillStyle='rgba(80,110,160,0.2)';
           ctx.fillRect(x+ox, floorSlab.y-240, 140, 160);
           ctx.fillStyle='rgba(140,200,255,0.1)';
@@ -6900,7 +7131,7 @@ function draw(){
         }
       } else if(fx.type==='skylineParallax'){
         const offset = (camX*0.15)%260;
-        for(let x=-offset;x<3*W;x+=260){
+        for(let x=-offset;x<levelWidth();x+=260){
           ctx.fillStyle='rgba(60,80,120,0.25)';
           ctx.fillRect(x+ox, 40, 200, H-180);
           ctx.fillStyle='rgba(100,130,180,0.18)';
@@ -6911,10 +7142,10 @@ function draw(){
         ctx.fillRect(fx.x+ox, fx.y, 60, 90);
       } else if(fx.type==='skyline'){
         ctx.fillStyle='rgba(60,80,120,0.25)';
-        ctx.fillRect(ox, 40, 3*W, H-160);
+        ctx.fillRect(ox, 40, levelWidth(), H-160);
       } else if(fx.type==='boardCharts'){
         const offset = (camX*0.12)%200;
-        for(let x=-offset; x<3*W; x+=200){
+        for(let x=-offset; x<levelWidth(); x+=200){
           const panelX = x+ox+80;
           ctx.fillStyle='rgba(12,20,34,0.72)';
           ctx.fillRect(panelX-8, 78, 154, 186);
