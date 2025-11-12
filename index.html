@@ -199,6 +199,32 @@
   .minimap-cell span { font-size:10px; opacity:0.7; }
   .minimap-cell:hover { background:rgba(70,120,200,0.38); }
   .minimap-cell.active { background:rgba(120,255,200,0.35); color:#0b1120; font-weight:bold; }
+  .minimap-missions {
+    margin-top:16px;
+    border-top:1px solid rgba(140,200,255,0.25);
+    padding-top:12px;
+    display:grid;
+    gap:6px;
+  }
+  .minimap-missions h4 {
+    margin:0;
+    text-align:center;
+    letter-spacing:2px;
+    font-size:11px;
+    text-transform:uppercase;
+    color:rgba(220,235,255,0.78);
+  }
+  .minimap-cell.mission {
+    justify-content:center;
+  }
+  .minimap-cell.mission span:first-child {
+    font-weight:600;
+    font-size:11px;
+  }
+  .minimap-cell.mission span:last-child {
+    font-size:9px;
+    opacity:0.65;
+  }
   .minimap-overlay.hidden { display:none !important; }
 
   .deck-overlay { position:fixed; inset:0; background:rgba(6,8,18,0.82); display:flex; align-items:center; justify-content:center; z-index:65; }
