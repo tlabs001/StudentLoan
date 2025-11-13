@@ -214,10 +214,7 @@ export function renderLevel19Scene(levelData, player = {}, options = {}) {
     if (hit && (hit.type === 'executive' || hit.type === 'enemy')) {
       const controller = settings.executiveController;
       if (controller && typeof controller.handlePlayerShot === 'function') {
-        const eliminated = !!controller.handlePlayerShot(hit.id, damage);
-        if (eliminated) {
-          hit.eliminated = true;
-        }
+        controller.handlePlayerShot(hit.id, damage);
       }
     }
     return hit;
