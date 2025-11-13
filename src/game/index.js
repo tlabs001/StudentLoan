@@ -258,6 +258,8 @@ const DRONE_MISSION_CONFIG = {
   }
 };
 
+const ADVANCED_VENDING_FLOORS = new Set([2, 3, 7, 9, 13, 14, 15, 17, 28, 29, 31, 33, 34]);
+
 (()=>{
 // ===== Color utilities & palettes =====
 function clamp01(v){ return Math.min(1, Math.max(0, v)); }
@@ -1339,6 +1341,7 @@ const player = {
   damageMultiplier:1,
   hurtUntil:0,
   speedBoostUntil:0,
+  speedBoostAmount:0,
   screenFlashUntil:0,
   lawsuitSlowUntil:0,
   stealthGraceUntil:0,
@@ -1470,6 +1473,9 @@ let ambientInterval=null, ambientCurrent=null;
 let managerCheckFloor=null, managerDefeated=false;
 let minimapUnlocked=false, minimapVisible=false;
 let deckVisible=false;
+let vendingMenuVisible=false;
+let activeVendingMachine=null;
+let vendingMenuWasPaused=false;
 const unlockedDeckFloors = new Set();
 let floorBannerTimeout=null;
 const FEATHER_RESPAWN_DELAY_MS = 1500;
@@ -1593,6 +1599,12 @@ const deckBtn = document.getElementById('deckBtn');
 const deckOverlay = document.getElementById('deckOverlay');
 const deckGrid = document.getElementById('deckGrid');
 const deckProgress = document.getElementById('deckProgress');
+const vendingOverlay = document.getElementById('vendingOverlay');
+const vendingPanel = vendingOverlay ? vendingOverlay.querySelector('.vending-panel') : null;
+const vendingTitle = document.getElementById('vendingTitle');
+const vendingSubtitle = document.getElementById('vendingSubtitle');
+const vendingGrid = document.getElementById('vendingGrid');
+const vendingHint = document.getElementById('vendingHint');
 const floorBannerEl = document.getElementById('floorBanner');
 const floorBannerText = document.getElementById('floorBannerText');
 const minimapPanel = minimapOverlay ? minimapOverlay.querySelector('.minimap') : null;
@@ -2019,6 +2031,15 @@ if(minimapOverlay){
   if(inner){ inner.addEventListener('click', (event)=>event.stopPropagation()); }
 }
 
+if(vendingOverlay){
+  vendingOverlay.addEventListener('click', (event)=>{
+    if(event.target === vendingOverlay){ closeVendingMenu(); }
+  });
+}
+if(vendingPanel){
+  vendingPanel.addEventListener('click', (event)=>event.stopPropagation());
+}
+
 if(minimapTower){
   minimapTower.addEventListener('click', (event)=>{
     const cell = event.target.closest('.minimap-cell');
@@ -2132,6 +2153,299 @@ const qte = {
     return success >= required;
   }
 };
+
+function jitterPrice(base, variance=0){
+  const rounded = Math.round(base || 0);
+  if(!variance) return Math.max(1, rounded);
+  const delta = Math.round((Math.random()*2 - 1) * variance);
+  return Math.max(1, rounded + delta);
+}
+
+function createAdvancedVendingInventory(){
+  const items = [];
+  items.push({
+    id:'ammo',
+    name:'Ammo Pack',
+    description:'10 pistol rounds paid in health.',
+    cost:{ type:'checking', amount:jitterPrice(10, 2) },
+    sold:false
+  });
+  items.push({
+    id:'speed',
+    name:'Debt Sprint',
+    description:'25% speed boost for 45 seconds.',
+    cost:{ type:'debt', amount:jitterPrice(100000, 12000) },
+    sold:false
+  });
+  items.push({
+    id:'maxhp',
+    name:'Health Extension',
+    description:'Raise health cap to 300.',
+    cost:{ type:'debt', amount:jitterPrice(1000000, 60000) },
+    sold:false
+  });
+  items.push({
+    id:'launcher',
+    name:'Rocket Launcher',
+    description:'Trade printer jams for heavy firepower.',
+    cost:{ type:'jams', amount:10 },
+    sold:false
+  });
+  items.push({
+    id:'intel',
+    name:'Intel Swap',
+    description:'Convert files into intel.',
+    cost:{ type:'files', amount:2 },
+    sold:false
+  });
+  items.push({
+    id:'file',
+    name:'File Swap',
+    description:'Convert intel into files.',
+    cost:{ type:'intel', amount:2 },
+    sold:false
+  });
+  items.push({
+    id:'secret',
+    name:'Secret File',
+    description:'Exchange 5 files for a secret dossier.',
+    cost:{ type:'files', amount:5 },
+    sold:false
+  });
+  items.push({
+    id:'mystery',
+    name:'Mystery Capsule',
+    description:'Random corporate perk. No refunds.',
+    cost:{ type:'debt', amount:jitterPrice(75000, 15000) },
+    sold:false
+  });
+  items.push({
+    id:'leave',
+    name:'Step Away',
+    description:'Close the vending interface.',
+    type:'close',
+    sold:false
+  });
+  return items;
+}
+
+function createVendingMachine(x, y, w, h, floor){
+  const machine = { x, y, w, h, broken:false, floor, menu:null, depleted:false };
+  if(ADVANCED_VENDING_FLOORS.has(floor)){
+    machine.menu = { items: createAdvancedVendingInventory() };
+    machine.depleted = vendingMachineSoldOut(machine);
+  }
+  return machine;
+}
+
+function vendingMachineSoldOut(machine){
+  if(!machine || !machine.menu) return false;
+  return machine.menu.items.filter(item => item.type !== 'close').every(item => item.sold);
+}
+
+function formatVendingCost(cost){
+  if(!cost) return '';
+  if(cost.type === 'checking') return `${cost.amount} health`;
+  if(cost.type === 'debt') return `+$${fmtCurrency(cost.amount)} debt`;
+  if(cost.type === 'files') return `${cost.amount} files`;
+  if(cost.type === 'intel') return `${cost.amount} intel`;
+  if(cost.type === 'jams') return `${cost.amount} printer jams`;
+  return '';
+}
+
+function canAffordVending(cost){
+  if(!cost) return { ok:true };
+  switch(cost.type){
+    case 'checking':
+      return player.checking > cost.amount ? { ok:true } : { ok:false, message:'Not enough health to spend.' };
+    case 'debt': {
+      const projected = player.loanBalance + cost.amount;
+      const clamped = clampLoanBalance(projected);
+      return clamped === projected ? { ok:true } : { ok:false, message:'Debt ceiling reached.' };
+    }
+    case 'files':
+      return player.files >= cost.amount ? { ok:true } : { ok:false, message:'Need more files.' };
+    case 'intel':
+      return player.intel >= cost.amount ? { ok:true } : { ok:false, message:'Need more intel.' };
+    case 'jams':
+      return (player.printerJams || 0) >= cost.amount ? { ok:true } : { ok:false, message:'Insufficient printer jams.' };
+    default:
+      return { ok:false };
+  }
+}
+
+function applyVendingCost(cost){
+  if(!cost) return;
+  switch(cost.type){
+    case 'checking':
+      player.checking = Math.max(0, player.checking - cost.amount);
+      break;
+    case 'debt':
+      player.loanBalance = clampLoanBalance(player.loanBalance + cost.amount);
+      break;
+    case 'files':
+      player.files = Math.max(0, player.files - cost.amount);
+      break;
+    case 'intel':
+      player.intel = Math.max(0, player.intel - cost.amount);
+      break;
+    case 'jams':
+      player.printerJams = Math.max(0, (player.printerJams||0) - cost.amount);
+      break;
+  }
+}
+
+function handleVendingReward(item){
+  switch(item.id){
+    case 'ammo':
+      addAmmo(10);
+      centerNote('Ammo +10 (health spent)', 1500);
+      notify('Vending machine dispensed ammo.');
+      break;
+    case 'speed':
+      applySpeedBoost(0.25, 45000);
+      centerNote('Speed boost +25%', 1600);
+      notify('Debt-fueled sprint engaged.');
+      break;
+    case 'maxhp':
+      player.checkingMax = Math.max(player.checkingMax || CHECKING_MAX, 300);
+      player.hpMax = player.checkingMax;
+      player.checking = Math.min(player.checking, player.checkingMax);
+      centerNote('Health bar extended to 300.', 1700);
+      notify('Corporate insurance upgraded your health.');
+      break;
+    case 'launcher': {
+      const wasUnlocked = player.weaponsUnlocked && player.weaponsUnlocked.grenade;
+      unlockWeapon('grenade', 'Grenade launcher');
+      player.grenade.reserve = Math.min(player.grenade.maxReserve || GRENADE_RESERVE_MAX, (player.grenade.reserve||0) + 4);
+      centerNote(wasUnlocked ? 'Rocket ammo secured.' : 'Rocket launcher unlocked!', 1700);
+      notify('Rocket launcher stocked via vending machine.');
+      break;
+    }
+    case 'intel':
+      player.intel += 1;
+      evaluateWeaponUnlocks();
+      centerNote('Intel +1', 1500);
+      notify('Converted files into intel.');
+      break;
+    case 'file':
+      player.files += 1;
+      centerNote('Files +1', 1500);
+      notify('Converted intel into files.');
+      break;
+    case 'secret':
+      player.specialFiles = (player.specialFiles || 0) + 1;
+      updateSpecialFileUI();
+      centerNote('Secret file acquired!', 1600);
+      notify('Shadow dossier secured.');
+      break;
+    case 'mystery': {
+      const rewards = [
+        ()=>{ addAmmo(18); centerNote('Mystery reward: ammo cache', 1500); notify('Mystery capsule spilled ammo.'); },
+        ()=>{ addChecking(40); centerNote('Mystery reward: health +40', 1500); notify('Mystery capsule restored health.'); },
+        ()=>{ applyLoanPayment(5000); centerNote('Mystery reward: debt -$5,000', 1500); notify('Mystery capsule eased your loan.'); },
+        ()=>{ player.intel += 2; evaluateWeaponUnlocks(); centerNote('Mystery reward: intel +2', 1500); notify('Mystery capsule delivered intel.'); },
+        ()=>{ player.files += 3; centerNote('Mystery reward: files +3', 1500); notify('Mystery capsule supplied files.'); },
+        ()=>{ applySpeedBoost(0.18, 35000); centerNote('Mystery reward: speed rush', 1500); notify('Mystery capsule juiced your sprint.'); },
+        ()=>{ player.specialFiles = (player.specialFiles || 0) + 1; updateSpecialFileUI(); centerNote('Mystery reward: secret file', 1600); notify('Mystery capsule hid a secret file.'); }
+      ];
+      const pick = rewards[Math.floor(Math.random()*rewards.length)];
+      pick();
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function openVendingMenu(machine){
+  if(!machine || !machine.menu || !vendingOverlay) return;
+  activeVendingMachine = machine;
+  vendingMenuVisible = true;
+  vendingMenuWasPaused = pause;
+  pause = true;
+  vendingOverlay.classList.remove('hidden');
+  renderVendingMenu();
+}
+
+function closeVendingMenu(options={}){
+  if(!vendingMenuVisible) return;
+  vendingOverlay && vendingOverlay.classList.add('hidden');
+  vendingMenuVisible = false;
+  activeVendingMachine = null;
+  if(!options.keepPaused){
+    pause = vendingMenuWasPaused;
+    if(!pause && runActive){ canvas.focus(); }
+  }
+  vendingMenuWasPaused = false;
+}
+
+function renderVendingMenu(){
+  if(!vendingMenuVisible || !activeVendingMachine || !vendingGrid) return;
+  const machine = activeVendingMachine;
+  if(vendingTitle) vendingTitle.textContent = 'Executive Vending Machine';
+  const soldOut = vendingMachineSoldOut(machine);
+  if(vendingSubtitle){
+    vendingSubtitle.textContent = soldOut ? 'Sold out — corporate greed wins again.' : 'Select an upgrade. Purchases are final.';
+  }
+  vendingGrid.textContent = '';
+  for(const item of machine.menu.items){
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'vending-item';
+    if(item.sold) button.classList.add('sold');
+    const affordability = item.type === 'close' ? { ok:true } : canAffordVending(item.cost);
+    if(!item.sold && item.type !== 'close' && !affordability.ok){
+      button.classList.add('disabled');
+    }
+    const label = document.createElement('strong');
+    label.textContent = item.name;
+    button.appendChild(label);
+    if(item.description){
+      const desc = document.createElement('span');
+      desc.textContent = item.description;
+      button.appendChild(desc);
+    }
+    if(item.type !== 'close'){
+      const costEl = document.createElement('small');
+      costEl.textContent = item.sold ? 'Sold out' : formatVendingCost(item.cost);
+      button.appendChild(costEl);
+    }
+    button.addEventListener('click', ()=>attemptVendingPurchase(machine, item));
+    vendingGrid.appendChild(button);
+  }
+  if(vendingHint){
+    vendingHint.textContent = 'Press ESC to cancel';
+  }
+}
+
+function attemptVendingPurchase(machine, item){
+  if(!machine || !item) return;
+  if(item.type === 'close'){
+    closeVendingMenu();
+    return;
+  }
+  if(item.sold){
+    lockedBuzz();
+    notify('That item is already sold out.');
+    return;
+  }
+  const affordability = canAffordVending(item.cost);
+  if(!affordability.ok){
+    lockedBuzz();
+    if(affordability.message){
+      centerNote(affordability.message, 1400);
+    }
+    return;
+  }
+  applyVendingCost(item.cost);
+  handleVendingReward(item);
+  item.sold = true;
+  machine.depleted = vendingMachineSoldOut(machine);
+  chime();
+  updateHudCommon();
+  renderVendingMenu();
+}
 
 function hideFloorBanner(){
   if(!floorBannerEl) return;
@@ -2589,6 +2903,7 @@ function resetPlayerState(){
   player.damageMultiplier=1;
   player.hurtUntil=0;
   player.speedBoostUntil=0;
+  player.speedBoostAmount=0;
   player.hopeBuffUntil=0;
   player.screenFlashUntil=0;
   player.lawsuitSlowUntil=0;
@@ -3063,6 +3378,7 @@ function enterFloor(targetFloor, options={}){
   camX = 0;
   camY = 0;
   seenDoor = false;
+  closeVendingMenu({ keepPaused:true });
   player.x = initialSpawnX;
   player.y = 0;
   player.vx = 0;
@@ -3144,6 +3460,7 @@ function finishRun(outcome, { message=null, note=null }={}){
   toggleCodex(false);
   toggleMinimap(false);
   toggleDeck(false);
+  closeVendingMenu({ keepPaused:true });
   hideFloorBanner();
   outsideMode = false;
   outsideGuards.length = 0;
@@ -3393,6 +3710,22 @@ function addAmmo(n){
     }
   }
 }
+
+function applySpeedBoost(amount, durationMs){
+  if(!player) return;
+  const nowTs = now();
+  const duration = Math.max(0, durationMs || 0);
+  const targetAmount = Math.max(0, amount || 0);
+  const active = nowTs < player.speedBoostUntil;
+  const currentAmount = player.speedBoostAmount || 0;
+  const newUntil = nowTs + duration;
+  if(!active || targetAmount >= currentAmount){
+    player.speedBoostAmount = targetAmount;
+    player.speedBoostUntil = newUntil;
+  } else {
+    player.speedBoostUntil = Math.max(player.speedBoostUntil, newUntil);
+  }
+}
 function addFuel(n){
   if(!Number.isFinite(n) || n<=0) return;
   const stats = player.flame;
@@ -3454,11 +3787,18 @@ function damageWorker(worker, amount){
 // Input
 const keys={};
 let attackHeld=false;
-window.addEventListener('keydown', e=>{ 
+window.addEventListener('keydown', e=>{
   if(droneMissionState && handleDroneMissionKeyDown(e)) return;
   const k=e.key.toLowerCase();
   if(rooftopMissionState && handleRooftopKeyDown(k, e)) return;
   if(warzoneMissionState && handleWarzoneKeyDown(k, e)) return;
+  if(vendingMenuVisible){
+    if(k==='escape' || k===' '){
+      e.preventDefault();
+      closeVendingMenu();
+    }
+    return;
+  }
   if(activeHack){
     e.preventDefault();
     handleHackInput(k);
@@ -3520,6 +3860,12 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keyup', e=>{
   if(droneMissionState && handleDroneMissionKeyUp(e)) return;
   const k=e.key.toLowerCase();
+  if(vendingMenuVisible){
+    if(k==='escape' || k===' '){
+      e.preventDefault();
+    }
+    return;
+  }
   keys[k] = false;
   if(k==='e'){ attackHeld=false; }
 }, {passive:false});
@@ -4868,7 +5214,7 @@ function makeLevel(i){
   waterCoolers.push({x: 1.2*W, y: yBase-60, w:28,h:60});
 
   coffeeMachines.push({x:0.25*W, y:yBase-60, w:32, h:58, used:false});
-  vendingMachines.push({x:2.45*W, y:yBase-70, w:36, h:68, broken:false});
+  vendingMachines.push(createVendingMachine(2.45*W, yBase-70, 36, 68, i));
   printers.push({x:0.9*W, y:yBase-56, w:34, h:40, jammed:false});
   if(layerYs.length>0){
     printers.push({x:1.6*W, y:layerYs[0]-40, w:34, h:40, jammed:false});
@@ -6231,7 +6577,8 @@ function startDroneMissionLevel(floor){
     camera:{x:0,y:0},
     input:{left:false,right:false,up:false,down:false},
     missionText: config.drone && config.drone.missionText ? config.drone.missionText : '',
-    overlay:null
+    overlay:null,
+    transitioning:false
   };
   state.playerWeaponsDisabled = true;
   player.hacking = false;
@@ -6817,11 +7164,15 @@ function respawnDrone(mission){
 }
 
 function completeDroneMissionLevel(){
-  if(!droneMissionState) return;
+  const mission = droneMissionState;
+  if(!mission || mission.transitioning) return;
   const nextFloor = Math.min(FLOORS, currentFloor + 1);
-  droneMissionState = null;
+  mission.transitioning = true;
   state.playerWeaponsDisabled = false;
-  setTimeout(()=>enterFloor(nextFloor, {}), 600);
+  setTimeout(()=>{
+    droneMissionState = null;
+    enterFloor(nextFloor, {});
+  }, 600);
   updateHudCommon();
 }
 
@@ -8826,7 +9177,7 @@ function makeArcadeBeatdownLevel(floor, yBase){
   for(const px of plantSlots){ plants.push({x:px, y:yBase-32, w:28, h:32}); }
 
   waterCoolers.push({x:0.5*W, y:yBase-62, w:32, h:62});
-  vendingMachines.push({x:0.95*W, y:yBase-70, w:38, h:70, broken:false});
+  vendingMachines.push(createVendingMachine(0.95*W, yBase-70, 38, 70, floor));
   coffeeMachines.push({x:1.65*W, y:yBase-62, w:34, h:60, used:false});
   printers.push({x:2.0*W, y:yBase-56, w:36, h:44, jammed:false});
 
@@ -9351,7 +9702,7 @@ function makeBoardRoomLevel(floor, yBase){
   deskDrawers.push({x: tableX + tableWidth/2 - 24, y: tableTop - 32, w:48, h:18, used:false});
 
   coffeeMachines.push({x: tableX + 48, y: tableTop - 58, w:32, h:58, used:false});
-  vendingMachines.push({x: tableX + tableWidth - 84, y: tableTop - 68, w:36, h:68, broken:false});
+  vendingMachines.push(createVendingMachine(tableX + tableWidth - 84, tableTop - 68, 36, 68, floor));
 
   const serverCount = serverObjective ? 4 : 2;
   for(let s=0;s<serverCount;s++){
@@ -9748,7 +10099,7 @@ function interact(){
     for(const machine of coffeeMachines){
       if(machine && !machine.used && rect(p,{x:machine.x-8,y:machine.y-8,w:machine.w+16,h:machine.h+16})){
         machine.used=true;
-        player.speedBoostUntil = Math.max(player.speedBoostUntil, now()+20000);
+        applySpeedBoost(0.1, 20000);
         centerNote('Energy Boost +10% speed', 1600);
         notify('Coffee buzz active.');
         beep({freq:740});
@@ -9756,14 +10107,24 @@ function interact(){
     }
     // Vending machines
     for(const vend of vendingMachines){
-      if(vend && !vend.broken && rect(p,{x:vend.x-10,y:vend.y-10,w:vend.w+20,h:vend.h+20})){
-        vend.broken=true;
+      if(!vend) continue;
+      const bounds = { x: vend.x-12, y: vend.y-12, w: vend.w+24, h: vend.h+24 };
+      if(!rect(p, bounds)) continue;
+      if(vend.menu){
+        if(vend.depleted){
+          lockedBuzz();
+          centerNote('This vending machine is sold out.', 1400);
+        } else {
+          openVendingMenu(vend);
+        }
+      } else if(!vend.broken){
+        vend.broken = true;
         const roll = Math.random();
-        if(roll<0.45){
+        if(roll < 0.45){
           addAmmo(24);
           centerNote('Ammo drop +24', 1200);
           notify('Vending machine spilled ammo.');
-        } else if(roll<0.9){
+        } else if(roll < 0.9){
           const base = 50 + Math.floor(Math.random()*151);
           const amt = Math.round(base * (player.cashMultiplier||1));
           addChecking(amt);
@@ -9776,7 +10137,12 @@ function interact(){
           notify('Faulty vending machine drained funds.');
         }
         boom();
+        updateHudCommon();
+      } else {
+        lockedBuzz();
+        notify('Empty vending machine.');
       }
+      return;
     }
     // Printers
     for(const printer of printers){
@@ -10425,7 +10791,9 @@ function update(dt){
   if(keys['a']||keys['arrowleft']) { ax-=1; player.facing=-1; }
   if(keys['d']||keys['arrowright']) { ax+=1; player.facing= 1; }
   if(hacking){ ax=0; }
-  const boost = now()<player.speedBoostUntil ? 1.1 : 1;
+  const boostActive = now()<player.speedBoostUntil;
+  const boostValue = player.speedBoostAmount || 0;
+  const boost = boostActive ? 1 + boostValue : 1;
   const lawsuitSlow = now()<player.lawsuitSlowUntil ? 0.7 : 1;
   const hopeBoost = now()<player.hopeBuffUntil ? 1.1 : 1;
   const maxRun = RUN*(player.sprint?SPRINT:1)*(player.crouch?0.6:1)*boost*hopeBoost*lawsuitSlow;
@@ -12568,10 +12936,24 @@ function draw(){
       ctx.fillRect(machine.x+6+ox, machine.y+6, machine.w-12, machine.h-16);
     }
     for(const vend of vendingMachines){
-      ctx.fillStyle=vend.broken?'#3a3a3a':'#4c64aa';
+      if(!vend) continue;
+      const hasMenu = !!vend.menu;
+      const soldOut = hasMenu && (vend.depleted || vendingMachineSoldOut(vend));
+      let bodyColor = '#4c64aa';
+      if(hasMenu){
+        bodyColor = soldOut ? '#2f3f45' : '#3ea89a';
+      }
+      if(vend.broken && !hasMenu){
+        bodyColor = '#3a3a3a';
+      }
+      ctx.fillStyle = bodyColor;
       ctx.fillRect(vend.x+ox, vend.y, vend.w, vend.h);
-      ctx.fillStyle='rgba(255,255,255,0.25)';
+      ctx.fillStyle = hasMenu ? 'rgba(255,255,255,0.32)' : 'rgba(255,255,255,0.25)';
       ctx.fillRect(vend.x+4+ox, vend.y+8, vend.w-8, vend.h-24);
+      if(hasMenu && !soldOut){
+        ctx.fillStyle = 'rgba(60,255,200,0.25)';
+        ctx.fillRect(vend.x+6+ox, vend.y+10, vend.w-12, 6);
+      }
     }
     for(const printer of printers){
       ctx.fillStyle=printer.jammed?'#555':'#8a8a8a';
