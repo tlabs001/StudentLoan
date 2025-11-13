@@ -773,505 +773,186 @@ const MUSIC_TRACKS = {
       }
     ]
   }
+import { createLevel19 } from '../levels/level19.js';
+import { renderLevel19Scene } from '../levels/level19_render.js';
+
+const runtime = {
+  active: false,
+  finishing: false,
+  level: null,
+  renderer: null,
+  player: null,
+  rafId: 0,
+  lastFrame: 0,
+  runStats: null,
+  lastResult: null,
+  disposables: [],
+  timers: [],
+  pointerHint: null
 };
 
-const musicState = { current:null, stopFns:[] };
+let stylesInjected = false;
 
-function stopMusic(){
-  if(musicState.stopFns){
-    for(const stop of musicState.stopFns){
-      try{ if(typeof stop==='function') stop(); }catch(e){}
-    }
+function ensureCanvas() {
+  const canvas = document.getElementById('game');
+  if (!canvas) {
+    throw new Error('LoanTower: unable to locate <canvas id="game"> element.');
   }
-  musicState.stopFns = [];
-  musicState.current = null;
+  return canvas;
 }
 
-function startVoiceLoop(ctx, voice, tempo){
-  const sequence = voice && voice.sequence;
-  if(!sequence || !sequence.length) return null;
-  let cancelled=false;
-  const activeNodes = new Set();
-  const secsPerBeat = 60 / (voice.tempo || tempo || 120);
-  let step=0;
-  let timerId=null;
+function ensureHudStyles() {
+  if (stylesInjected) return;
+  const style = document.createElement('style');
+  style.textContent = `
+    .pointer-hint {
+      position: fixed;
+      left: 50%;
+      bottom: 8%;
+      transform: translateX(-50%);
+      padding: 0.75rem 1.25rem;
+      background: rgba(12, 16, 28, 0.72);
+      border: 1px solid rgba(180, 220, 255, 0.35);
+      border-radius: 12px;
+      font: 0.85rem 'JetBrains Mono', monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #f6faff;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 180ms ease;
+      z-index: 80;
+    }
+    .run-end-banner {
+      position: fixed;
+      top: 18%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 1rem 1.6rem;
+      background: rgba(14, 18, 30, 0.9);
+      border: 1px solid rgba(210, 180, 255, 0.45);
+      border-radius: 16px;
+      font: 1rem 'Press Start 2P', monospace;
+      letter-spacing: 0.1em;
+      text-align: center;
+      color: #f5edff;
+      z-index: 85;
+      opacity: 1;
+      transition: opacity 320ms ease-out;
+    }
+  `;
+  document.head.appendChild(style);
+  stylesInjected = true;
+}
 
-  const scheduleNext = ()=>{
-    if(cancelled) return;
-    const stepData = sequence[step % sequence.length];
-    step++;
-    const beats = stepData && Number.isFinite(stepData.beats) ? Math.max(0.125, stepData.beats) : 1;
-    const duration = Math.max(0.05, beats * secsPerBeat);
-    if(stepData && !stepData.rest){
-      const freq = stepData.freq || noteToFrequency(stepData.note);
-      if(freq > 0){
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const wave = stepData.wave || voice.wave || 'square';
-        const gainValue = Math.max(0.0001, stepData.gain ?? voice.gain ?? 0.1);
-        const attack = Math.max(0.002, stepData.attack ?? voice.attack ?? 0.01);
-        const release = Math.max(0.02, stepData.release ?? voice.release ?? Math.min(0.3, duration*0.6));
-        const startTime = ctx.currentTime + (stepData.offset ?? voice.offset ?? 0.02);
-        osc.type = wave;
-        try{ osc.frequency.setValueAtTime(freq, startTime); }catch(e){ osc.frequency.value = freq; }
-        if(Number.isFinite(stepData.detune)){ osc.detune.setValueAtTime(stepData.detune, startTime); }
-        gain.gain.setValueAtTime(0.0001, startTime);
-        gain.gain.exponentialRampToValueAtTime(gainValue, startTime + attack);
-        gain.gain.setTargetAtTime(0.0001, startTime + duration - release, release);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        const node = { osc, gain };
-        activeNodes.add(node);
-        osc.onended = ()=>{
-          try{ gain.disconnect(); }catch(e){}
-          activeNodes.delete(node);
-        };
-        try{ osc.start(startTime); }catch(e){ osc.start(); }
-        try{ osc.stop(startTime + duration + release + 0.05); }catch(e){ osc.stop(ctx.currentTime + duration + release + 0.05); }
+function hideLegacyHud() {
+  const hud = document.querySelector('.hudBox');
+  if (hud) {
+    hud.style.display = 'none';
+  }
+  const center = document.querySelector('.center');
+  if (center) {
+    center.style.display = 'none';
+  }
+}
+
+function trackDisposable(dispose) {
+  if (typeof dispose === 'function') {
+    runtime.disposables.push(dispose);
+  }
+}
+
+function addEvent(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  trackDisposable(() => target.removeEventListener(type, handler, options));
+}
+
+function addTimer(fn, delay) {
+  const id = window.setTimeout(fn, delay);
+  runtime.timers.push(id);
+  return id;
+}
+
+function clearTimers() {
+  for (const id of runtime.timers) {
+    window.clearTimeout(id);
+  }
+  runtime.timers.length = 0;
+}
+
+function createPlayer(name) {
+  const playerName = name && name.trim() ? name.trim() : 'Runner';
+  const player = {
+    name: playerName,
+    health: 100,
+    maxHealth: 100,
+    loanBalance: 120000,
+    debt: 120000,
+    hasElevatorKey: false,
+    position: { x: 0, y: 0, z: 0 },
+    viewDirection: { x: 0, y: -1, z: 0 },
+    applyDamage(amount) {
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      this.health = Math.max(0, this.health - amount);
+      if (this.health === 0) {
+        handlePlayerDefeated();
       }
-    }
-    timerId = setTimeout(scheduleNext, duration * 1000);
-  };
-
-  scheduleNext();
-
-  return ()=>{
-    cancelled=true;
-    if(timerId) clearTimeout(timerId);
-    for(const node of activeNodes){
-      try{ node.osc.stop(); }catch(e){}
-      try{ node.gain.disconnect(); }catch(e){}
-    }
-    activeNodes.clear();
-  };
-}
-
-async function startMusic(type){
-  if(musicState.current === type) return;
-  stopMusic();
-  if(!type) return;
-  const track = MUSIC_TRACKS[type];
-  if(!track) return;
-  try{
-    const ctx = getAC();
-    if(ctx.state === 'suspended' && ctx.resume){
-      try{ await ctx.resume(); }catch(e){}
-    }
-    const tempo = track.tempo || 120;
-    const stops=[];
-    for(const voice of track.voices || []){
-      const stop = startVoiceLoop(ctx, voice, tempo);
-      if(stop) stops.push(stop);
-    }
-    musicState.stopFns = stops;
-    musicState.current = type;
-  }catch(e){
-    musicState.stopFns = [];
-    musicState.current = null;
-  }
-}
-
-function stopAmbientLoop(){
-  if(ambientInterval){
-    clearInterval(ambientInterval);
-    ambientInterval=null;
-  }
-}
-
-function setAmbient(type){
-  if(ambientCurrent===type) return;
-  ambientCurrent=type;
-  stopAmbientLoop();
-  if(!type) return;
-  const invoke = ()=>{
-    if(type==='printer'){
-      motor({startFreq:240,endFreq:160,dur:0.9,gain:0.04});
-    } else if(type==='server'){
-      motor({startFreq:150,endFreq:110,dur:1.4,gain:0.05});
-    } else if(type==='wind'){
-      beep({freq:220,dur:0.3,type:'triangle',gain:0.03});
+    },
+    addDebt(amount) {
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      this.debt = (this.debt ?? this.loanBalance ?? 0) + amount;
+      this.loanBalance = this.debt;
     }
   };
-  invoke();
-  ambientInterval = setInterval(invoke, type==='server'?1800:type==='printer'?1600:1400);
+  return player;
 }
 
-function setAmbientForFloor(floor){
-  if(floor<=12){
-    setAmbient('printer');
-  } else if(floor<=24){
-    setAmbient('server');
-  } else {
-    setAmbient('wind');
-  }
-}
-function chime(){ beep({freq:740,dur:0.08}); setTimeout(()=>beep({freq:1100,dur:0.1}),70); }
-function lockedBuzz(){ motor({startFreq:160,endFreq:80,dur:0.2,gain:0.06}); }
-function doorOpenSFX(){ motor({startFreq:220,endFreq:90,dur:0.8,gain:0.08}); }
-function boom(){ motor({startFreq:80,endFreq:40,dur:0.4,gain:0.12}); }
-
-// ===== Board & CEO Codex =====
-const PROFILE_DECK = [
-  {
-    floor: 4,  card:'Ace of Spades',  name:'Marla Quill',  title:'The Auditor',
-    bio:'The tower’s numbers whisper her name; she can balance any debt ledger blindfolded. Beneath the calm veneer lies a black-suit reaper of accounts.',
-    power:'Ledger Shield – Reflects bullets for 2 s / 6 s cooldown.',
-    specials:['Tax Sweep (coin fan – $5 drain)','Overdraft Pop (grenade detonation)'],
-    hp:69, portrait:'portraits/ace_spades.png',
-    debtEffects:[
-      { id:'HI',  radius:483, desc:'High Interest – The compounding monster. Your balance drains $1 per second; when you’re broke it starts eating your health instead.' },
-      { id:'CAP', radius:483, desc:'Interest Capitalization – Interest grows the longer you linger. Each few seconds in range increases how fast High Interest drains your money.' },
-      { id:'MIN', radius:414, desc:'Minimum Payment – You can only afford the bare minimum—fire rate slowed 20%.' }
-    ]
-  },
-  {
-    floor: 8,  card:'King of Clubs',  name:'Gideon Pike', title:'The Enforcer',
-    bio:'A muscle in a suit. He treats risk like a contact sport.',
-    power:'Credit Snare – Slow 40%.',
-    specials:['Charge-Off Volley (3×10 dmg)','Margin Call (knockback)'],
-    hp:81, portrait:'portraits/king_clubs.png',
-    debtEffects:[
-      { id:'WG', radius:437, desc:'Wage Garnish – Every hit costs an extra $5 from your account.' },
-      { id:'RS', radius:368, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' }
-    ]
-  },
-  {
-    floor:12,  card:'Queen of Diamonds', name:'Selene Hart', title:'The Litigator',
-    bio:'Glamorous and deadly, she signs settlements in blood-red ink. Her diamonds sparkle like legal daggers.',
-    power:'Injunction Beam – 0.9 s stun (cancels Feather).',
-    specials:['Discovery Drones (8 dmg)'],
-    hp:92, portrait:'portraits/queen_diamonds.png',
-    debtEffects:[
-      { id:'HOLD', radius:414, desc:'Loan Servicer Hold – “Your call is very important to us…” Inputs stutter randomly for a moment.' },
-      { id:'FP',   radius:391, desc:'Fine Print – Legalese catches you—grenade and saber specials disabled while in range.' }
-    ]
-  },
-  {
-    floor:16,  card:'Jack of Hearts', name:'Orson Vale', title:'The Engineer',
-    bio:'Blue-collar romantic of corporate machinery. Fixes everything but his own conscience.',
-    power:'Vacuum Dash – Invuln dash + suction wake.',
-    specials:['Tool Rain (10 dmg)','Conveyor Shift (reversed friction)'],
-    hp:104, portrait:'portraits/jack_hearts.png',
-    debtEffects:[
-      { id:'RS',  radius:368, desc:'Repayment Shock – A wave pulses from the floor, dealing 10 damage and sliding you.' },
-      { id:'MIN', radius:414, desc:'Minimum Payment – Fire rate reduced by 20% while in range.' }
-    ]
-  },
-  {
-    floor:20,  card:'Ten of Spades', name:'Dara Flint', title:'The Marketer',
-    bio:'Sells despair as self-care; debt as destiny. Every campaign ends with a signature and a smile.',
-    power:'Hype Mirage – 2 clones.',
-    specials:['Viral Spray (8×10 dmg)','Rebrand Flash (hue hide)'],
-    hp:115, portrait:'portraits/ten_spades.png',
-    debtEffects:[
-      { id:'REPR', radius:437, desc:'Reprice – Random penalties like Minimum Payment or Wage Garnish flicker on for short bursts.' },
-      { id:'DP',   radius:414, desc:'Delinquency Ping – Floating debt notices home in; contact drains $3 (or 1 HP if broke).' }
-    ]
-  },
-  {
-    floor:24,  card:'Nine of Clubs', name:'Ilya Crown', title:'The Coder',
-    bio:'Wrote the algorithm that predicts failure before it happens. Now she’s debugging the world.',
-    power:'Firewall Dome – Halves incoming bullet speed.',
-    specials:['Packet Lance (15 dmg)','Patch Cycle (heal 5 hp/5 s)'],
-    hp:127, portrait:'portraits/nine_clubs.png',
-    debtEffects:[
-      { id:'HI',    radius:460, desc:'High Interest – Your balance drains $1 per second; when broke it drains health instead.' },
-      { id:'CLAMP', radius:414, desc:'Credit Clamp – Critical hits halved and weapon spread widened by 10%.' }
-    ]
-  },
-  {
-    floor:28,  card:'Eight of Diamonds', name:'Rhea Stone', title:'The HR Gardener',
-    bio:'Cuts personnel like topiary; calls it “creative pruning.”',
-    power:'Severance Wave – Ground shock 10 dmg.',
-    specials:['Exit Interview (tether 1 s)','Paperstorm (20×5 dmg)'],
-    hp:132, portrait:'portraits/eight_diamonds.png',
-    debtEffects:[
-      { id:'COLL', radius:483, desc:'Collections Call – Spotlights detect you twice as fast; on full alert, more guards spawn and the elevator relocks briefly.' },
-      { id:'HOLD', radius:414, desc:'Loan Servicer Hold – Inputs stutter briefly at intervals.' }
-    ]
-  },
-  {
-    floor:32,  card:'Seven of Hearts', name:'Victor Kade', title:'The Strategist',
-    bio:'Loves games with other people’s lives as chips. Plays every floor like poker night.',
-    power:'Arb Slide – Rail dash + rapid fire.',
-    specials:['Hedge Ring (orbit bullets)','Golden Parachute (heal 20 once @ 50% HP)'],
-    hp:138, portrait:'portraits/seven_hearts.png',
-    debtEffects:[
-      { id:'WG',  radius:437, desc:'Wage Garnish – Each hit takes an extra $5.' },
-      { id:'MIN', radius:414, desc:'Minimum Payment – Fire rate −20% while nearby.' },
-      { id:'REPR',radius:437, desc:'Reprice – Randomly imposes Minimum Payment or Wage Garnish for short durations.' }
-    ]
-  }
-];
-
-const CEO_PROFILE = {
-  floor:36, card:'Ace of Aces', name:'Helena Voss', title:'The CEO',
-  bio:'The architect of the tower; believes gravity should accrue interest.',
-  power:'Capital Storm – Cluster fire: inner 10 dmg / outer 20 dmg.',
-  specials:['Buyback Shield (absorb 30 → 10×10 blast)','Hostile Takeover (3 board powers for 8 s)','Final Phase (ninja summons, faster patterns)'],
-  hp:253, portrait:'portraits/ace_aces.png',
-  debtEffects:[
-    { id:'HI',   radius:552, desc:'High Interest – Drains $1 per second; if broke, drains health instead.' },
-    { id:'CAP',  radius:552, desc:'Interest Capitalization – Staying close ramps the High Interest drain faster over time.' },
-    { id:'COLL', radius:529, desc:'Collections Call – Detection accelerates, extra guards spawn, and the elevator relocks briefly.' },
-    { id:'WG',   radius:483, desc:'Wage Garnish – Every hit costs an extra $5.' }
-  ]
-};
-
-const PLAYER_PROFILE = {
-  card:'Field Dossier',
-  name:'Tower Operative',
-  title:'Infiltration Specialist',
-  bio:'Student debtor turned saboteur. Every sprint is paid for with borrowed time, restless nights, and a stubborn refusal to default.',
-  power:'Multi-Tool Loadout – Swap between pistol, flamethrower, and baton to answer any threat.',
-  hp:'Checking balance (functions as health)',
-  specials:[
-    'Sidearm: 9-round magazine, 10 damage per shot.',
-    'Flamethrower: Cone stream with ember ticks that deal 6 damage.',
-    'Shock Baton: 20 damage melee arc that pairs with stomp knockdowns.',
-    'Feather Harness: Grants midair flaps when recovered from special pickups.'
-  ],
-  debtEffects:[
-    { id:'CHK', desc:'Checking drains when hurt; at $0 the run immediately fails.' },
-    { id:'SAV', desc:'Savings record your success and vanish at midnight if the tower stands.' }
-  ],
-  effectsLabel:'Field Notes'
-};
-
-const GUARD_PROFILES = [
-  {
-    card:'Guard: Pistol',
-    name:'Security Officer',
-    title:'Baseline Patrol',
-    bio:'Standard corporate security assigned to roam the open-plan floors. Predictable routes, but relentless once they radio an alarm.',
-    power:'Service Pistol – Fires 10 damage rounds roughly every 0.7 s once you cross their cone.',
-    hp:20,
-    specials:[
-      'Detection Cone: raises the floor alarm and flags reinforcements.',
-      'Contact Hit: 10 damage on collision if you stay grounded.'
-    ],
-    debtEffects:[
-      { id:'ALERT', desc:'Feeds the Collections alert meter when line-of-sight is maintained.' }
-    ],
-    effectsLabel:'Intel'
-  },
-  {
-    card:'Guard: Auto',
-    name:'Suppressor',
-    title:'Auto Rifle Specialist',
-    bio:'Carries a modified carbine and sweeps hallways with suppressing fire to pin debtors in place.',
-    power:'Auto Carbine – Streams bursts of bullets with slight spread when locked in.',
-    hp:20,
-    specials:[
-      'Burst Fire: sustained volleys chew through broken cover.',
-      'Alarm Booster: escalates reinforcement chances while alarms are active.'
-    ],
-    debtEffects:[
-      { id:'SUP', desc:'Suppressive bursts push you out of cover and punish long standoffs.' }
-    ],
-    effectsLabel:'Intel'
-  },
-  {
-    card:'Guard: Ninja',
-    name:'Shadow Contractor',
-    title:'Close Quarters',
-    bio:'Black-suited specialists hired for silent takedowns. No firearms—only ruthless momentum.',
-    power:'Shadow Dash – Closes gaps quickly, then slashes for heavy damage.',
-    hp:30,
-    specials:[
-      'Acrobatic Pursuit: leaps between platforms without ladders.',
-      'Blade Rush: combos stack 10 damage strikes if you stay on the floor.'
-    ],
-    debtEffects:[
-      { id:'MELEE', desc:'Forces you airborne—staying grounded lets them chain contact damage.' }
-    ],
-    effectsLabel:'Intel'
-  },
-  {
-    card:'Guard: Launcher',
-    name:'Siege Specialist',
-    title:'Explosive Ordnance',
-    bio:'Lugs a slow-moving launcher that watches vault doors and server wings.',
-    power:'Grenade Launcher – Fires rockets every 1.4 s that explode in a 60 px blast.',
-    hp:40,
-    specials:[
-      'Splash Damage: rockets detonate even when they miss directly.',
-      'Knockback: blasts shove you from ladders or ledges toward patrol routes.'
-    ],
-    debtEffects:[
-      { id:'BLAST', desc:'Treat every rocket as 10 damage plus knockback even through partial cover.' }
-    ],
-    effectsLabel:'Intel'
-  }
-];
-
-const VENT_BOSS_PROFILES = [
-  {
-    card:'Vault Boss: Auto',
-    name:'Vault Enforcer',
-    title:'Sub-Level Sentry',
-    bio:'Guarding the server vault vents with belt-fed rifles and corporate zeal.',
-    power:'Cycling Auto Turret – Marches forward while spraying suppressive fire.',
-    hp:30,
-    specials:[
-      'Bullet Storm: repeated volleys saturate the cramped vent corridors.',
-      'Support Calls: pairs with pistol guards who reinforce the vault.'
-    ],
-    debtEffects:[
-      { id:'VENT', desc:'Defeating them opens safer routes through the vault network.' }
-    ],
-    effectsLabel:'Intel'
-  },
-  {
-    card:'Vault Boss: Launcher',
-    name:'Vault Artillery',
-    title:'Explosive Overseer',
-    bio:'Heavier ordnance reserved for sub-level breaches in the finance wing.',
-    power:'Cluster Launcher – Arcing rockets with punishing splash damage.',
-    hp:40,
-    specials:[
-      'Arcing Rockets: shots bounce around cover and explode on impact.',
-      'Area Denial: blast radius makes safe footing scarce in the vents.'
-    ],
-    debtEffects:[
-      { id:'BLAST', desc:'Staying mobile mid-air is the safest way to survive the blast radius.' }
-    ],
-    effectsLabel:'Intel'
-  }
-];
-
-const CODEX_SECTIONS = [
-  { title:'Main Player', entries:[PLAYER_PROFILE] },
-  { title:'Tower Guards', entries:GUARD_PROFILES },
-  { title:'Vent Bosses', entries:VENT_BOSS_PROFILES },
-  { title:'Board Members', entries:PROFILE_DECK },
-  { title:'CEO', entries:[CEO_PROFILE] }
-];
-
-const BOARD_DECK_PROFILES = [...PROFILE_DECK, CEO_PROFILE].sort((a,b)=>{
-  const af = Number.isFinite(a.floor) ? a.floor : 0;
-  const bf = Number.isFinite(b.floor) ? b.floor : 0;
-  return af - bf;
-});
-const BOARD_DECK_MAP = new Map(BOARD_DECK_PROFILES.map(profile => [profile.floor, profile]));
-
-const deckPortraitCache = new Map();
-
-function hashSeed(str){
-  let h = 2166136261 >>> 0;
-  for(let i=0;i<str.length;i++){
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+function handlePlayerDefeated() {
+  if (!runtime.active || runtime.finishing) return;
+  runtime.runStats.deaths = (runtime.runStats.deaths || 0) + 1;
+  endRun('death', 'You were consumed by the executives.');
 }
 
-function makeSeededRandom(seedStr){
-  let state = hashSeed(seedStr || 'deck');
-  return function(){
-    state = (state + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(state ^ state >>> 15, 1 | state);
-    t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
-    t ^= t >>> 14;
-    return (t >>> 0) / 4294967296;
-  };
+function updatePointerHint() {
+  if (!runtime.pointerHint) return;
+  const canvas = document.pointerLockElement;
+  const locked = canvas === ensureCanvas();
+  runtime.pointerHint.style.opacity = locked ? '0' : '1';
 }
 
-function generateDeckPortrait(profile){
-  const key = `${profile && (profile.card || profile.name || profile.floor) || 'board'}`;
-  if(deckPortraitCache.has(key)) return deckPortraitCache.get(key);
-  const size = 32;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const rand = makeSeededRandom(key);
-  const palette = ['#0a1122','#192745','#2d4170','#4f6fa8','#7ea7ff','#f0f5ff'];
-  const half = Math.ceil(size / 2);
-  for(let y=0; y<size; y++){
-    for(let x=0; x<half; x++){
-      const color = palette[Math.floor(rand()*palette.length)];
-      ctx.fillStyle = color;
-      ctx.fillRect(x, y, 1, 1);
-      ctx.fillRect(size - 1 - x, y, 1, 1);
-    }
+function removePointerHint() {
+  if (runtime.pointerHint && runtime.pointerHint.parentNode) {
+    runtime.pointerHint.parentNode.removeChild(runtime.pointerHint);
   }
-  const eyeY = 10 + Math.floor(rand()*6);
-  const eyeX = 9 + Math.floor(rand()*5);
-  ctx.fillStyle = '#f8fbff';
-  ctx.fillRect(eyeX, eyeY, 2, 2);
-  ctx.fillRect(size - eyeX - 2, eyeY, 2, 2);
-  const browY = Math.max(eyeY - 3, 2);
-  ctx.fillStyle = '#1c2236';
-  ctx.fillRect(eyeX - 1, browY, 4, 1);
-  ctx.fillRect(size - eyeX - 3, browY, 4, 1);
-  const accentY = 14 + Math.floor(rand()*4);
-  ctx.fillStyle = '#253356';
-  ctx.fillRect(eyeX - 2, accentY, 4, 2);
-  ctx.fillRect(size - eyeX - 2, accentY, 4, 2);
-  const mouthY = 20 + Math.floor(rand()*4);
-  const mouthWidth = 6 + Math.floor(rand()*3);
-  ctx.fillStyle = '#ff8fb3';
-  ctx.fillRect(Math.floor(size/2 - mouthWidth/2), mouthY, mouthWidth, 2);
-  const collarY = 24 + Math.floor(rand()*4);
-  ctx.fillStyle = '#1d2842';
-  ctx.fillRect(size/2 - 6, collarY, 12, size - collarY);
-  ctx.fillStyle = '#2a3b66';
-  ctx.fillRect(size/2 - 2, collarY, 4, size - collarY);
-  const dataUrl = canvas.toDataURL();
-  deckPortraitCache.set(key, dataUrl);
-  return dataUrl;
+  runtime.pointerHint = null;
 }
 
-const EFFECTS = {
-  NJ:   { name:'Night Job',            color:'#5F66FF', icon:'NJ', kind:'pulse',   tick_ms:6000, params:{sleep_ms:1000} },
-  SJ:   { name:'Second Job',           color:'#8A9FBF', icon:'SJ', kind:'continuous', params:{move_mult:0.75, jump_mult:0.80} },
-  HI:   { name:'High Interest',        color:'#B455FF', icon:'HI', kind:'drain',   tick_ms:250,  params:{dollars_per_sec:10.0} },
-  WG:   { name:'Wage Garnish',         color:'#FF7A7A', icon:'WG', kind:'on_hit',  params:{extra_dollars:5} },
-  COLL: { name:'Collections',          color:'#FFB84D', icon:'C',  kind:'alert',   tick_ms:300,  params:{mult:2.0, spawn_cd_ms:12000, lock_ms:5000} },
-  FF:   { name:'Forbearance Freeze',   color:'#77E3FF', icon:'F',  kind:'feather', params:{block:true, accel_mult:2.0} },
-  MIN:  { name:'Minimum Payment',      color:'#F7D154', icon:'M',  kind:'rate',    params:{firerate_mult:0.80} },
-  HOLD: { name:'Loan Servicer Hold',   color:'#999999', icon:'H',  kind:'pulse',   tick_ms:7000, params:{stutter_ms:300} },
-  CAP:  { name:'Interest Capitalization', color:'#A65CFF', icon:'CAP', kind:'stack', tick_ms:1000, params:{add_per_5s:0.2, max_add:1.0, decay_per_s:0.4} },
-  FP:   { name:'Fine Print',           color:'#E53935', icon:'FP', kind:'lockout', params:{disable:['grenade','saber_special']} },
-  RS:   { name:'Repayment Shock',      color:'#E59E5E', icon:'RS', kind:'shock',   tick_ms:4000, params:{dmg:10, radius:180, slide:0.8} },
-  CLAMP:{ name:'Credit Clamp',         color:'#80CBC4', icon:'CL', kind:'aim',     params:{crit_mult:0.5, spread_add:0.10} },
-  REPR: { name:'Reprice',              color:'#FFD1E0', icon:'R',  kind:'toggle',  tick_ms:10000, params:{pool:['MIN','WG'], dur_ms:5000} },
-  DP:   { name:'Delinquency Ping',     color:'#C0F',    icon:'DP', kind:'minion',  tick_ms:5000, params:{loss:3, hp_fallback:1, speed:120} }
-};
+function createPointerHint() {
+  ensureHudStyles();
+  removePointerHint();
+  const hint = document.createElement('div');
+  hint.className = 'pointer-hint';
+  hint.textContent = 'Click to focus • WASD move • Mouse look • E interact • Click shoot';
+  document.body.appendChild(hint);
+  runtime.pointerHint = hint;
+  updatePointerHint();
+}
 
-const BOSS_AURAS = {
-  4:  [{id:'HI',radius:483},{id:'CAP',radius:483},{id:'MIN',radius:414}],
-  8:  [{id:'WG',radius:437},{id:'RS',radius:368}],
-  12: [{id:'HOLD',radius:414},{id:'FP',radius:391}],
-  16: [{id:'RS',radius:368},{id:'MIN',radius:414}],
-  20: [{id:'REPR',radius:437},{id:'DP',radius:414}],
-  24: [{id:'HI',radius:460},{id:'CLAMP',radius:414}],
-  28: [{id:'COLL',radius:483},{id:'HOLD',radius:414}],
-  32: [{id:'WG',radius:437},{id:'MIN',radius:414},{id:'REPR',radius:437}],
-  36: [{id:'HI',radius:552},{id:'CAP',radius:552},{id:'COLL',radius:529},{id:'WG',radius:483}]
-};
-
-// ===== Input fixes =====
-const block = new Set([' ', 'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','PageUp','PageDown']);
-window.addEventListener('keydown',(e)=>{ if(block.has(e.key) || block.has(e.code)) e.preventDefault(); },{passive:false});
-const canvas=document.getElementById('game'); const ctx=canvas.getContext('2d'); canvas.focus();
-window.addEventListener('click', ()=>{ canvas.focus(); getAC(); });
-function updateCanvasAimFromEvent(event){
-  if(!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = rect.width ? canvas.width / rect.width : 1;
-  const scaleY = rect.height ? canvas.height / rect.height : 1;
-  const x = (event.clientX - rect.left) * scaleX;
-  const y = (event.clientY - rect.top) * scaleY;
-  if(outsideMode){
-    outsideAim.x = Math.max(0, Math.min(W, x));
-    outsideAim.y = Math.max(0, Math.min(H, y));
-  } else if(arcadeRampage && arcadeRampage.active){
-    clampArcadeAim(x, y);
-  } else if(warzoneMissionState && warzoneMissionState.phase==='gun'){
-    warzoneMissionState.aimX = clamp(x / W, 0, 1);
-  }
+function showEndBanner(message, duration = 2600) {
+  if (!message) return;
+  ensureHudStyles();
+  const banner = document.createElement('div');
+  banner.className = 'run-end-banner';
+  banner.textContent = message;
+  document.body.appendChild(banner);
+  addTimer(() => {
+    banner.style.opacity = '0';
+    addTimer(() => {
+      if (banner.parentNode) {
+        banner.parentNode.removeChild(banner);
+      }
+    }, 420);
+  }, duration);
 }
 canvas.addEventListener('mousemove', updateCanvasAimFromEvent);
 canvas.addEventListener('mousedown', updateCanvasAimFromEvent);
@@ -1765,570 +1446,130 @@ let droneMissionState = null;
 let rooftopMissionState = null;
 let warzoneMissionState = null;
 
-// Time helpers (driven by GAME_PARAMS.timing)
-let startClock = 0;
-function timeLeftMs(){
-  if(!runActive || !startClock) return TOTAL_TIME_MS;
-  return Math.max(0, TOTAL_TIME_MS - (performance.now() - startClock));
-}
-function fmtClock(ms){
-  const clamped = Math.max(0, Math.min(TOTAL_TIME_MS, ms));
-  const frac = 1 - (clamped / TOTAL_TIME_MS);
-  const minutesFromStart = Math.floor(frac * RUN_DURATION_HOURS * 60);
-  let hour = RUN_START_HOUR + Math.floor(minutesFromStart/60);
-  let mins = minutesFromStart % 60;
-  while (hour >= 24) hour -= 24;
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  let dispH = hour % 12; if (dispH === 0) dispH = 12;
-  return `${dispH}:${mins.toString().padStart(2,'0')} ${ampm}`;
-}
-
-// Level arrays
-let walls=[], floorSlab=null, windowsArr=[], ladders=[], vents=[], servers=[], panels=[], cameras=[], guards=[], desks=[], plants=[], waterCoolers=[], spotlights=[], door=null, pickups=[], movingPlatforms=[], workers=[], arcadeStations=[];
-let coffeeMachines=[], vendingMachines=[], printers=[], serverTerminals=[], deskDrawers=[], hazards=[], stealthZones=[], backgroundFX=[], floatingPapers=[], billboardScreens=[], boardTables=[], merchants=[], sprinklers=[], boardMembers=[];
-let destroyedOnFloor=0, totalServersOnFloor=0;
-let alarm=false, alarmUntil=0;
-let inSub=false; // vent sub-level
-let sub = null;
-let entryVentWorld = null;
-let lightingCondition='normal', lightingPulse=0, lightingPhase=0;
-let floorTheme=null, boardRoomActive=false, ninjaRound=false, serverObjective=false, inflationActive=false, bonusFloorActive=false;
-let boardMemberDefeated=false;
-let arcadeBeatdownActive=false, arcadePixelOverlay=false, arcadeRampage=null;
-let arcadeAim={x:W/2,y:H*0.55};
-let evacuationActive=false, evacuationUntil=0, powerSurgeUntil=0, sprinklersActiveUntil=0;
-let spotlightDetection=0, elevatorLockedUntil=0;
-let interestDrainTimer=0;
-let scheduledBonusFloor=null;
-let blackMarketOffer=null;
-let activeHack=null;
-let ambientInterval=null, ambientCurrent=null;
-let managerCheckFloor=null, managerDefeated=false;
-let minimapUnlocked=false, minimapVisible=false;
-let deckVisible=false;
-const unlockedDeckFloors = new Set();
-let floorBannerTimeout=null;
-const FEATHER_RESPAWN_DELAY_MS = 1500;
-let featherRespawnPickup=null;
-let featherRespawnLocation=null;
-let featherRespawnAt=0;
-
-function setFeatherRespawnSource(source){
-  if(source && typeof source.x === 'number' && typeof source.y === 'number'){
-    if(source.type !== undefined){
-      featherRespawnPickup = source;
-    } else {
-      featherRespawnPickup = null;
-    }
-    featherRespawnLocation = { x: source.x, y: source.y };
-  } else if(player){
-    const span = levelWidth();
-    const x = clamp(player.x + player.w/2 - 10, 40, span - 40);
-    const y = player.y - 24;
-    featherRespawnPickup = null;
-    featherRespawnLocation = { x, y };
-  } else {
-    featherRespawnPickup = null;
-    featherRespawnLocation = null;
-  }
-}
-
-function clampArcadeAim(x, y){
-  const minX = W * 0.08;
-  const maxX = W * 0.92;
-  const minY = H * 0.2;
-  const maxY = H * 0.88;
-  arcadeAim.x = clamp(x, minX, maxX);
-  arcadeAim.y = clamp(y, minY, maxY);
-}
-
-function placeFloorFeather(layerYs, yBase){
-  const candidates = [];
-  candidates.push({y:yBase, type:'base'});
-  if(layerYs && layerYs.length>0){ candidates.push({y:layerYs[0], type:'platform'}); }
-  if(layerYs && layerYs.length>1){ candidates.push({y:layerYs[1], type:'platform'}); }
-  const choice = candidates[Math.floor(Math.random()*candidates.length)];
-  const targetY = choice.type==='base' ? yBase : choice.y;
-  let targetX = 1.5*W - 20;
-  if(choice.type==='platform'){
-    const platform = walls.find(w=>w.isPlatform && Math.abs((w.y||0) - targetY) < 1);
-    if(platform){ targetX = platform.x + platform.w/2 - 10; }
-  }
-  targetX = clamp(targetX, 60, levelWidth() - 80);
-  const pickup = {type:'feather', x:targetX, y:targetY-24, w:20, h:20};
-  pickups.push(pickup);
-  setFeatherRespawnSource(pickup);
-}
-
-function clearFeather(reason){
-  if(!player || !player.hasFeather) return false;
-  player.hasFeather = false;
-  player.featherEnergy = 0;
-  player.lastFlap = now();
-  if(featherTimerEl) featherTimerEl.textContent = 'Feather —';
-  if(featherPill) featherPill.textContent = 'Feather: —';
-  if(reason==='damage'){
-    centerNote('Feather lost!', 1100);
-    notify('A hit knocked away your feather.');
-  } else if(reason==='elevator'){
-    notify('Feather winds fade between floors.');
-  }
-  if(reason==='damage' && (featherRespawnPickup || featherRespawnLocation) && !featherRespawnAt){
-    featherRespawnAt = now() + FEATHER_RESPAWN_DELAY_MS;
-  }
-  return true;
-}
-
-function desiredMusicMode(){
-  if(inSub) return 'vent';
-  if(boardRoomActive) return 'boss';
-  return 'level';
-}
-
-function updateMusicForState(){
-  const desired = desiredMusicMode();
-  startMusic(desired);
-}
-
-// Projectiles
-const bullets=[];
-
-// Smoke overlay
-let smokeActive=false, smokeT=0;
-
-// HUD helpers
-const noteEl = document.getElementById('note');
-const timeEl = document.getElementById('time');
-const serversEl = document.getElementById('servers');
-const alarmsEl = document.getElementById('alarms');
-const invEl = document.getElementById('inv');
-const filesPill = document.getElementById('filesPill');
-const intelPill = document.getElementById('intelPill');
-const featherPill = document.getElementById('featherPill');
-const specialFilesPill = document.getElementById('specialFilesPill');
-const codexPanel = document.getElementById('codexPanel');
-const codexGrid = document.getElementById('codexGrid');
-const codexProgress = document.getElementById('codexProgress');
-const codexCloseBtn = document.getElementById('codexClose');
-const hpFill = document.getElementById('hpFill');
-const hpText = document.getElementById('hpText');
-const savingsFill = document.getElementById('savingsFill');
-const savingsText = document.getElementById('savingsText');
-const loanFill = document.getElementById('loanFill');
-const loanText = document.getElementById('loanText');
-const hostageInfo = document.getElementById('hostageInfo');
-const weaponNameEl = document.getElementById('weaponName');
-const weaponAmmoEl = document.getElementById('weaponAmmo');
-const featherTimerEl = document.getElementById('featherTimer');
-const floorLabelEl = document.getElementById('floorLabel');
-const miniBossEl = document.getElementById('miniBossCount');
-const mapBtn = document.getElementById('mapBtn');
-const minimapOverlay = document.getElementById('minimapOverlay');
-const minimapTower = document.getElementById('minimapTower');
-const deckBtn = document.getElementById('deckBtn');
-const deckOverlay = document.getElementById('deckOverlay');
-const deckGrid = document.getElementById('deckGrid');
-const deckProgress = document.getElementById('deckProgress');
-const floorBannerEl = document.getElementById('floorBanner');
-const floorBannerText = document.getElementById('floorBannerText');
-const minimapPanel = minimapOverlay ? minimapOverlay.querySelector('.minimap') : null;
-const minimapCells = [];
-const MINIMAP_MISSIONS = [
-  { id:'badDeal', label:'A BAD DEAL', subtitle:'Ground mission' },
-  { id:'itsOnlyMoney', label:'ITS ONLY MONEY', subtitle:'Warzone' }
-];
-const minimapMissionButtons = new Map();
-
-// Buttons
-const btnTest=document.getElementById('btnTest');
-const btnNormal=document.getElementById('btnNormal');
-const btnP=document.getElementById('btnPistol');
-const btnSilenced=document.getElementById('btnSilenced');
-const btnF=document.getElementById('btnFlame');
-const btnM=document.getElementById('btnMelee');
-const btnGrenade=document.getElementById('btnGrenade');
-const btnSaber=document.getElementById('btnSaber');
-const btnMachine=document.getElementById('btnMachine');
-const rageModal=document.getElementById('rageModal');
-const rageContinue=document.getElementById('rageContinue');
-const rageMessage=document.getElementById('rageMessage');
-const weaponButtons = {
-  pistol: btnP,
-  silenced: btnSilenced,
-  flame: btnF,
-  melee: btnM,
-  grenade: btnGrenade,
-  saber: btnSaber,
-  machineGun: btnMachine
-};
-const weaponRequirements = {
-  grenade: { type:'intel', amount:20, label:'Intel 20' },
-  saber: { type:'files', amount:25, label:'Files 25' },
-  machineGun: { type:'intel', amount:40, label:'Intel 40' }
-};
-
-function setMode(m){
-  testMode = (m==='test');
-  btnTest.classList.toggle('active', testMode);
-  btnNormal.classList.toggle('active', !testMode);
-  notify(testMode? "TEST mode: revive on death." : "NORMAL mode: restart on death.");
-  updateMapButtonState();
-}
-btnTest.onclick=()=>setMode('test');
-btnNormal.onclick=()=>setMode('normal');
-function weaponIsUnlocked(w){
-  return !!(player.weaponsUnlocked && player.weaponsUnlocked[w]);
-}
-function updateWeaponButtons(){
-  for(const [weapon, btn] of Object.entries(weaponButtons)){
-    if(!btn) continue;
-    const unlocked = weaponIsUnlocked(weapon);
-    btn.classList.toggle('locked', !unlocked);
-    if(unlocked){
-      btn.removeAttribute('data-lock');
-    } else {
-      const req = weaponRequirements[weapon];
-      if(req){
-        const current = req.type==='intel' ? player.intel : req.type==='files' ? player.files : 0;
-        const remaining = Math.max(0, req.amount - current);
-        const label = remaining>0 ? `${req.label} (${remaining})` : req.label;
-        btn.setAttribute('data-lock', label);
-      }
-    }
-    btn.classList.toggle('active', player.weapon===weapon);
-  }
-}
-function unlockWeapon(weapon, reason){
-  if(!player.weaponsUnlocked) player.weaponsUnlocked={};
-  if(player.weaponsUnlocked[weapon]) return;
-  player.weaponsUnlocked[weapon]=true;
-  updateWeaponButtons();
-  evaluateWeaponUnlocks();
-  if(reason){
-    notify(`${reason} unlocked.`);
-    centerNote(`${reason} ready!`, 1400);
-  }
-}
-function evaluateWeaponUnlocks(){
-  if(player.intel>=20) unlockWeapon('grenade','Grenade launcher');
-  if(player.files>=25) unlockWeapon('saber','Saber');
-  if(player.intel>=40) unlockWeapon('machineGun','Machine gun');
-  updateWeaponButtons();
-}
-
-function unlockAllWeapons(){
-  if(!player.weaponsUnlocked) player.weaponsUnlocked = {};
-  const knownWeapons = new Set([
-    ...Object.keys(weaponButtons || {}),
-    ...Object.keys(player.weaponsUnlocked)
-  ]);
-  let unlockedAny = false;
-  for(const weapon of knownWeapons){
-    if(!player.weaponsUnlocked[weapon]){
-      player.weaponsUnlocked[weapon] = true;
-      unlockedAny = true;
-    }
-  }
-  updateWeaponButtons();
-  evaluateWeaponUnlocks();
-  return unlockedAny;
-}
-function showRageModal(message){
-  if(rageMessage && message){ rageMessage.textContent = message; }
-  if(rageModal){
-    rageModal.classList.remove('hidden');
-  }
-  pause = true;
-}
-function hideRageModal(){
-  if(rageModal){
-    rageModal.classList.add('hidden');
-  }
-  if(runActive){
-    pause = false;
-    canvas.focus();
-  }
-}
-function activateMidnightRage(){
-  if(state.midnightRage) return;
-  state.midnightRage = true;
-  player.savings = 0;
-  notify('Savings drained at midnight.');
-  centerNote('Midnight rage awakened!', 1800);
-  const boostedLoan = clampLoanBalance(player.loanBalance * 1000);
-  player.loanBalance = boostedLoan;
-  player.damageMultiplier = 1.5;
-  unlockWeapon('machineGun');
-  evaluateWeaponUnlocks();
-  player.machineGun.ammo = Math.max(player.machineGun.ammo, player.machineGun.mag || player.machineGun.ammo);
-  player.machineGun.reserve = Math.max(player.machineGun.reserve, (player.machineGun.mag || 90) * 4);
-  setWeapon('machineGun');
-  showRageModal('Savings wiped at midnight. Loan balance inflated and rage boosts your damage by 50%. Machine gun only.');
-}
-function reloadWeapon(){
-  if(player.weapon==='pistol' || player.weapon==='silenced'){
-    const stats = player.weapon==='pistol' ? player.pistol : player.silenced;
-    const mag = stats.mag || player.pistol.mag || GAME_PARAMS.player.pistol.magazine;
-    const need = mag - stats.ammo;
-    if(need<=0) return false;
-    const take = Math.min(need, player.pistol.reserve);
-    if(take<=0) return false;
-    stats.ammo += take;
-    player.pistol.reserve -= take;
-    beep({freq:420});
-    return true;
-  }
-  if(player.weapon==='machineGun'){
-    const stats = player.machineGun;
-    const mag = stats.mag || 90;
-    const need = mag - stats.ammo;
-    if(need<=0) return false;
-    const take = Math.min(need, stats.reserve||0);
-    if(take<=0) return false;
-    stats.ammo += take;
-    stats.reserve -= take;
-    beep({freq:360});
-    return true;
-  }
-  if(player.weapon==='grenade'){
-    const stats = player.grenade;
-    const mag = stats.mag || GRENADE_MAG_CAPACITY;
-    if(stats.ammo >= mag) return false;
-    const reserve = stats.reserve || 0;
-    if(reserve<=0) return false;
-    const need = mag - stats.ammo;
-    const take = Math.min(need, reserve);
-    stats.ammo += take;
-    stats.reserve -= take;
-    beep({freq:300});
-    return true;
-  }
-  return false;
-}
-function detonateGrenade(grenade){
-  if(!grenade || grenade.detonated) return;
-  grenade.detonated = true;
-  const blast = {x:grenade.x-50, y:grenade.y-40, w:100, h:100};
-  const dmg = scaledPlayerDamage(GRENADE_BASE_DAMAGE);
-  if(!inSub){
-    for(const guard of guards){
-      if(!guard || guard.hp<=0) continue;
-      const box={x:guard.x,y:guard.y,w:guard.w,h:guard.h};
-      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
-        const fell = applyGuardDamage(guard, dmg);
-        if(fell){ guard.hp=0; }
-        guard.hitFlashUntil = now()+200;
-      }
-    }
-    for(const worker of workers){
-      if(!worker || !worker.alive) continue;
-      const box={x:worker.x,y:worker.y,w:worker.w,h:worker.h};
-      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
-        damageWorker(worker, dmg);
-      }
-    }
-    if(ecoBossActive && ecoBoss && ecoBoss.hp>0){
-      const bossBox={x:ecoBoss.x,y:ecoBoss.y,w:ecoBoss.w,h:ecoBoss.h};
-      if(rect2(blast.x,blast.y,blast.w,blast.h,bossBox)){
-        ecoBoss.hp = Math.max(0, ecoBoss.hp - Math.round(dmg*0.8));
-        ecoBoss.hitFlashUntil = now()+220;
-      }
-    }
-  } else if(sub){
-    for(const guard of sub.guards){
-      if(!guard || guard.hp<=0) continue;
-      const box={x:guard.x,y:guard.y,w:guard.w,h:guard.h};
-      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
-        const fell = applyGuardDamage(guard, dmg);
-        if(fell){ guard.hp=0; }
-        guard.hitFlashUntil = now()+200;
-      }
-    }
-    for(const boss of sub.bosses){
-      if(!boss || boss.hp<=0) continue;
-      const box={x:boss.x,y:boss.y,w:boss.w,h:boss.h};
-      if(rect2(blast.x,blast.y,blast.w,blast.h,box)){
-        boss.hp = Math.max(0, boss.hp - dmg);
-        boss.hitFlashUntil = now()+200;
-      }
-    }
-  }
-  boom();
-  grenade.life = 0;
-}
-function setWeapon(w){
-  if(ninjaRound && w!=='melee'){
-    centerNote('Investor ninjas demand melee only.', 1400);
-    notify('Melee-only round active.');
-    return;
-  }
-  if(state.midnightRage && w!=='machineGun'){
-    centerNote('Midnight rage demands the machine gun.', 1400);
-    notify('Rage keeps you locked to the machine gun.');
-    return;
-  }
-  if(!weaponIsUnlocked(w)){
-    const req = weaponRequirements[w];
-    const msg = req ? `${req.label} required.` : 'Weapon locked.';
-    centerNote(msg, 1400);
-    notify('Weapon not yet unlocked.');
-    return;
-  }
-  player.weapon=w;
-  updateWeaponButtons();
-  let freq=520;
-  if(w==='pistol' || w==='silenced') freq=600;
-  else if(w==='flame') freq=500;
-  else if(w==='melee' || w==='saber') freq=440;
-  else if(w==='grenade') freq=420;
-  else if(w==='machineGun') freq=660;
-  beep({freq,dur:0.06});
-}
-btnP.onclick=()=>setWeapon('pistol');
-btnSilenced.onclick=()=>setWeapon('silenced');
-btnF.onclick=()=>setWeapon('flame');
-btnM.onclick=()=>setWeapon('melee');
-btnGrenade.onclick=()=>setWeapon('grenade');
-btnSaber.onclick=()=>setWeapon('saber');
-btnMachine.onclick=()=>setWeapon('machineGun');
-if(rageContinue){ rageContinue.onclick=()=>hideRageModal(); }
-
-const boardFloorOrder = [...BOARD_FLOORS].sort((a,b)=>a-b);
-
-function boardRoomLetter(floor){
-  const idx = boardFloorOrder.indexOf(floor);
-  return idx >= 0 ? String.fromCharCode('A'.charCodeAt(0) + idx) : '';
-}
-
-function formatFloorLabel(floor){
-  if(!Number.isFinite(floor)) return 'LEVEL —';
-  if(floor === OUTSIDE_FLOOR) return 'MISSION – A BAD DEAL (GROUND INFILTRATION)';
-  if(floor === FLOORS) return `LEVEL ${floor} – CEO PENTHOUSE`;
-  if(isBoardFloor(floor)){
-    const letter = boardRoomLetter(floor);
-    return `LEVEL ${floor} – BOARD ROOM ${letter || ''}`.trim();
-  }
-  return `LEVEL ${floor}`;
-}
-
-function formatFloorSecondaryLabel(floor){
-  if(floor === OUTSIDE_FLOOR) return 'ABD';
-  if(floor === FLOORS) return 'PH';
-  if(isBoardFloor(floor)){
-    const letter = boardRoomLetter(floor);
-    return letter ? `BR ${letter}` : 'BOARD';
-  }
-  return `F${String(floor).padStart(2,'0')}`;
-}
-
-if(minimapTower){
-  for(let f=FLOORS; f>=1; f--){
-    const cell=document.createElement('button');
-    cell.type='button';
-    cell.className='minimap-cell';
-    cell.dataset.floor=String(f);
-    cell.innerHTML = `<span>${formatFloorLabel(f)}</span><span>${formatFloorSecondaryLabel(f)}</span>`;
-    minimapTower.appendChild(cell);
-    minimapCells.push(cell);
-  }
-}
-
-if(minimapPanel){
-  const missionSection = document.createElement('div');
-  missionSection.className = 'minimap-missions';
-  const heading = document.createElement('h4');
-  heading.textContent = 'MISSIONS';
-  missionSection.appendChild(heading);
-  for(const mission of MINIMAP_MISSIONS){
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'minimap-cell mission';
-    btn.dataset.mission = mission.id;
-    const subtitle = mission.subtitle ? `<span>${mission.subtitle}</span>` : '<span></span>';
-    btn.innerHTML = `<span>${mission.label}</span>${subtitle}`;
-    btn.addEventListener('click', ()=>{
-      if(!testMode || !runActive){
-        centerNote('Test mode required to warp to missions.', 1200);
-        lockedBuzz();
-        return;
-      }
-      const changed = startMinimapMission(mission.id);
-      if(changed){
-        toggleMinimap(false);
-      }
-    });
-    missionSection.appendChild(btn);
-    minimapMissionButtons.set(mission.id, btn);
-  }
-  minimapPanel.appendChild(missionSection);
-}
-
-if(mapBtn){
-  mapBtn.addEventListener('click', ()=>{
-    if(minimapVisible){ toggleMinimap(false); return; }
-    if(!canAccessMinimap()){
-      centerNote('Clear a vent to access the map.', 1400);
-      lockedBuzz();
-      return;
-    }
-    toggleMinimap(true);
+function tryInteract() {
+  if (!runtime.level || !runtime.renderer) return;
+  runtime.level.interact({
+    player: runtime.player,
+    performRaycast: runtime.renderer.performRaycast,
+    hasLineOfSight: runtime.renderer.hasLineOfSight
   });
 }
 
-if(deckBtn){
-  deckBtn.addEventListener('click', ()=>{
-    if(deckVisible){ toggleDeck(false); }
-    else { toggleDeck(true); }
-  });
+function handleKeyDown(event) {
+  if (!runtime.active) return;
+  if (event.code === 'KeyE') {
+    event.preventDefault();
+    tryInteract();
+  }
 }
 
-if(deckOverlay){
-  deckOverlay.addEventListener('click', (event)=>{
-    if(event.target === deckOverlay){ toggleDeck(false); }
-  });
-  const panel = deckOverlay.querySelector('.deck-panel');
-  if(panel){ panel.addEventListener('click', (event)=>event.stopPropagation()); }
+function handleMouseDown(event) {
+  if (!runtime.active || event.button !== 0) return;
+  if (!runtime.renderer || !runtime.renderer.controls?.isLocked?.()) return;
+  const hit = runtime.renderer.shoot();
+  if (hit && (hit.type === 'executive' || hit.type === 'enemy')) {
+    runtime.runStats.kills = (runtime.runStats.kills || 0) + 1;
+  }
 }
 
-if(minimapOverlay){
-  minimapOverlay.addEventListener('click', (event)=>{
-    if(event.target === minimapOverlay){ toggleMinimap(false); }
+function animationLoop(timestamp) {
+  if (!runtime.active) return;
+  if (!runtime.lastFrame) {
+    runtime.lastFrame = timestamp;
+  }
+  const dt = Math.min(0.1, (timestamp - runtime.lastFrame) / 1000);
+  runtime.lastFrame = timestamp;
+
+  runtime.renderer?.render(dt);
+  runtime.level?.update(dt, {
+    player: runtime.player,
+    performRaycast: runtime.renderer?.performRaycast,
+    hasLineOfSight: runtime.renderer?.hasLineOfSight
   });
-  const inner = minimapOverlay.querySelector('.minimap');
-  if(inner){ inner.addEventListener('click', (event)=>event.stopPropagation()); }
+
+  runtime.rafId = window.requestAnimationFrame(animationLoop);
 }
 
-if(minimapTower){
-  minimapTower.addEventListener('click', (event)=>{
-    const cell = event.target.closest('.minimap-cell');
-    if(!cell) return;
-    const floor = Number(cell.dataset.floor);
-    if(!Number.isFinite(floor)) return;
-    if(testMode && runActive){
-      const changed = jumpToFloor(floor);
-      if(changed){
-        toggleMinimap(false);
-      } else {
-        centerNote(formatFloorLabel(floor), 1100);
-      }
-    } else {
-      centerNote(formatFloorLabel(floor), 1100);
+function cleanup() {
+  if (runtime.rafId) {
+    window.cancelAnimationFrame(runtime.rafId);
+    runtime.rafId = 0;
+  }
+  runtime.lastFrame = 0;
+  clearTimers();
+  while (runtime.disposables.length) {
+    const dispose = runtime.disposables.pop();
+    try {
+      dispose();
+    } catch (err) {
+      console.warn('LoanTower cleanup error', err);
+    }
+  }
+  runtime.level?.destroy?.();
+  runtime.renderer?.dispose?.();
+  runtime.level = null;
+  runtime.renderer = null;
+  runtime.player = null;
+  removePointerHint();
+  runtime.active = false;
+}
+
+function buildRunDetail(outcome) {
+  const now = performance.now();
+  const stats = runtime.runStats || {};
+  const duration = stats.start ? Math.max(0, now - stats.start) : 0;
+  const player = runtime.player || {};
+  return {
+    outcome: outcome || 'unknown',
+    name: player.name || 'Runner',
+    timeMs: Math.round(duration),
+    loanRemaining: Math.round(player.loanBalance ?? player.debt ?? 0),
+    kills: stats.kills || 0,
+    deaths: stats.deaths || (outcome === 'death' ? 1 : 0),
+    refinances: stats.refinances || 0,
+    score: 0,
+    floor: 19
+  };
+}
+
+function endRun(outcome, message) {
+  if (runtime.finishing) return;
+  runtime.finishing = true;
+  if (document.pointerLockElement === ensureCanvas()) {
+    document.exitPointerLock();
+  }
+  const detail = buildRunDetail(outcome);
+  runtime.lastResult = detail;
+  cleanup();
+  if (message) {
+    showEndBanner(message);
+  }
+  window.dispatchEvent(new CustomEvent('loanTower:end', { detail }));
+  runtime.finishing = false;
+}
+
+function startRun(name) {
+  ensureHudStyles();
+  hideLegacyHud();
+  cleanup();
+  runtime.lastResult = null;
+  runtime.finishing = false;
+
+  const canvas = ensureCanvas();
+  const player = createPlayer(name);
+  const level = createLevel19({
+    seed: 'level19',
+    player,
+    onLevelComplete: () => {
+      endRun('victory', 'Elevator unlocked. You escaped Level 19.');
     }
   });
-}
-
-updateMapButtonState();
-resetDeckState();
-toggleMinimap(false);
-hideFloorBanner();
-
-if(specialFilesPill){
-  specialFilesPill.addEventListener('click', ()=>{
-    if(!player.codexUnlocked){
-      notify('Collect 10 Special Files to unlock the tower dossiers.');
-      return;
-    }
-    toggleCodex();
+  level.initialise({ player });
+  const renderer = renderLevel19Scene(level.layout, player, {
+    canvas,
+    executiveController: level.executives,
+    movementSpeed: 4.6,
+    visibilityRadius: 12
   });
 }
 if(codexCloseBtn){
@@ -2358,191 +1599,49 @@ function shuffleArray(array, rng=Math.random){
   for(let i=array.length-1; i>0; i--){
     const j = Math.floor(rng() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
-function notify(text){ noteEl.textContent = text; }
+  level.crosshair?.showToast('Find the elevator key. Search the cubicles.');
 
-const ui = {
-  confirm: (msg) => window.confirm(msg),
-  toast: (msg) => notify(msg),
-  banner: (msg, duration=4000) => centerNote(msg, duration)
-};
+  runtime.active = true;
+  runtime.level = level;
+  runtime.renderer = renderer;
+  runtime.player = player;
+  runtime.runStats = { start: performance.now(), kills: 0, deaths: 0, refinances: 0 };
+  runtime.lastFrame = 0;
 
-const unlockedAchievements = new Set();
-function unlockAchievement(id, title, description){
-  if(!id || unlockedAchievements.has(id)) return;
-  unlockedAchievements.add(id);
-  const detail = description ? `${title}: ${description}` : title;
-  notify(`Achievement unlocked — ${detail}`);
-  centerNote(`Achievement Unlocked: ${title}`, 1800);
-  chime();
-}
-
-const audio = {
-  play(id){
-    if(id==='hallelujah'){
-      beep({freq:620,dur:0.3});
-      setTimeout(()=>beep({freq:740,dur:0.3}), 180);
-      setTimeout(()=>beep({freq:880,dur:0.45}), 360);
+  createPointerHint();
+  addEvent(document, 'pointerlockchange', updatePointerHint, false);
+  addEvent(window, 'keydown', handleKeyDown, false);
+  addEvent(window, 'mousedown', handleMouseDown, false);
+  addEvent(window, 'blur', () => {
+    if (document.pointerLockElement === canvas) {
+      document.exitPointerLock();
     }
+  }, false);
+
+  try {
+    canvas.focus({ preventScroll: true });
+  } catch {
+    canvas.focus();
   }
+
+  runtime.rafId = window.requestAnimationFrame(animationLoop);
+}
+
+window.LoanTowerBridge = {
+  startRun,
+  isRunning: () => runtime.active,
+  getLastResult: () => runtime.lastResult
 };
 
-const qte = {
-  run({rounds=5, required=4, windowMs=900}={}){
-    if(typeof window.prompt !== 'function') return false;
-    let success = 0;
-    const pool = 'asdfqwe';
-    for(let i=0;i<rounds;i++){
-      let seq='';
-      const length = 3;
-      for(let j=0;j<length;j++){
-        seq += pool[Math.floor(Math.random()*pool.length)];
-      }
-      const start = performance.now();
-      const input = window.prompt(`Refinance QTE (${i+1}/${rounds}): Type "${seq.toUpperCase()}" within ${(windowMs/1000).toFixed(1)}s`);
-      if(typeof input !== 'string') continue;
-      const elapsed = performance.now() - start;
-      if(elapsed <= windowMs && input.trim().toLowerCase() === seq){
-        success++;
-      }
-    }
-    return success >= required;
-  }
-};
-
-function hideFloorBanner(){
-  if(!floorBannerEl) return;
-  floorBannerEl.classList.remove('visible');
-  floorBannerEl.classList.add('hidden');
-  if(floorBannerTimeout){
-    clearTimeout(floorBannerTimeout);
-    floorBannerTimeout=null;
-  }
+function onReady() {
+  hideLegacyHud();
+  window.dispatchEvent(new Event('loanTowerReady'));
 }
 
-function showFloorBanner(floor){
-  if(!floorBannerEl || !floorBannerText) return;
-  floorBannerText.textContent = formatFloorLabel(floor);
-  floorBannerEl.classList.remove('hidden');
-  requestAnimationFrame(()=>floorBannerEl.classList.add('visible'));
-  if(floorBannerTimeout){ clearTimeout(floorBannerTimeout); }
-  floorBannerTimeout = setTimeout(()=>{
-    floorBannerEl.classList.remove('visible');
-    floorBannerTimeout = setTimeout(()=>{ floorBannerEl.classList.add('hidden'); floorBannerTimeout=null; }, 260);
-  }, 2200);
-}
-
-function canAccessMinimap(){
-  return minimapUnlocked || (testMode && runActive);
-}
-
-function updateMapButtonState(){
-  if(!mapBtn) return;
-  const accessible = canAccessMinimap();
-  mapBtn.classList.toggle('locked', !accessible);
-  mapBtn.disabled = !accessible;
-  if(!accessible){ mapBtn.classList.remove('active'); }
-}
-
-function updateMinimapHighlight(){
-  if(minimapCells.length===0) return;
-  for(const cell of minimapCells){
-    const floor = Number(cell.dataset.floor);
-    cell.classList.toggle('active', floor === currentFloor);
-  }
-  for(const [missionId, btn] of minimapMissionButtons.entries()){
-    const active = (missionId === 'badDeal' && outsideMode) || (missionId === 'itsOnlyMoney' && !!warzoneMissionState);
-    btn.classList.toggle('active', active);
-  }
-}
-
-function toggleMinimap(force){
-  if(!minimapOverlay) return;
-  const target = force !== undefined ? force : !minimapVisible;
-  if(target && !canAccessMinimap()){
-    centerNote('Clear a vent to access the map.', 1400);
-    lockedBuzz();
-    return;
-  }
-  minimapVisible = target;
-  if(target){
-    minimapOverlay.classList.remove('hidden');
-    updateMinimapHighlight();
-  } else {
-    minimapOverlay.classList.add('hidden');
-  }
-  if(mapBtn){ mapBtn.classList.toggle('active', target); }
-}
-
-function jumpToFloor(targetFloor){
-  if(!runActive) return false;
-  if(!Number.isFinite(targetFloor)) return false;
-  const floor = Math.min(Math.max(1, Math.round(targetFloor)), FLOORS);
-  return enterFloor(floor, { viaTest:true });
-}
-
-function startMinimapMission(id){
-  if(id === 'badDeal'){
-    return warpToBadDealMission();
-  }
-  if(id === 'itsOnlyMoney'){
-    return warpToItsOnlyMoneyMission();
-  }
-  return false;
-}
-
-function warpToBadDealMission(){
-  if(!runActive) return false;
-  rooftopMissionState = null;
-  warzoneMissionState = null;
-  topDownState = null;
-  ventDungeonState = null;
-  outsideMode = false;
-  currentFloor = OUTSIDE_FLOOR;
-  camX = 0;
-  camY = 0;
-  player.x = initialSpawnX;
-  player.y = 0;
-  player.vx = 0;
-  player.vy = 0;
-  initOutsideRound();
-  notify('Test warp ➜ MISSION – A BAD DEAL.');
-  updateMinimapHighlight();
-  return true;
-}
-
-function warpToItsOnlyMoneyMission(){
-  if(!runActive) return false;
-  outsideMode = false;
-  topDownState = null;
-  ventDungeonState = null;
-  rooftopMissionState = null;
-  warzoneMissionState = null;
-  camX = 0;
-  camY = 0;
-  guards.length = 0;
-  player.x = initialSpawnX;
-  player.y = 0;
-  player.vx = 0;
-  player.vy = 0;
-  startWarzoneMission();
-  notify('Test warp ➜ ITS ONLY MONEY.');
-  updateMinimapHighlight();
-  return true;
-}
-
-function updateDeckProgress(){
-  if(deckProgress){
-    deckProgress.textContent = `Unlocked ${unlockedDeckFloors.size}/${BOARD_DECK_PROFILES.length}`;
-  }
-}
-
-function updateDeckButton(){
-  if(!deckBtn) return;
-  deckBtn.textContent = `Board Deck (P) ${unlockedDeckFloors.size}/${BOARD_DECK_PROFILES.length}`;
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', onReady);
+} else {
+  onReady();
 }
 
 function renderDeck(){
