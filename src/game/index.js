@@ -173,6 +173,7 @@ const HELL_WAVE_GOALS = {
 const HELL_OPTIONAL_KILL_TARGET = 100;
 const HELL_PRESET_WAVE_TARGETS = [25, 50, 75, 100, 200, 400, 600, 800, 1000];
 const HELL_SPAWN_INTERVAL_BASE = 30 / 45;
+const ZOMBIE_SPAWN_RATE_MULTIPLIER = 0.55; // 45% faster spawn cadence
 const VENT_DUNGEON_FLOORS = new Set([9, 34]);
 const VENT_DUNGEON_CONFIG = {
   9: {
@@ -233,7 +234,9 @@ const DRONE_MISSION_CONFIG = {
       totalTargets: 36,
       maxActiveTargets: 5,
       missionText: 'Hack complete. Eliminate all 16 estates.',
-      enemyLabel: 'Estate Guard'
+      enemyLabel: 'Estate Guard',
+      bombardierSpeedMultiplier: 0.55,
+      bombardierSpacingMultiplier: 2
     }
   },
   35: {
@@ -248,7 +251,9 @@ const DRONE_MISSION_CONFIG = {
       totalTargets: 20,
       maxActiveTargets: 4,
       missionText: 'Target yachts destroyed',
-      enemyLabel: 'Deck Guard'
+      enemyLabel: 'Deck Guard',
+      bombardierSpeedMultiplier: 0.55,
+      bombardierSpacingMultiplier: 2
     }
   }
 };
@@ -1380,7 +1385,12 @@ let ceoQTEAttempted = false;
 const state = {
   ceoPassive: false,
   playerWeaponsDisabled: false,
-  midnightRage: false
+  midnightRage: false,
+  midnightRageSince: 0,
+  midnightRageUntil: 0,
+  midnightRageTriggered: false,
+  midnightMachineGunLocked: false,
+  midnightDebtLastApplied: 0
 };
 
 const CEO_ARENA_WAVES = [
@@ -1589,7 +1599,9 @@ const minimapPanel = minimapOverlay ? minimapOverlay.querySelector('.minimap') :
 const minimapCells = [];
 const MINIMAP_MISSIONS = [
   { id:'badDeal', label:'A BAD DEAL', subtitle:'Ground mission' },
-  { id:'itsOnlyMoney', label:'ITS ONLY MONEY', subtitle:'Warzone' }
+  { id:'itsOnlyMoney', label:'ITS ONLY MONEY', subtitle:'Warzone' },
+  { id:'bombardier10', label:'BOMBING DRILL – LEVEL 10', subtitle:'Mansions practice' },
+  { id:'bombardier35', label:'BOMBING DRILL – LEVEL 35', subtitle:'Mega-yachts practice' }
 ];
 const minimapMissionButtons = new Map();
 
@@ -1641,18 +1653,25 @@ function updateWeaponButtons(){
     if(unlocked){
       btn.removeAttribute('data-lock');
     } else {
-      const req = weaponRequirements[weapon];
-      if(req){
-        const current = req.type==='intel' ? player.intel : req.type==='files' ? player.files : 0;
-        const remaining = Math.max(0, req.amount - current);
-        const label = remaining>0 ? `${req.label} (${remaining})` : req.label;
-        btn.setAttribute('data-lock', label);
+      if(weapon === 'machineGun' && state.midnightMachineGunLocked){
+        btn.setAttribute('data-lock', 'Seized after midnight');
+      } else {
+        const req = weaponRequirements[weapon];
+        if(req){
+          const current = req.type==='intel' ? player.intel : req.type==='files' ? player.files : 0;
+          const remaining = Math.max(0, req.amount - current);
+          const label = remaining>0 ? `${req.label} (${remaining})` : req.label;
+          btn.setAttribute('data-lock', label);
+        }
       }
     }
     btn.classList.toggle('active', player.weapon===weapon);
   }
 }
 function unlockWeapon(weapon, reason){
+  if(weapon === 'machineGun' && state.midnightMachineGunLocked){
+    return;
+  }
   if(!player.weaponsUnlocked) player.weaponsUnlocked={};
   if(player.weaponsUnlocked[weapon]) return;
   player.weaponsUnlocked[weapon]=true;
@@ -1706,6 +1725,12 @@ function hideRageModal(){
 function activateMidnightRage(){
   if(state.midnightRage) return;
   state.midnightRage = true;
+  state.midnightRageTriggered = true;
+  const triggeredAt = now();
+  state.midnightRageSince = triggeredAt;
+  state.midnightRageUntil = triggeredAt + 10 * 60 * 1000;
+  state.midnightMachineGunLocked = false;
+  state.midnightDebtLastApplied = triggeredAt;
   player.savings = 0;
   notify('Savings drained at midnight.');
   centerNote('Midnight rage awakened!', 1800);
@@ -1718,6 +1743,43 @@ function activateMidnightRage(){
   player.machineGun.reserve = Math.max(player.machineGun.reserve, (player.machineGun.mag || 90) * 4);
   setWeapon('machineGun');
   showRageModal('Savings wiped at midnight. Loan balance inflated and rage boosts your damage by 50%. Machine gun only.');
+}
+
+function concludeMidnightRage(){
+  if(!state.midnightRage) return;
+  state.midnightRage = false;
+  state.midnightRageSince = 0;
+  state.midnightRageUntil = 0;
+  state.midnightMachineGunLocked = true;
+  player.damageMultiplier = 1;
+  if(player.weaponsUnlocked){
+    player.weaponsUnlocked.machineGun = false;
+  }
+  updateWeaponButtons();
+  if(player.weapon === 'machineGun'){
+    setWeapon('pistol');
+  }
+  notify('Midnight rage faded. Machine gun seized for safety.');
+  centerNote('Midnight rage subsided — arsenal unlocked.', 2000);
+}
+
+function applyMidnightDebtGrowth(nowMs){
+  if(!state.midnightRageTriggered) return;
+  const interval = 60 * 1000;
+  const lastApplied = state.midnightDebtLastApplied || state.midnightRageSince || nowMs;
+  if(nowMs <= lastApplied) return;
+  const elapsed = nowMs - lastApplied;
+  if(elapsed < interval) return;
+  const increments = Math.floor(elapsed / interval);
+  state.midnightDebtLastApplied = lastApplied + increments * interval;
+  if(player.loanBalance > 0 && increments > 0){
+    const previousBalance = player.loanBalance;
+    const factor = Math.pow(1.01, increments);
+    player.loanBalance = clampLoanBalance(Math.ceil(previousBalance * factor));
+    const percentLabel = increments === 1 ? '1%' : `${increments}%`;
+    notify(`Midnight penalty: loan balance grew by ${percentLabel}.`);
+    updateHudCommon();
+  }
 }
 function reloadWeapon(){
   if(player.weapon==='pistol' || player.weapon==='silenced'){
@@ -1819,6 +1881,11 @@ function setWeapon(w){
   if(state.midnightRage && w!=='machineGun'){
     centerNote('Midnight rage demands the machine gun.', 1400);
     notify('Rage keeps you locked to the machine gun.');
+    return;
+  }
+  if(state.midnightMachineGunLocked && w==='machineGun'){
+    centerNote('Machine gun seized after midnight.', 1600);
+    notify('Machine gun access revoked.');
     return;
   }
   if(!weaponIsUnlocked(w)){
@@ -2144,6 +2211,12 @@ function startMinimapMission(id){
   if(id === 'itsOnlyMoney'){
     return warpToItsOnlyMoneyMission();
   }
+  if(id === 'bombardier10'){
+    return warpToDroneBombingPractice(10);
+  }
+  if(id === 'bombardier35'){
+    return warpToDroneBombingPractice(35);
+  }
   return false;
 }
 
@@ -2174,6 +2247,7 @@ function warpToItsOnlyMoneyMission(){
   ventDungeonState = null;
   rooftopMissionState = null;
   warzoneMissionState = null;
+  droneMissionState = null;
   camX = 0;
   camY = 0;
   guards.length = 0;
@@ -2183,6 +2257,40 @@ function warpToItsOnlyMoneyMission(){
   player.vy = 0;
   startWarzoneMission();
   notify('Test warp ➜ ITS ONLY MONEY.');
+  updateMinimapHighlight();
+  return true;
+}
+
+function warpToDroneBombingPractice(floor){
+  if(!runActive) return false;
+  const config = DRONE_MISSION_CONFIG[floor];
+  if(!config) return false;
+  outsideMode = false;
+  topDownState = null;
+  ventDungeonState = null;
+  rooftopMissionState = null;
+  warzoneMissionState = null;
+  droneMissionState = null;
+  camX = 0;
+  camY = 0;
+  guards.length = 0;
+  player.x = initialSpawnX;
+  player.y = 0;
+  player.vx = 0;
+  player.vy = 0;
+  startDroneMissionLevel(floor);
+  if(!droneMissionState) return false;
+  droneMissionState.practice = true;
+  droneMissionState.hackWins = droneMissionState.config.hackWinsRequired || 3;
+  droneMissionState.hackProgress = 1;
+  droneMissionState.pendingDrone = false;
+  droneMissionState.pendingDroneDelay = 0;
+  initializeDronePhase(droneMissionState);
+  if(droneMissionState.phase === 'drone'){
+    droneMissionState.hackMessage = 'Practice bombing run initialized.';
+  }
+  notify(`Test warp ➜ BOMBING PRACTICE – ${config.name}.`);
+  centerNote(`Practice Bombing Run – Level ${floor}`, 2000);
   updateMinimapHighlight();
   return true;
 }
@@ -2505,6 +2613,11 @@ function resetPlayerState(){
   player.stepStride = 0;
   updateSpecialFileUI();
   state.midnightRage = false;
+  state.midnightRageTriggered = false;
+  state.midnightRageSince = 0;
+  state.midnightRageUntil = 0;
+  state.midnightMachineGunLocked = false;
+  state.midnightDebtLastApplied = 0;
 }
 
 function scaledPlayerDamage(base){
@@ -4147,7 +4260,7 @@ function advanceHellscapeWave(nextWaveIndex){
   state.waveClearedAt = 0;
   state.nextWaveAt = 0;
   const baseInterval = state.spawnInterval || HELL_SPAWN_INTERVAL_BASE;
-  state.spawnTimer = Math.max(0, baseInterval * 0.9);
+  state.spawnTimer = Math.max(0, baseInterval * 0.9 * ZOMBIE_SPAWN_RATE_MULTIPLIER);
   state.zombieSpawnCycle = 0;
   notify(`Wave ${state.wave} incoming — ${state.waveTarget} zombies detected.`);
   centerNote(`Wave ${state.wave} incoming!`, 2000);
@@ -4265,7 +4378,8 @@ function updateHellscape(dt){
   const remainingSpawns = Math.max(0, (state.waveTarget || 0) - (state.waveSpawns || 0));
   state.spawnTimer = (state.spawnTimer || 0) + dt;
   const baseInterval = state.spawnInterval || HELL_SPAWN_INTERVAL_BASE;
-  const interval = Math.max(0.55, baseInterval - difficulty * 0.12);
+  const adjustedBase = Math.max(0, baseInterval - difficulty * 0.12);
+  const interval = Math.max(0.3, adjustedBase * ZOMBIE_SPAWN_RATE_MULTIPLIER);
   if(remainingSpawns > 0 && state.spawnTimer >= interval){
     if(activeZombies < maxZombies){
       const spawnNearPlayer = ((state.zombieSpawnCycle || 0) % 2) === 1;
@@ -6430,6 +6544,8 @@ function initializeBombardierPhase(mission){
   const viewSize = Math.floor(Math.min(W, H) * 0.72);
   const viewX = Math.floor((W - viewSize) / 2);
   const viewY = Math.floor((H - viewSize) / 2);
+  const speedMult = config.bombardierSpeedMultiplier || 1;
+  const baseScroll = (config.terrain === 'yacht' ? 260 : 220);
   mission.bombardier = {
     viewSize,
     viewX,
@@ -6440,7 +6556,7 @@ function initializeBombardierPhase(mission){
     aimY: viewY + viewSize / 2,
     aimSpeed: 240,
     aimRange: viewSize * 0.3,
-    scrollSpeed: (config.terrain === 'yacht' ? 260 : 220),
+    scrollSpeed: baseScroll * speedMult,
     dropCooldown: 0,
     spawnTimer: 0,
     spawnInterval: 1.25,
@@ -6463,7 +6579,45 @@ function spawnBombardierTarget(mission){
   const margin = size * 0.08;
   const width = (config.terrain === 'yacht' ? size * (0.46 + Math.random()*0.12) : size * (0.35 + Math.random()*0.16));
   const height = (config.terrain === 'yacht' ? width * (0.34 + Math.random()*0.08) : width * (0.46 + Math.random()*0.1));
-  const x = view.viewX + margin + Math.random() * Math.max(0, size - width - margin*2);
+  const spacingMult = config.bombardierSpacingMultiplier || 1;
+  const candidate = () => view.viewX + margin + Math.random() * Math.max(0, size - width - margin*2);
+  let x = candidate();
+  if(spacingMult > 1 && mission.targets && mission.targets.length){
+    const attempts = 20;
+    let fallbackX = null;
+    let fallbackScore = -Infinity;
+    for(let attempt=0; attempt<attempts; attempt++){
+      const candidateX = candidate();
+      const candidateCenter = candidateX + width/2;
+      let ok = true;
+      let minRatio = Infinity;
+      for(const existing of mission.targets){
+        if(!existing || existing.removed) continue;
+        const existingWidth = existing.width || 0;
+        if(existingWidth <= 0) continue;
+        const existingCenter = existing.x + existingWidth/2;
+        const requiredGap = spacingMult * Math.max(width, existingWidth);
+        const gap = Math.abs(candidateCenter - existingCenter);
+        const ratio = requiredGap > 0 ? gap / requiredGap : 1;
+        minRatio = Math.min(minRatio, ratio);
+        if(gap < requiredGap){
+          ok = false;
+        }
+      }
+      if(ok){
+        x = candidateX;
+        fallbackX = candidateX;
+        break;
+      }
+      if(minRatio > fallbackScore){
+        fallbackScore = minRatio;
+        fallbackX = candidateX;
+      }
+    }
+    if(fallbackX !== null){
+      x = fallbackX;
+    }
+  }
   const y = view.viewY - height - 60 - Math.random()*60;
   const hp = config.terrain === 'yacht' ? 3 : 2;
   const peopleCount = config.terrain === 'yacht' ? 8 : 10;
@@ -9911,7 +10065,7 @@ function attack(){
     const bx = player.x + (dir>0?player.w:0);
     const by = player.y + 18;
     for(let i=0;i<3;i++){
-      bullets.push({type:'flame', x:bx, y:by+(Math.random()*10-5), vx: dir*(6+Math.random()*2), vy:(Math.random()*2-1), life:220, from:'player'});
+      bullets.push({type:'flame', x:bx, y:by+(Math.random()*10-5), vx: dir*(6+Math.random()*2), vy:(Math.random()*2-1), life:440, from:'player'});
     }
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+3000; }
   } else if(player.weapon==='machineGun'){
@@ -10229,10 +10383,15 @@ function update(dt){
   if(!seenDoor && (inViewport(door.x) || Math.abs(player.x - door.x) < W*0.4)){ seenDoor=true; }
 
   if(timeLeftMs()<=0){
-    if(!state.midnightRage){
+    if(!state.midnightRageTriggered){
       activateMidnightRage();
       return;
     }
+    const nowMs = now();
+    if(state.midnightRage && state.midnightRageUntil && nowMs >= state.midnightRageUntil){
+      concludeMidnightRage();
+    }
+    applyMidnightDebtGrowth(nowMs);
   }
 
   if(topDownState){
