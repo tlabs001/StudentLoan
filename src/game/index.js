@@ -779,6 +779,129 @@ const MUSIC_TRACKS = {
         ]
       }
     ]
+  },
+  vent: {
+    tempo: 122,
+    voices: [
+      {
+        wave: 'triangle',
+        gain: 0.09,
+        release: 0.24,
+        sequence: [
+          { note: 'C4', beats: 0.5 },
+          { note: 'E4', beats: 0.5 },
+          { rest: true, beats: 0.25 },
+          { note: 'G4', beats: 0.25 },
+          { note: 'A4', beats: 0.5 },
+          { note: 'E4', beats: 0.5 },
+          { rest: true, beats: 0.25 },
+          { note: 'D4', beats: 0.25 }
+        ]
+      },
+      {
+        wave: 'sine',
+        gain: 0.06,
+        release: 0.28,
+        sequence: [
+          { note: 'A3', beats: 1 },
+          { rest: true, beats: 0.5 },
+          { note: 'F3', beats: 0.5 },
+          { note: 'G3', beats: 1 },
+          { rest: true, beats: 0.5 },
+          { note: 'E3', beats: 0.5 }
+        ]
+      }
+    ]
+  },
+  boss: {
+    tempo: 136,
+    voices: [
+      {
+        wave: 'square',
+        gain: 0.15,
+        release: 0.18,
+        sequence: [
+          { note: 'D5', beats: 0.5 },
+          { note: 'F5', beats: 0.5 },
+          { note: 'G5', beats: 0.5 },
+          { note: 'A5', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'F5', beats: 0.5 },
+          { note: 'E5', beats: 0.5 },
+          { note: 'C5', beats: 0.5 }
+        ]
+      },
+      {
+        wave: 'sawtooth',
+        gain: 0.08,
+        release: 0.22,
+        sequence: [
+          { note: 'D3', beats: 1 },
+          { note: 'C3', beats: 1 },
+          { note: 'Bb2', beats: 1 },
+          { note: 'F3', beats: 1 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.07,
+        release: 0.16,
+        sequence: [
+          { note: 'A4', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'G4', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'F4', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'E4', beats: 0.25 },
+          { rest: true, beats: 0.25 }
+        ]
+      }
+    ]
+  },
+  warzone: {
+    tempo: 148,
+    voices: [
+      {
+        wave: 'sawtooth',
+        gain: 0.14,
+        release: 0.2,
+        sequence: [
+          { note: 'E4', beats: 0.25 },
+          { note: 'G4', beats: 0.25 },
+          { note: 'A4', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'B4', beats: 0.25 },
+          { rest: true, beats: 0.25 },
+          { note: 'A4', beats: 0.25 },
+          { rest: true, beats: 0.25 }
+        ]
+      },
+      {
+        wave: 'triangle',
+        gain: 0.1,
+        release: 0.3,
+        sequence: [
+          { note: 'E2', beats: 1 },
+          { note: 'D2', beats: 1 },
+          { note: 'C2', beats: 1 },
+          { note: 'B1', beats: 1 }
+        ]
+      },
+      {
+        wave: 'square',
+        gain: 0.06,
+        release: 0.14,
+        sequence: [
+          { note: 'E5', beats: 0.5 },
+          { rest: true, beats: 0.25 },
+          { note: 'G5', beats: 0.25 },
+          { note: 'A5', beats: 0.5 },
+          { rest: true, beats: 0.25 },
+          { note: 'G5', beats: 0.25 }
+        ]
+      }
+    ]
   }
 };
 
@@ -916,6 +1039,85 @@ function chime(){ beep({freq:740,dur:0.08}); setTimeout(()=>beep({freq:1100,dur:
 function lockedBuzz(){ motor({startFreq:160,endFreq:80,dur:0.2,gain:0.06}); }
 function doorOpenSFX(){ motor({startFreq:220,endFreq:90,dur:0.8,gain:0.08}); }
 function boom(){ motor({startFreq:80,endFreq:40,dur:0.4,gain:0.12}); }
+
+function playGunshot(kind='pistol'){
+  try{
+    const ctx = getAC();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const cfg = {
+      pistol:{ start:620, end:240, dur:0.12, gain:0.1, type:'square' },
+      silenced:{ start:420, end:180, dur:0.16, gain:0.05, type:'sine' },
+      machineGun:{ start:760, end:320, dur:0.08, gain:0.08, type:'sawtooth' },
+      grenade:{ start:340, end:120, dur:0.22, gain:0.08, type:'triangle' },
+      outside:{ start:600, end:220, dur:0.1, gain:0.07, type:'square' }
+    };
+    const opts = cfg[kind] || cfg.pistol;
+    const nowT = ctx.currentTime;
+    osc.type = opts.type;
+    gain.gain.setValueAtTime(0.0001, nowT);
+    gain.gain.linearRampToValueAtTime(opts.gain, nowT + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, nowT + opts.dur);
+    osc.frequency.setValueAtTime(opts.start, nowT);
+    osc.frequency.exponentialRampToValueAtTime(opts.end, nowT + opts.dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(nowT);
+    osc.stop(nowT + opts.dur + 0.06);
+  }catch(e){}
+}
+
+function playServerExplosion(){
+  boom();
+  try{
+    const ctx = getAC();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const nowT = ctx.currentTime;
+    osc.type = 'sawtooth';
+    gain.gain.setValueAtTime(0.0001, nowT);
+    gain.gain.linearRampToValueAtTime(0.14, nowT + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, nowT + 0.42);
+    osc.frequency.setValueAtTime(260, nowT);
+    osc.frequency.exponentialRampToValueAtTime(60, nowT + 0.36);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(nowT);
+    osc.stop(nowT + 0.5);
+  }catch(e){}
+}
+
+function playGoonDeath(){
+  try{
+    const ctx = getAC();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const nowT = ctx.currentTime;
+    const start = 240 + Math.random()*90;
+    const end = 110 + Math.random()*40;
+    osc.type = 'triangle';
+    gain.gain.setValueAtTime(0.0001, nowT);
+    gain.gain.linearRampToValueAtTime(0.12, nowT + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, nowT + 0.34);
+    osc.frequency.setValueAtTime(start, nowT);
+    osc.frequency.exponentialRampToValueAtTime(end, nowT + 0.28);
+    const rasp = ctx.createOscillator();
+    const raspGain = ctx.createGain();
+    rasp.type = 'square';
+    rasp.frequency.setValueAtTime(start*0.5, nowT);
+    raspGain.gain.setValueAtTime(0.0001, nowT);
+    raspGain.gain.linearRampToValueAtTime(0.05, nowT + 0.02);
+    raspGain.gain.exponentialRampToValueAtTime(0.0001, nowT + 0.22);
+    osc.connect(gain);
+    rasp.connect(raspGain);
+    gain.connect(ctx.destination);
+    raspGain.connect(ctx.destination);
+    osc.start(nowT);
+    osc.stop(nowT + 0.4);
+    rasp.start(nowT);
+    rasp.stop(nowT + 0.3);
+  }catch(e){}
+}
 
 // ===== Board & CEO Codex =====
 const PROFILE_DECK = [
@@ -1381,6 +1583,7 @@ let ecoBossActive = false;
 let ecoBoss = null;
 let ecoProjectiles = [];
 let hostagesInRoom = [];
+let finalHostages = [];
 let hellscapeState = null;
 let collectionsPressure = 1;
 let ceoQTEAttempted = false;
@@ -1549,7 +1752,21 @@ function clearFeather(reason){
   return true;
 }
 
+function markServerDestroyed(server, { reward=0, message=null }={}){
+  if(!server || server.destroyed) return false;
+  server.destroyed = true;
+  playServerExplosion();
+  if(Number.isFinite(reward) && reward !== 0){
+    addChecking(reward);
+    if(message){ notify(message); }
+  } else if(message){
+    notify(message);
+  }
+  return true;
+}
+
 function desiredMusicMode(){
+  if(warzoneMissionState) return 'warzone';
   if(inSub) return 'vent';
   if(boardRoomActive) return 'boss';
   return 'level';
@@ -1580,6 +1797,10 @@ const codexPanel = document.getElementById('codexPanel');
 const codexGrid = document.getElementById('codexGrid');
 const codexProgress = document.getElementById('codexProgress');
 const codexCloseBtn = document.getElementById('codexClose');
+const killStatsEl = document.getElementById('killStats');
+const deathStatsEl = document.getElementById('deathStats');
+const refinanceStatsEl = document.getElementById('refinanceStats');
+const collectionsStatEl = document.getElementById('collectionsStat');
 const hpFill = document.getElementById('hpFill');
 const hpText = document.getElementById('hpText');
 const savingsFill = document.getElementById('savingsFill');
@@ -1644,6 +1865,47 @@ const weaponRequirements = {
   saber: { type:'files', amount:25, label:'Files 25' },
   machineGun: { type:'intel', amount:40, label:'Intel 40' }
 };
+
+const hudTabButtons = Array.from(document.querySelectorAll('.hud-tab-btn'));
+const hudTabPanels = new Map(Array.from(document.querySelectorAll('.hud-tab-panel')).map(panel => [panel.dataset.tab, panel]));
+let activeHudTab = null;
+
+function setHudTabActive(tabId){
+  if(!tabId || !hudTabPanels.has(tabId)){
+    hudTabPanels.forEach(panel=>panel.classList.remove('open'));
+    hudTabButtons.forEach(btn=>{
+      btn.classList.remove('active');
+      btn.classList.add('inactive');
+    });
+    activeHudTab = null;
+    return;
+  }
+  hudTabPanels.forEach((panel, id)=>{
+    panel.classList.toggle('open', id === tabId);
+  });
+  hudTabButtons.forEach(btn=>{
+    const isActive = btn.dataset.tab === tabId;
+    btn.classList.toggle('active', isActive);
+    btn.classList.toggle('inactive', !isActive);
+  });
+  activeHudTab = tabId;
+}
+
+hudTabButtons.forEach(btn=>{
+  if(!btn.classList.contains('active')){
+    btn.classList.add('inactive');
+  }
+  btn.addEventListener('click', ()=>{
+    const tab = btn.dataset.tab;
+    if(activeHudTab === tab){
+      setHudTabActive(null);
+    } else {
+      setHudTabActive(tab);
+    }
+  });
+});
+
+setHudTabActive('weapons');
 
 function setMode(m){
   testMode = (m==='test');
@@ -3168,10 +3430,12 @@ function fireOutsideShot(){
   outsideLastShot = t;
   outsideCrosshairFlashUntil = t + 140;
   outsideShotPulseUntil = t + 200;
+  playGunshot('outside');
   const aimX = outsideScope.x;
   const aimY = outsideScope.y;
   let hit = false;
   let workerBonus = false;
+  let goonDown = false;
   for(const sniper of outsideCounterSnipers){
     if(!sniper || sniper.dead) continue;
     const left = sniper.x;
@@ -3184,6 +3448,7 @@ function fireOutsideShot(){
       sniper.removeAt = t + 1200;
       outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
       hit = true;
+      goonDown = true;
       break;
     }
   }
@@ -3200,6 +3465,7 @@ function fireOutsideShot(){
         guard.removeAt = t + 260;
         outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
         hit = true;
+        goonDown = true;
         break;
       }
     }
@@ -3226,6 +3492,7 @@ function fireOutsideShot(){
         guard.respawnAt = t + 1800;
         outsideKillCount = Math.min(OUTSIDE_KILL_TARGET, outsideKillCount + 1);
         hit = true;
+        goonDown = true;
         break;
       }
     }
@@ -3251,6 +3518,9 @@ function fireOutsideShot(){
     }
   }
   if(hit){
+    if(goonDown){
+      playGoonDeath();
+    }
     const freq = workerBonus ? 540 : 720;
     const dur = workerBonus ? 0.07 : 0.08;
     beep({freq, dur});
@@ -4131,6 +4401,32 @@ function makeCeoPenthouseArena(yBase){
   ceoArenaState.shockwaves = [];
   ceoArenaState.lastSupplyWave = -1;
   ceoArenaState.initialSupplyDelivered = false;
+
+  finalHostages = [];
+  const captiveNames = getActiveHostages();
+  if(captiveNames.length){
+    const spacing = 48;
+    const anchor = arenaRight - 80;
+    const startX = Math.max(arenaLeft + 120, anchor - (captiveNames.length - 1) * spacing);
+    const groundY = yBase;
+    captiveNames.forEach((name, index)=>{
+      finalHostages.push({
+        name,
+        x: startX + index * spacing,
+        y: groundY,
+        w: 24,
+        h: 44,
+        freed:false,
+        safe:false,
+        removed:false,
+        vx:0,
+        vy:0,
+        speed:1.85,
+        escapeDir:1,
+        hitFlashUntil:0
+      });
+    });
+  }
 
   notify('The penthouse reveals a marble coliseum. Step into the arena to begin the gauntlet.');
   centerNote('CEO Coliseum — enter the arena.', 2000);
@@ -5016,6 +5312,7 @@ function makeLevel(i){
   door=null; alarm=false; alarmUntil=0; destroyedOnFloor=0; totalServersOnFloor=0;
   inSub=false; sub=null; entryVentWorld=null; smokeActive=false; seenDoor=false;
   ecoBossActive=false; ecoBoss=null; ecoProjectiles=[]; hostagesInRoom=[];
+  finalHostages=[];
   hellscapeState=null;
   plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
   topDownState = null;
@@ -7602,6 +7899,7 @@ function startRooftopMission(){
   attackHeld = false;
   notify('Elevator breach complete — New mission unlocked: Jump in Rates.');
   centerNote('Press SPACE to clip into the zip line.', 2200);
+  updateMusicForState();
 }
 
 function handleRooftopKeyDown(key, event){
@@ -7842,6 +8140,7 @@ function startWarzoneMission(){
   player.weapon = 'machineGun';
   notify('Mission Update: ITS ONLY MONEY. Sneak behind the cars and reach the mounted M60.');
   centerNote('Move forward — sneak behind the cars.', 2400);
+  updateMusicForState();
 }
 
 function handleWarzoneKeyDown(key, event){
@@ -7884,6 +8183,7 @@ function handleWarzoneFire(){
   if(mission.fireCooldown > 0) return;
   mission.fireCooldown = 0.065;
   mission.muzzleFlashUntil = nowTs + 180;
+  playGunshot('machineGun');
   let targetIndex = -1;
   let targetEnemy = null;
   for(let i=0; i<mission.enemies.length; i++){
@@ -7899,6 +8199,7 @@ function handleWarzoneFire(){
   if(targetEnemy){
     targetEnemy.hp -= 1;
     if(targetEnemy.hp <= 0){
+      playGoonDeath();
       mission.enemies.splice(targetIndex,1);
       mission.killCount++;
       runStats.kills = (runStats.kills||0) + 1;
@@ -8038,6 +8339,7 @@ function updateWarzoneMission(dt){
       if(mission.enemies.length){
         const index = Math.floor(Math.random()*mission.enemies.length);
         const enemy = mission.enemies.splice(index,1)[0];
+        playGoonDeath();
         mission.killCount++;
         runStats.kills = (runStats.kills||0) + 1;
         if(mission.goreUnlocked){
@@ -9510,6 +9812,39 @@ function spawnEcoBossRoom(floor){
   updateHostageHud();
 }
 
+function rescueCosignerHostage(name, { showCenter=false }={}){
+  hostageState.taken = hostageState.taken.filter((n)=>n!==name);
+  if(!hostageState.rescued.includes(name)) hostageState.rescued.push(name);
+  reduceLoanByPercent(0.10);
+  applyHopeBuff();
+  const balanceText = `$${fmtCurrency(player.loanBalance)}`;
+  ui.toast(`Freed ${name}! Loan reduced to ${balanceText}.`);
+  if(showCenter){
+    centerNote(`${name} freed!`, 1600);
+  }
+  updateHostageHud();
+  return balanceText;
+}
+
+function freeFinalHostage(hostage){
+  if(!hostage || hostage.freed || hostage.removed) return false;
+  hostage.freed = true;
+  hostage.safe = false;
+  hostage.onGround = false;
+  hostage.vx = 0;
+  hostage.vy = -6.5;
+  const rightExit = levelWidth() + 80;
+  const leftExit = -80;
+  const exitHint = door ? (door.x + door.w + 120) : rightExit;
+  const runDir = Math.sign(exitHint - hostage.x) || 1;
+  hostage.escapeDir = runDir;
+  hostage.escapeTarget = runDir >= 0 ? rightExit : leftExit;
+  hostage.escapeCelebrated = false;
+  rescueCosignerHostage(hostage.name, { showCenter:true });
+  notify(`${hostage.name} freed — guide them to the exit!`);
+  return true;
+}
+
 function spawnHostageChair(name, slot){
   const chair = {
     name,
@@ -9526,12 +9861,7 @@ function spawnHostageChair(name, slot){
     if(chair.freed || chair.lost) return;
     chair.freed = true;
     chair.removed = true;
-    hostageState.taken = hostageState.taken.filter((n)=>n!==name);
-    if(!hostageState.rescued.includes(name)) hostageState.rescued.push(name);
-    reduceLoanByPercent(0.10);
-    applyHopeBuff();
-    ui.toast(`Freed ${name}! Loan reduced to $${fmtCurrency(player.loanBalance)}.`);
-    updateHostageHud();
+    rescueCosignerHostage(name);
   };
   chair.fail = ()=>{
     if(chair.freed || chair.lost) return;
@@ -9555,6 +9885,57 @@ function updateHostageChairs(dt){
     }
   }
   hostagesInRoom = hostagesInRoom.filter((chair)=>chair && !chair.removed);
+}
+
+function updateFinalHostages(dt){
+  if(!finalHostages.length) return;
+  const groundY = floorSlab ? floorSlab.y : (H - 50);
+  const rightExit = levelWidth() + 80;
+  const leftExit = -80;
+  let frameScale = dt ? dt * 60 : 0;
+  if(!Number.isFinite(frameScale) || frameScale < 0){
+    frameScale = 0;
+  }
+  for(const hostage of finalHostages){
+    if(!hostage || hostage.removed) continue;
+    if(hostage.freed){
+      if(frameScale <= 0){
+        hostage.onGround = hostage.y >= groundY;
+        continue;
+      }
+      let remaining = frameScale;
+      while(remaining > 0 && !hostage.removed){
+        const step = Math.min(1, remaining);
+        hostage.vy = (hostage.vy || 0) + GRAV * 0.85 * step;
+        hostage.y += hostage.vy * step;
+        if(hostage.y >= groundY){
+          hostage.y = groundY;
+          hostage.vy = 0;
+          hostage.onGround = true;
+        } else if(hostage.y < groundY){
+          hostage.onGround = false;
+        }
+        if(hostage.onGround){
+          const dir = hostage.escapeDir || 1;
+          const speed = (hostage.speed || 1.8) * step;
+          hostage.x += dir * speed;
+          const exitTarget = typeof hostage.escapeTarget === 'number'
+            ? hostage.escapeTarget
+            : (dir >= 0 ? rightExit : leftExit);
+          const escaped = dir >= 0 ? (hostage.x >= exitTarget) : (hostage.x <= exitTarget);
+          if(escaped && !hostage.safe){
+            hostage.safe = true;
+            hostage.removed = true;
+            notify(`${hostage.name} escaped the penthouse!`);
+          }
+        }
+        remaining -= step;
+      }
+    } else {
+      hostage.idlePhase = (hostage.idlePhase || 0) + dt * 2.2;
+    }
+  }
+  finalHostages = finalHostages.filter(h=>h && !h.removed);
 }
 
 function spawnRootSnare(){
@@ -9999,6 +10380,18 @@ function interact(){
         }
       }
     }
+    if(finalHostages.length){
+      for(const hostage of finalHostages){
+        if(!hostage || hostage.freed || hostage.removed) continue;
+        const height = hostage.h || 44;
+        const bounds = { x: hostage.x - 18, y: (hostage.y || 0) - height - 12, w: 36, h: height + 18 };
+        if(rect(p, bounds)){
+          if(freeFinalHostage(hostage)){
+            beep({freq:780});
+          }
+        }
+      }
+    }
     // Pickups
     for(const station of arcadeStations){
       if(station && !station.used){
@@ -10164,7 +10557,15 @@ function interact(){
     for(const drawer of deskDrawers){
       if(drawer && !drawer.used && rect(p,{x:drawer.x-6,y:drawer.y-6,w:drawer.w+12,h:drawer.h+12})){
         drawer.used=true;
-        if(Math.random()<0.1){
+        const roll = Math.random();
+        if(roll < 0.001){
+          player.loanBalance = 0;
+          centerNote('Loan record shredded! Debt wiped clean.', 2000);
+          notify('You destroyed your loan record — debt forgiven.');
+          ui.toast('Debt wiped clean. Keep going!');
+          chime();
+          updateHudCommon();
+        } else if(roll < 0.101){
           const reward=['intel','feather','upgrade'][Math.floor(Math.random()*3)];
           if(reward==='intel'){
             player.intel++;
@@ -10411,6 +10812,7 @@ function attack(){
     bullets.push(bullet);
     handlePlayerBulletFired('bullet');
     stats.muzzleUntil = t + 80;
+    playGunshot(player.weapon==='silenced' ? 'silenced' : 'pistol');
     if(player.weapon==='pistol' && !player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+4000; }
   } else if(player.weapon==='flame'){
     const stats = player.flame;
@@ -10448,6 +10850,7 @@ function attack(){
     bullets.push({type:'bullet', x:bx, y:by, vx: dir*14, vy:0, life:900, from:'player', rapid:true});
     handlePlayerBulletFired('bullet');
     stats.muzzleUntil = t + 110;
+    playGunshot('machineGun');
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+5000; }
   } else if(player.weapon==='grenade'){
     const stats = player.grenade;
@@ -10460,6 +10863,7 @@ function attack(){
     const bx = player.x + (dir>0?player.w:0);
     const by = player.y + 12;
     bullets.push({type:'grenade', x:bx, y:by, vx: dir*6, vy:-3, life:1100, from:'player'});
+    playGunshot('grenade');
     if(!player.hidden && !player.inVent){ alarm=true; alarmUntil=now()+6000; }
   } else if(player.weapon==='melee' || player.weapon==='saber'){
     const stats = player.weapon==='saber' ? player.saber : player.melee;
@@ -11194,6 +11598,7 @@ function update(dt){
     for(let i=guards.length-1;i>=0;i--){
       const defeated = guards[i];
       if(defeated.hp<=0){
+        playGoonDeath();
         guards.splice(i,1);
         runStats.kills += 1;
         let rewardHandled = false;
@@ -11255,10 +11660,12 @@ function update(dt){
       }
     }
 
+    updateFinalHostages(dt);
+
     // Servers armed -> destroyed
     for(const s of servers){
       if(!s.destroyed && s.armed && now()>s.armTime){
-        s.destroyed=true; addChecking(10); notify("+$10 (server bonus)");
+        markServerDestroyed(s, { reward:10, message:"+$10 (server bonus)" });
       }
     }
     destroyedOnFloor = servers.filter(x=>x.destroyed).length;
@@ -11333,10 +11740,24 @@ function update(dt){
     }
     // removals
     for(let i=sub.guards.length-1;i>=0;i--){
-      if(sub.guards[i].hp<=0){ sub.guards.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (vent guard)"); checkVentForMinimapUnlock(); }
+      if(sub.guards[i].hp<=0){
+        playGoonDeath();
+        sub.guards.splice(i,1);
+        runStats.kills += 1;
+        addChecking(10);
+        notify("+$10 (vent guard)");
+        checkVentForMinimapUnlock();
+      }
     }
     for(let i=sub.bosses.length-1;i>=0;i--){
-      if(sub.bosses[i].hp<=0){ sub.bosses.splice(i,1); runStats.kills += 1; addChecking(10); notify("+$10 (boss)"); checkVentForMinimapUnlock(); }
+      if(sub.bosses[i].hp<=0){
+        playGoonDeath();
+        sub.bosses.splice(i,1);
+        runStats.kills += 1;
+        addChecking(10);
+        notify("+$10 (boss)");
+        checkVentForMinimapUnlock();
+      }
     }
   }
 
@@ -11417,7 +11838,7 @@ function update(dt){
             if(b.type==='grenade'){ detonateGrenade(b); break; }
             const serverDamage = b.type==='flame' ? scaledPlayerDamage(3) : scaledPlayerDamage(2);
             s.hp -= Math.max(1, Math.round(serverDamage));
-            if(s.hp<=0){ s.destroyed=true; }
+            if(s.hp<=0){ markServerDestroyed(s); }
             b.life=0;
             break;
           }
@@ -11598,6 +12019,13 @@ function updateHudCommon(){
   if(filesPill) filesPill.textContent = `Files: ${player.files}`;
   if(intelPill) intelPill.textContent = `Intel: ${player.intel}`;
   if(featherPill) featherPill.textContent = player.hasFeather ? `Feather: ${Math.round(player.featherEnergy)}` : 'Feather: —';
+  if(killStatsEl) killStatsEl.textContent = `Kills: ${runStats.kills || 0}`;
+  if(deathStatsEl) deathStatsEl.textContent = `Deaths: ${runStats.deaths || 0}`;
+  if(refinanceStatsEl) refinanceStatsEl.textContent = `Refinances: ${runStats.refinances || 0}`;
+  if(collectionsStatEl){
+    const pressure = Number.isFinite(collectionsPressure) ? Math.max(0, collectionsPressure) : 1;
+    collectionsStatEl.textContent = `Collections Pressure ×${pressure.toFixed(2)}`;
+  }
   updateSpecialFileUI();
   updateMinimapHighlight();
 }
@@ -12940,18 +13368,19 @@ function draw(){
       const hasMenu = !!vend.menu;
       const soldOut = hasMenu && (vend.depleted || vendingMachineSoldOut(vend));
       let bodyColor = '#4c64aa';
+      let panelColor = 'rgba(255,255,255,0.25)';
       if(hasMenu){
-        bodyColor = soldOut ? '#2f3f45' : '#3ea89a';
-      }
-      if(vend.broken && !hasMenu){
+        bodyColor = soldOut ? '#4b1d1d' : '#cf2d2d';
+        panelColor = soldOut ? 'rgba(255,210,210,0.2)' : 'rgba(255,255,255,0.42)';
+      } else if(vend.broken){
         bodyColor = '#3a3a3a';
       }
       ctx.fillStyle = bodyColor;
       ctx.fillRect(vend.x+ox, vend.y, vend.w, vend.h);
-      ctx.fillStyle = hasMenu ? 'rgba(255,255,255,0.32)' : 'rgba(255,255,255,0.25)';
+      ctx.fillStyle = panelColor;
       ctx.fillRect(vend.x+4+ox, vend.y+8, vend.w-8, vend.h-24);
       if(hasMenu && !soldOut){
-        ctx.fillStyle = 'rgba(60,255,200,0.25)';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.fillRect(vend.x+6+ox, vend.y+10, vend.w-12, 6);
       }
     }
@@ -13085,6 +13514,40 @@ function draw(){
           ctx.fillStyle = '#6bff94';
           ctx.fillRect(hx-16, baseY-height-10, 32 * ratio, 4);
         }
+      }
+    }
+
+    if(finalHostages.length){
+      for(const hostage of finalHostages){
+        if(!hostage || hostage.removed) continue;
+        const hx = hostage.x + ox;
+        const baseY = hostage.y || (floorSlab ? floorSlab.y : H-50);
+        const height = hostage.h || 44;
+        const bob = hostage.freed ? 0 : Math.sin(hostage.idlePhase || 0) * 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(hx-14, baseY-6, 28, 6);
+        const bodyColour = hostage.freed ? 'rgba(180,255,210,0.9)' : 'rgba(255,230,190,0.9)';
+        ctx.fillStyle = bodyColour;
+        ctx.fillRect(hx-11, baseY-height+bob+4, 22, height-8);
+        ctx.fillStyle = 'rgba(58,44,32,0.86)';
+        ctx.fillRect(hx-9, baseY-height-6+bob, 18, 12);
+        if(!hostage.freed){
+          ctx.strokeStyle = 'rgba(188,120,80,0.7)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(hx-12, baseY-height/2+bob);
+          ctx.lineTo(hx+12, baseY-height/2+bob);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          ctx.fillRect(hx-8, baseY-height+bob+6, 16, 4);
+        }
+        ctx.save();
+        ctx.fillStyle = 'rgba(10,16,24,0.7)';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(hostage.name || 'Hostage', hx, baseY-height-10);
+        ctx.restore();
       }
     }
 

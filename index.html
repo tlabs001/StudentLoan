@@ -348,21 +348,74 @@
 <canvas id="game" width="1180" height="660" tabindex="0"></canvas>
 
 <div class="hudBox">
-  <div class="hud-line small">
-    <div class="btnGroup" id="modeGroup">
-      <span class="small">Mode:</span>
-      <button class="btn" data-mode="test" id="btnTest">Test</button>
-      <button class="btn active" data-mode="normal" id="btnNormal">Normal</button>
+  <div class="hud-tabs" id="hudTabs">
+    <div class="hud-tab-headers">
+      <button type="button" class="hud-tab-btn active" data-tab="weapons">Weapons</button>
+      <button type="button" class="hud-tab-btn" data-tab="intel">Intel &amp; Files</button>
+      <button type="button" class="hud-tab-btn" data-tab="kills">Kill Record</button>
+      <button type="button" class="hud-tab-btn" data-tab="stats">Stats</button>
     </div>
-    <div class="btnGroup" id="weaponGroup">
-      <span class="small">Weapon:</span>
-      <button class="btn active" data-weapon="pistol" id="btnPistol">Pistol (1)</button>
-      <button class="btn" data-weapon="silenced" id="btnSilenced">Silenced (2)</button>
-      <button class="btn" data-weapon="flame" id="btnFlame">Flame (3)</button>
-      <button class="btn" data-weapon="melee" id="btnMelee">Melee (4)</button>
-      <button class="btn locked" data-weapon="grenade" id="btnGrenade" data-lock="Intel 20">Grenade (5)</button>
-      <button class="btn locked" data-weapon="saber" id="btnSaber" data-lock="Files 25">Saber (6)</button>
-      <button class="btn locked" data-weapon="machineGun" id="btnMachine" data-lock="Intel 40">Machine Gun (7)</button>
+    <div class="hud-tab-panels">
+      <div class="hud-tab-panel open" data-tab="weapons">
+        <div class="hud-line small">
+          <div class="btnGroup" id="modeGroup">
+            <span class="small">Mode:</span>
+            <button class="btn" data-mode="test" id="btnTest">Test</button>
+            <button class="btn active" data-mode="normal" id="btnNormal">Normal</button>
+          </div>
+          <div class="btnGroup" id="weaponGroup">
+            <span class="small">Weapon:</span>
+            <button class="btn active" data-weapon="pistol" id="btnPistol">Pistol (1)</button>
+            <button class="btn" data-weapon="silenced" id="btnSilenced">Silenced (2)</button>
+            <button class="btn" data-weapon="flame" id="btnFlame">Flame (3)</button>
+            <button class="btn" data-weapon="melee" id="btnMelee">Melee (4)</button>
+            <button class="btn locked" data-weapon="grenade" id="btnGrenade" data-lock="Intel 20">Grenade (5)</button>
+            <button class="btn locked" data-weapon="saber" id="btnSaber" data-lock="Files 25">Saber (6)</button>
+            <button class="btn locked" data-weapon="machineGun" id="btnMachine" data-lock="Intel 40">Machine Gun (7)</button>
+          </div>
+        </div>
+        <div class="hud-line">
+          <div class="hud-weapon">
+            <div id="weaponName" class="name">1 • Pistol</div>
+            <div id="weaponAmmo" class="ammo">Ammo 0/0</div>
+          </div>
+          <button id="mapBtn" type="button" class="btn map locked">Map (0)</button>
+          <button id="deckBtn" type="button" class="btn deck">Board Deck (P) 0/9</button>
+        </div>
+      </div>
+      <div class="hud-tab-panel" data-tab="intel">
+        <div class="hud-line small">
+          <div id="servers">Servers: 0/0</div>
+          <div id="alarms">Alarms: OK</div>
+          <div id="inv">Inv: —</div>
+        </div>
+        <div class="hud-line small">
+          <span class="pill" id="filesPill">Files: 0</span>
+          <span class="pill" id="intelPill">Intel: 0</span>
+          <span class="pill" id="featherPill">Feather: —</span>
+          <span class="pill codexBtn locked" id="specialFilesPill" title="Press 9 to view tower dossiers">Special Files: 0/10</span>
+        </div>
+      </div>
+      <div class="hud-tab-panel" data-tab="kills">
+        <div class="hud-line small">
+          <div id="hostageInfo" class="hud-hostages" title="No hostages captured.">Hostages: 0</div>
+          <div id="killStats" class="hud-stat">Kills: 0</div>
+          <div id="deathStats" class="hud-stat">Deaths: 0</div>
+        </div>
+        <div class="hud-line small">
+          <div id="refinanceStats" class="hud-stat">Refinances: 0</div>
+        </div>
+      </div>
+      <div class="hud-tab-panel" data-tab="stats">
+        <div class="hud-line small">
+          <div id="floorLabel" class="hud-flex">LEVEL —</div>
+          <div id="miniBossCount">Mini-Bosses: 0</div>
+        </div>
+        <div class="hud-line small">
+          <div id="featherTimer">Feather —</div>
+          <div id="collectionsStat" class="hud-stat">Collections Pressure ×1.0</div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="hud-line">
@@ -382,31 +435,8 @@
       <span id="loanText" class="value">-$0</span>
     </div>
   </div>
-  <div class="hud-line">
-    <div id="hostageInfo" class="hud-hostages" title="No hostages captured.">Hostages: 0</div>
-    <div class="hud-weapon">
-      <div id="weaponName" class="name">1 • Pistol</div>
-      <div id="weaponAmmo" class="ammo">Ammo 0/0</div>
-    </div>
-    <button id="mapBtn" type="button" class="btn map locked">Map (0)</button>
-    <button id="deckBtn" type="button" class="btn deck">Board Deck (P) 0/9</button>
-  </div>
-  <div class="hud-line small">
-    <div id="floorLabel" class="hud-flex">LEVEL —</div>
-    <div id="miniBossCount">Mini-Bosses: 0</div>
-    <div id="featherTimer">Feather —</div>
+  <div class="hud-line small always-visible">
     <div id="time">--:-- ➜ --:--</div>
-  </div>
-  <div class="hud-line small">
-    <div id="servers">Servers: 0/0</div>
-    <div id="alarms">Alarms: OK</div>
-    <div id="inv">Inv: —</div>
-  </div>
-  <div class="hud-line small">
-    <span class="pill" id="filesPill">Files: 0</span>
-    <span class="pill" id="intelPill">Intel: 0</span>
-    <span class="pill" id="featherPill">Feather: —</span>
-    <span class="pill codexBtn locked" id="specialFilesPill" title="Press 9 to view tower dossiers">Special Files: 0/10</span>
   </div>
   <div class="note small" id="note">Good evening. Destroy the servers before midnight.</div>
 </div>
