@@ -228,6 +228,7 @@ const DRONE_MISSION_CONFIG = {
     hackWinsRequired: 3,
     hackLinesPerMatch: 6,
     drone: {
+      controlMode: 'bombardier',
       terrain: 'mansion',
       totalTargets: 36,
       maxActiveTargets: 5,
@@ -242,6 +243,7 @@ const DRONE_MISSION_CONFIG = {
     hackWinsRequired: 3,
     hackMaxGames: 20,
     drone: {
+      controlMode: 'bombardier',
       terrain: 'yacht',
       totalTargets: 20,
       maxActiveTargets: 4,
@@ -6377,38 +6379,121 @@ function concludeDroneHackMatch(mission, success, message){
   updateHudCommon();
 }
 
+function isBombardierMission(mission){
+  return !!(mission && mission.config && mission.config.drone && mission.config.drone.controlMode === 'bombardier');
+}
+
 function initializeDronePhase(mission){
   mission.phase = 'drone';
   mission.bombs = [];
   mission.explosions = [];
   mission.enemies = [];
   mission.enemyShots = [];
-  mission.targets = mission.targets.filter(t=>!t.destroyed || t.destructionTimer>0);
-  mission.areaSize = mission.config.drone && mission.config.drone.terrain === 'yacht' ? 5200 : 4200;
-  mission.drone = {
-    x: mission.areaSize/2,
-    y: mission.areaSize/2,
-    heading: -Math.PI/2,
-    speed: 240,
-    baseSpeed: 240,
-    health: 120,
-    maxHealth: 120,
-    dropCooldown:0,
-    damageFlash:0
-  };
-  mission.camera.x = mission.drone.x - W/2;
-  mission.camera.y = mission.drone.y - H/2;
+  mission.targets = [];
   mission.destroyedTargets = 0;
   mission.spawnedTargets = 0;
-  mission.targets = [];
-  const maxActive = mission.config.drone && mission.config.drone.maxActiveTargets ? mission.config.drone.maxActiveTargets : 4;
-  for(let i=0; i<maxActive; i++){
-    spawnDroneTarget(mission);
-  }
   mission.hackMessage = '';
+  mission.bombardier = null;
+  mission.drone = null;
+
+  if(isBombardierMission(mission)){
+    initializeBombardierPhase(mission);
+  } else {
+    mission.targets = mission.targets.filter(t=>!t.destroyed || t.destructionTimer>0);
+    mission.areaSize = mission.config.drone && mission.config.drone.terrain === 'yacht' ? 5200 : 4200;
+    mission.drone = {
+      x: mission.areaSize/2,
+      y: mission.areaSize/2,
+      heading: -Math.PI/2,
+      speed: 240,
+      baseSpeed: 240,
+      health: 120,
+      maxHealth: 120,
+      dropCooldown:0,
+      damageFlash:0
+    };
+    mission.camera.x = mission.drone.x - W/2;
+    mission.camera.y = mission.drone.y - H/2;
+    const maxActive = mission.config.drone && mission.config.drone.maxActiveTargets ? mission.config.drone.maxActiveTargets : 4;
+    for(let i=0; i<maxActive; i++){
+      spawnDroneTarget(mission);
+    }
+  }
+
   notify('Hack complete. Drone uplink acquired.');
   centerNote('Hack complete — drone strike authorized.', 2200);
   updateHudCommon();
+}
+
+function initializeBombardierPhase(mission){
+  const config = mission.config.drone || {};
+  const viewSize = Math.floor(Math.min(W, H) * 0.72);
+  const viewX = Math.floor((W - viewSize) / 2);
+  const viewY = Math.floor((H - viewSize) / 2);
+  mission.bombardier = {
+    viewSize,
+    viewX,
+    viewY,
+    centerX: viewX + viewSize / 2,
+    centerY: viewY + viewSize / 2,
+    aimX: viewX + viewSize / 2,
+    aimY: viewY + viewSize / 2,
+    aimSpeed: 240,
+    aimRange: viewSize * 0.3,
+    scrollSpeed: (config.terrain === 'yacht' ? 260 : 220),
+    dropCooldown: 0,
+    spawnTimer: 0,
+    spawnInterval: 1.25,
+    groundOffset: 0
+  };
+  mission.camera.x = 0;
+  mission.camera.y = 0;
+  const maxActive = Math.max(1, (config.maxActiveTargets || 3));
+  for(let i=0; i<maxActive; i++){
+    spawnBombardierTarget(mission);
+  }
+}
+
+function spawnBombardierTarget(mission){
+  const config = mission.config.drone || {};
+  const view = mission.bombardier;
+  if(!view) return null;
+  if(mission.destroyedTargets >= (config.totalTargets || 12)) return null;
+  const size = view.viewSize;
+  const margin = size * 0.08;
+  const width = (config.terrain === 'yacht' ? size * (0.46 + Math.random()*0.12) : size * (0.35 + Math.random()*0.16));
+  const height = (config.terrain === 'yacht' ? width * (0.34 + Math.random()*0.08) : width * (0.46 + Math.random()*0.1));
+  const x = view.viewX + margin + Math.random() * Math.max(0, size - width - margin*2);
+  const y = view.viewY - height - 60 - Math.random()*60;
+  const hp = config.terrain === 'yacht' ? 3 : 2;
+  const peopleCount = config.terrain === 'yacht' ? 8 : 10;
+  const people = [];
+  for(let i=0;i<peopleCount;i++){
+    people.push({
+      ox: width * (0.18 + Math.random()*0.64),
+      oy: height * (0.15 + Math.random()*0.7),
+      alive:true,
+      fade:0
+    });
+  }
+  const target = {
+    id:`target-${Date.now()}-${Math.random().toString(16).slice(2,6)}`,
+    type: config.terrain || 'mansion',
+    x,
+    y,
+    width,
+    height,
+    speed: view.scrollSpeed * (0.92 + Math.random()*0.16),
+    hp,
+    maxHp: hp,
+    destroyed:false,
+    hitFlash:0,
+    smokeTimer:0,
+    people,
+    removed:false
+  };
+  mission.targets.push(target);
+  return target;
 }
 
 function spawnDroneTarget(mission){
@@ -6457,10 +6542,32 @@ function spawnDroneGuards(mission, target){
 }
 
 function dropDroneBomb(mission){
+  if(isBombardierMission(mission)){
+    return dropBombardierBomb(mission);
+  }
   if(!mission || !mission.drone) return false;
   if(mission.drone.dropCooldown>0) return false;
   mission.bombs.push({ x: mission.drone.x, y: mission.drone.y, timer:0, travelTime:0.65 + Math.random()*0.1 });
   mission.drone.dropCooldown = 0.4;
+  return true;
+}
+
+function dropBombardierBomb(mission){
+  const view = mission && mission.bombardier;
+  if(!view) return false;
+  if(view.dropCooldown > 0) return false;
+  const config = mission.config.drone || {};
+  const bomb = {
+    x: view.aimX,
+    y: view.viewY + 16,
+    vy: 60,
+    gravity: 900,
+    exploded:false,
+    done:false,
+    maxRadius: (config.terrain === 'yacht' ? view.viewSize * 0.21 : view.viewSize * 0.17)
+  };
+  mission.bombs.push(bomb);
+  view.dropCooldown = 0.5;
   return true;
 }
 
@@ -6721,6 +6828,11 @@ function computeRecommendedPlayerMove(chess){
 }
 
 function updateDronePhase(mission, dt){
+  if(isBombardierMission(mission)){
+    updateBombardierPhase(mission, dt);
+    updateHudCommon();
+    return;
+  }
   const drone = mission.drone;
   if(!drone) return;
   if(mission.input.left) drone.heading -= dt * 1.6;
@@ -6791,6 +6903,148 @@ function updateDronePhase(mission, dt){
   }
   mission.targets = mission.targets.filter(t=>!t.destroyed || t.destructionTimer>0);
   updateHudCommon();
+}
+
+function updateBombardierPhase(mission, dt){
+  const config = mission.config.drone || {};
+  const required = config.totalTargets || 12;
+  const view = mission.bombardier;
+  if(!view) return;
+
+  view.dropCooldown = Math.max(0, view.dropCooldown - dt);
+  const aimSpeed = view.aimSpeed;
+  if(mission.input.left) view.aimX -= aimSpeed * dt;
+  if(mission.input.right) view.aimX += aimSpeed * dt;
+  if(mission.input.up) view.aimY -= aimSpeed * dt * 0.75;
+  if(mission.input.down) view.aimY += aimSpeed * dt * 0.75;
+  const range = view.aimRange;
+  view.aimX = clamp(view.aimX, view.centerX - range, view.centerX + range);
+  view.aimY = clamp(view.aimY, view.centerY - range, view.centerY + range);
+  view.groundOffset = (view.groundOffset + view.scrollSpeed * dt) % view.viewSize;
+
+  const maxActive = Math.max(1, (config.maxActiveTargets || 3));
+  while(mission.targets.length < maxActive && mission.destroyedTargets < required){
+    spawnBombardierTarget(mission);
+  }
+
+  for(const target of mission.targets){
+    target.y += target.speed * dt;
+    target.hitFlash = Math.max(0, target.hitFlash - dt);
+    if(target.destroyed){
+      target.smokeTimer += dt;
+    }
+    for(const person of target.people){
+      if(!person.alive){
+        person.fade = Math.max(0, person.fade - dt*1.2);
+      }
+    }
+    if(target.y - target.height > view.viewY + view.viewSize + 40){
+      target.removed = true;
+    }
+  }
+  mission.targets = mission.targets.filter(t=>!t.removed);
+
+  for(const bomb of mission.bombs){
+    bomb.vy += bomb.gravity * dt;
+    bomb.y += bomb.vy * dt;
+    if(!bomb.exploded){
+      let hitTarget = null;
+      for(const target of mission.targets){
+        if(target.destroyed) continue;
+        if(bomb.x >= target.x && bomb.x <= target.x + target.width && bomb.y >= target.y && bomb.y <= target.y + target.height){
+          hitTarget = target;
+          break;
+        }
+      }
+      if(hitTarget){
+        triggerBombardierExplosion(mission, bomb.x, bomb.y, bomb.maxRadius);
+        bomb.exploded = true;
+        bomb.done = true;
+        continue;
+      }
+      if(bomb.y >= view.viewY + view.viewSize - 6){
+        triggerBombardierExplosion(mission, bomb.x, bomb.y, bomb.maxRadius);
+        bomb.exploded = true;
+        bomb.done = true;
+        continue;
+      }
+    }
+    if(bomb.y > view.viewY + view.viewSize + 60){
+      bomb.done = true;
+    }
+  }
+  mission.bombs = mission.bombs.filter(b=>!b.done);
+
+  for(const explosion of mission.explosions){
+    explosion.life -= dt;
+    explosion.radius = Math.min(explosion.maxRadius, explosion.radius + explosion.expansion * dt);
+  }
+  mission.explosions = mission.explosions.filter(e=>e.life>0);
+
+  if(mission.destroyedTargets >= required && mission.phase !== 'complete'){
+    mission.phase = 'complete';
+    mission.overlay = { title:'Mission Complete', timer:1.6 };
+    centerNote('Mission Complete', 2000);
+    notify('Mission complete. Returning to the tower.');
+  }
+}
+
+function triggerBombardierExplosion(mission, x, y, radiusOverride){
+  const config = mission.config.drone || {};
+  const view = mission.bombardier;
+  if(!view) return;
+  const maxRadius = radiusOverride || (config.terrain === 'yacht' ? view.viewSize * 0.22 : view.viewSize * 0.18);
+  const explosion = {
+    x,
+    y,
+    radius: Math.max(18, maxRadius * 0.25),
+    maxRadius,
+    life:0.55,
+    expansion: maxRadius * 2.8
+  };
+  mission.explosions.push(explosion);
+  boom();
+  applyBombardierExplosion(mission, explosion);
+}
+
+function applyBombardierExplosion(mission, explosion){
+  for(const target of mission.targets){
+    if(!target || target.removed) continue;
+    if(!circleIntersectsRect(explosion.x, explosion.y, explosion.maxRadius, target.x, target.y, target.width, target.height)){
+      continue;
+    }
+    if(!target.destroyed){
+      target.hp = Math.max(0, target.hp - 1);
+      target.hitFlash = 0.3;
+      if(target.hp <= 0){
+        target.destroyed = true;
+        target.smokeTimer = 0;
+        mission.destroyedTargets += 1;
+        applyLoanPayment(100);
+        mission.loanSaved += 100;
+        notify(`${target.type === 'yacht' ? 'Yacht' : 'Mansion'} destroyed.`);
+      }
+    }
+    for(const person of target.people){
+      if(!person.alive){
+        continue;
+      }
+      const px = target.x + person.ox;
+      const py = target.y + person.oy;
+      if(Math.hypot(px - explosion.x, py - explosion.y) <= explosion.maxRadius * 0.85){
+        person.alive = false;
+        person.fade = 0.35;
+      }
+    }
+  }
+}
+
+function circleIntersectsRect(cx, cy, radius, rx, ry, rw, rh){
+  const closestX = clamp(cx, rx, rx + rw);
+  const closestY = clamp(cy, ry, ry + rh);
+  const dx = cx - closestX;
+  const dy = cy - closestY;
+  return dx*dx + dy*dy <= radius*radius;
 }
 
 function drawDroneMission(){
@@ -7875,6 +8129,10 @@ function drawChessHack(mission){
 
 function drawDronePhase(mission){
   const config = mission.config.drone || {};
+  if(isBombardierMission(mission)){
+    drawBombardierPhase(mission);
+    return;
+  }
   const terrain = config.terrain || 'mansion';
   const ox = -mission.camera.x;
   const oy = -mission.camera.y;
@@ -7979,6 +8237,142 @@ function drawDronePhase(mission){
   }
 }
 
+function drawBombardierPhase(mission){
+  const config = mission.config.drone || {};
+  const view = mission.bombardier;
+  if(!view) return;
+  const sightSize = view.viewSize;
+  const rectX = view.viewX;
+  const rectY = view.viewY;
+  ctx.fillStyle = config.terrain === 'yacht' ? '#021b2b' : '#0b160d';
+  ctx.fillRect(0,0,W,H);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectX, rectY, sightSize, sightSize);
+  ctx.clip();
+
+  const gradient = ctx.createLinearGradient(0, rectY, 0, rectY + sightSize);
+  if(config.terrain === 'yacht'){
+    gradient.addColorStop(0, '#08314a');
+    gradient.addColorStop(1, '#0d1e29');
+  } else {
+    gradient.addColorStop(0, '#1a2b18');
+    gradient.addColorStop(1, '#0f1610');
+  }
+  ctx.fillStyle = gradient;
+  ctx.fillRect(rectX, rectY, sightSize, sightSize);
+
+  ctx.strokeStyle = config.terrain === 'yacht' ? 'rgba(120,180,210,0.12)' : 'rgba(120,160,120,0.12)';
+  ctx.lineWidth = 1;
+  const stripeSpacing = sightSize * 0.14;
+  const offset = view.groundOffset % stripeSpacing;
+  ctx.beginPath();
+  for(let y = rectY - stripeSpacing + offset; y < rectY + sightSize + stripeSpacing; y += stripeSpacing){
+    ctx.moveTo(rectX - 20, y);
+    ctx.lineTo(rectX + sightSize + 20, y + stripeSpacing*0.35);
+  }
+  ctx.stroke();
+
+  for(const target of mission.targets){
+    const x = target.x;
+    const y = target.y;
+    const w = target.width;
+    const h = target.height;
+    if(target.type === 'yacht'){
+      ctx.fillStyle = target.destroyed ? '#4a1f1f' : '#d7ecf8';
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h*0.5, w/2, h/2.6, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = target.destroyed ? 'rgba(255,140,100,0.3)' : '#7baac1';
+      ctx.beginPath();
+      ctx.ellipse(x + w/2, y + h*0.42, w/2.4, h/3.4, 0, 0, Math.PI*2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = target.destroyed ? '#402222' : '#32442d';
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = target.destroyed ? 'rgba(255,140,90,0.32)' : '#496045';
+      ctx.fillRect(x + w*0.08, y + h*0.08, w*0.84, h*0.84);
+    }
+    if(target.hitFlash>0){
+      ctx.fillStyle = `rgba(255,200,140,${Math.min(0.45, target.hitFlash*2)})`;
+      ctx.fillRect(x-4, y-4, w+8, h+8);
+    }
+    if(target.destroyed){
+      ctx.fillStyle = 'rgba(255,120,80,0.28)';
+      ctx.beginPath();
+      ctx.arc(x + w/2, y + h/2, Math.min(w, h)*0.6, 0, Math.PI*2);
+      ctx.fill();
+    }
+    for(const person of target.people){
+      const px = x + person.ox;
+      const py = y + person.oy;
+      const alpha = person.alive ? 0.85 : Math.max(0, person.fade*2.4);
+      if(alpha <= 0) continue;
+      ctx.fillStyle = `rgba(255,90,90,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(px, py, sightSize * 0.01, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  for(const bomb of mission.bombs){
+    ctx.fillStyle = '#ffe6a4';
+    ctx.fillRect(bomb.x-3, bomb.y-8, 6, 16);
+  }
+  for(const explosion of mission.explosions){
+    ctx.fillStyle = 'rgba(255,200,120,0.22)';
+    ctx.beginPath();
+    ctx.arc(explosion.x, explosion.y, explosion.radius, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, W, rectY);
+  ctx.fillRect(0, rectY + sightSize, W, H - (rectY + sightSize));
+  ctx.fillRect(0, rectY, rectX, sightSize);
+  ctx.fillRect(rectX + sightSize, rectY, W - (rectX + sightSize), sightSize);
+
+  ctx.strokeStyle = 'rgba(120,200,220,0.6)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(rectX, rectY, sightSize, sightSize);
+
+  ctx.strokeStyle = 'rgba(180,240,255,0.45)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(view.aimX - sightSize*0.08, view.aimY);
+  ctx.lineTo(view.aimX + sightSize*0.08, view.aimY);
+  ctx.moveTo(view.aimX, view.aimY - sightSize*0.08);
+  ctx.lineTo(view.aimX, view.aimY + sightSize*0.08);
+  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(180,240,255,0.25)';
+  ctx.setLineDash([8,6]);
+  ctx.strokeRect(rectX + sightSize*0.22, rectY + sightSize*0.22, sightSize*0.56, sightSize*0.56);
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '20px monospace';
+  ctx.fillText(config.missionText || 'Eliminate all targets.', 24, 32);
+  ctx.font = '16px monospace';
+  const total = config.totalTargets || 12;
+  ctx.fillText(`Targets destroyed: ${mission.destroyedTargets}/${total}`, 24, 56);
+  ctx.fillText(`Loan reduced: $${fmtCurrency(mission.loanSaved || 0)}`, 24, 78);
+  ctx.fillText('Press E to drop bombs • Arrow keys to adjust scope', 24, 102);
+
+  if(mission.overlay){
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '28px monospace';
+    ctx.textAlign='center';
+    ctx.fillText(mission.overlay.title || 'Mission Complete', W/2, H/2);
+    ctx.textAlign='left';
+  }
+}
+
 function handleDroneMissionKeyDown(event){
   if(!droneMissionState) return false;
   const mission = droneMissionState;
@@ -8039,11 +8433,17 @@ function handleDroneMissionKeyDown(event){
       if(key==='escape'){ chess.selectedPiece = null; chess.selected = null; chess.availableMoves = []; event.preventDefault(); return true; }
     }
   } else if(mission.phase === 'drone'){
+    const bombardier = isBombardierMission(mission);
     if(key==='arrowleft' || key==='a'){ mission.input.left = true; event.preventDefault(); return true; }
     if(key==='arrowright' || key==='d'){ mission.input.right = true; event.preventDefault(); return true; }
     if(key==='arrowup' || key==='w'){ mission.input.up = true; event.preventDefault(); return true; }
     if(key==='arrowdown' || key==='s'){ mission.input.down = true; event.preventDefault(); return true; }
-    if(key===' '){
+    if(!bombardier && key===' '){
+      dropDroneBomb(mission);
+      event.preventDefault();
+      return true;
+    }
+    if(bombardier && (key==='e' || key==='enter')){
       dropDroneBomb(mission);
       event.preventDefault();
       return true;
@@ -8070,7 +8470,11 @@ function handleDroneMissionKeyUp(event){
 
 function handleDroneMissionMouseDown(event){
   if(!droneMissionState) return false;
-  if(droneMissionState.phase === 'drone'){ dropDroneBomb(droneMissionState); event.preventDefault(); return true; }
+  if(droneMissionState.phase === 'drone' && !isBombardierMission(droneMissionState)){
+    dropDroneBomb(droneMissionState);
+    event.preventDefault();
+    return true;
+  }
   return false;
 }
 
