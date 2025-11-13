@@ -905,7 +905,24 @@ const MUSIC_TRACKS = {
   }
 };
 
-const musicState = { current:null, stopFns:[] };
+const musicState = { current:null, stopFns:[], requested:null };
+const MUSIC_MUTE_KEY = 'loanTower.musicMuted';
+let musicMuted = false;
+try {
+  musicMuted = localStorage.getItem(MUSIC_MUTE_KEY) === '1';
+} catch (e) {
+  musicMuted = false;
+}
+const HUD_COMPACT_KEY = 'loanTower.hudCompact';
+let hudCompact = false;
+try {
+  hudCompact = localStorage.getItem(HUD_COMPACT_KEY) === '1';
+} catch (e) {
+  hudCompact = false;
+}
+let hudBoxEl = null;
+let hudToggleBtn = null;
+let musicToggleBtn = null;
 
 function stopMusic(){
   if(musicState.stopFns){
@@ -977,9 +994,15 @@ function startVoiceLoop(ctx, voice, tempo){
 }
 
 async function startMusic(type){
+  musicState.requested = type || null;
+  if(musicMuted || !type){
+    if(musicState.current){
+      stopMusic();
+    }
+    return;
+  }
   if(musicState.current === type) return;
   stopMusic();
-  if(!type) return;
   const track = MUSIC_TRACKS[type];
   if(!track) return;
   try{
@@ -1837,6 +1860,9 @@ const MINIMAP_MISSIONS = [
   { id:'bombardier35', label:'BOMBING DRILL – LEVEL 35', subtitle:'Mega-yachts practice' }
 ];
 const minimapMissionButtons = new Map();
+hudBoxEl = document.getElementById('hudBox');
+hudToggleBtn = document.getElementById('hudToggle');
+musicToggleBtn = document.getElementById('musicToggle');
 
 // Buttons
 const btnTest=document.getElementById('btnTest');
@@ -1865,47 +1891,6 @@ const weaponRequirements = {
   saber: { type:'files', amount:25, label:'Files 25' },
   machineGun: { type:'intel', amount:40, label:'Intel 40' }
 };
-
-const hudTabButtons = Array.from(document.querySelectorAll('.hud-tab-btn'));
-const hudTabPanels = new Map(Array.from(document.querySelectorAll('.hud-tab-panel')).map(panel => [panel.dataset.tab, panel]));
-let activeHudTab = null;
-
-function setHudTabActive(tabId){
-  if(!tabId || !hudTabPanels.has(tabId)){
-    hudTabPanels.forEach(panel=>panel.classList.remove('open'));
-    hudTabButtons.forEach(btn=>{
-      btn.classList.remove('active');
-      btn.classList.add('inactive');
-    });
-    activeHudTab = null;
-    return;
-  }
-  hudTabPanels.forEach((panel, id)=>{
-    panel.classList.toggle('open', id === tabId);
-  });
-  hudTabButtons.forEach(btn=>{
-    const isActive = btn.dataset.tab === tabId;
-    btn.classList.toggle('active', isActive);
-    btn.classList.toggle('inactive', !isActive);
-  });
-  activeHudTab = tabId;
-}
-
-hudTabButtons.forEach(btn=>{
-  if(!btn.classList.contains('active')){
-    btn.classList.add('inactive');
-  }
-  btn.addEventListener('click', ()=>{
-    const tab = btn.dataset.tab;
-    if(activeHudTab === tab){
-      setHudTabActive(null);
-    } else {
-      setHudTabActive(tab);
-    }
-  });
-});
-
-setHudTabActive('weapons');
 
 function setMode(m){
   testMode = (m==='test');
@@ -2325,6 +2310,18 @@ updateMapButtonState();
 resetDeckState();
 toggleMinimap(false);
 hideFloorBanner();
+
+if(hudBoxEl){
+  setHudCompactState(hudCompact);
+}
+if(hudToggleBtn){
+  hudToggleBtn.addEventListener('click', ()=>toggleHudCompact());
+  updateHudToggleButton();
+}
+if(musicToggleBtn){
+  musicToggleBtn.addEventListener('click', ()=>toggleMusicMuted());
+  updateMusicToggleButton();
+}
 
 if(specialFilesPill){
   specialFilesPill.addEventListener('click', ()=>{
@@ -2771,6 +2768,53 @@ function toggleMinimap(force){
     minimapOverlay.classList.add('hidden');
   }
   if(mapBtn){ mapBtn.classList.toggle('active', target); }
+}
+
+function updateMusicToggleButton(){
+  if(!musicToggleBtn) return;
+  musicToggleBtn.textContent = musicMuted ? 'Unmute Music' : 'Mute Music';
+  musicToggleBtn.setAttribute('aria-pressed', musicMuted ? 'true' : 'false');
+  musicToggleBtn.classList.toggle('muted', musicMuted);
+  const label = musicMuted ? 'Unmute music' : 'Mute music';
+  musicToggleBtn.setAttribute('aria-label', label);
+  musicToggleBtn.title = label;
+}
+
+function setMusicMuted(muted){
+  musicMuted = !!muted;
+  updateMusicToggleButton();
+  try { localStorage.setItem(MUSIC_MUTE_KEY, musicMuted ? '1' : '0'); } catch (e) {}
+  if(musicMuted){
+    stopMusic();
+  } else if(runActive && musicState.requested){
+    startMusic(musicState.requested);
+  }
+}
+
+function toggleMusicMuted(){
+  setMusicMuted(!musicMuted);
+}
+
+function updateHudToggleButton(){
+  if(!hudToggleBtn) return;
+  const label = hudCompact ? 'Expand HUD (K)' : 'Compact HUD (K)';
+  hudToggleBtn.setAttribute('aria-expanded', (!hudCompact).toString());
+  hudToggleBtn.setAttribute('aria-label', label);
+  hudToggleBtn.title = label;
+}
+
+function setHudCompactState(compact){
+  hudCompact = !!compact;
+  if(hudBoxEl){
+    hudBoxEl.classList.toggle('compact', hudCompact);
+  }
+  updateHudToggleButton();
+  try { localStorage.setItem(HUD_COMPACT_KEY, hudCompact ? '1' : '0'); } catch (e) {}
+}
+
+function toggleHudCompact(force){
+  const target = force !== undefined ? !!force : !hudCompact;
+  setHudCompactState(target);
 }
 
 function jumpToFloor(targetFloor){
@@ -4069,6 +4113,9 @@ window.addEventListener('keydown', e=>{
     }
     return;
   }
+  if(e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')){
+    return;
+  }
   if(activeHack){
     e.preventDefault();
     handleHackInput(k);
@@ -4093,6 +4140,11 @@ window.addEventListener('keydown', e=>{
     e.preventDefault();
     if(deckVisible){ toggleDeck(false); }
     else { toggleDeck(true); }
+    return;
+  }
+  if(k==='k'){
+    e.preventDefault();
+    toggleHudCompact();
     return;
   }
   if(k==='escape'){
@@ -7463,9 +7515,11 @@ function respawnDrone(mission){
 function completeDroneMissionLevel(){
   const mission = droneMissionState;
   if(!mission || mission.transitioning) return;
-  const nextFloor = Math.min(FLOORS, currentFloor + 1);
+  const missionFloor = Number.isFinite(mission.floor) ? mission.floor : currentFloor;
+  const nextFloor = Math.min(FLOORS, missionFloor + 1);
   mission.transitioning = true;
   state.playerWeaponsDisabled = false;
+  currentFloor = missionFloor;
   setTimeout(()=>{
     droneMissionState = null;
     enterFloor(nextFloor, {});
