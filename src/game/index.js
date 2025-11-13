@@ -1,4 +1,6 @@
 import { Agent } from './agent.js';
+import { createLevel19 } from '../levels/level19.js';
+import { renderLevel19Scene } from '../levels/level19_render.js';
 
 // === Editable Parameter Sections ==========================================
 // -- Canvas & Display --
@@ -1274,6 +1276,352 @@ function updateCanvasAimFromEvent(event){
 canvas.addEventListener('mousemove', updateCanvasAimFromEvent);
 canvas.addEventListener('mousedown', updateCanvasAimFromEvent);
 
+// ===== Level 19 first-person runtime =====
+let level19StylesInjected = false;
+const level19Runtime = {
+  active: false,
+  finishing: false,
+  level: null,
+  renderer: null,
+  player: null,
+  rafId: 0,
+  lastFrame: 0,
+  pointerHint: null,
+  disposables: [],
+  timers: [],
+  startChecking: 0,
+  startLoanBalance: 0
+};
+
+const legacyHudState = {
+  hud: null,
+  hudDisplay: '',
+  center: null,
+  centerDisplay: ''
+};
+
+function ensureLevel19HudStyles(){
+  if(level19StylesInjected) return;
+  const style = document.createElement('style');
+  style.textContent = `
+    .pointer-hint {
+      position: fixed;
+      left: 50%;
+      bottom: 8%;
+      transform: translateX(-50%);
+      padding: 0.75rem 1.25rem;
+      background: rgba(12, 16, 28, 0.72);
+      border: 1px solid rgba(180, 220, 255, 0.35);
+      border-radius: 12px;
+      font: 0.85rem 'JetBrains Mono', monospace;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #f6faff;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 180ms ease;
+      z-index: 80;
+    }
+    .run-end-banner {
+      position: fixed;
+      top: 18%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 1rem 1.6rem;
+      background: rgba(14, 18, 30, 0.9);
+      border: 1px solid rgba(210, 180, 255, 0.45);
+      border-radius: 16px;
+      font: 1rem 'Press Start 2P', monospace;
+      letter-spacing: 0.1em;
+      text-align: center;
+      color: #f5edff;
+      z-index: 85;
+      opacity: 1;
+      transition: opacity 320ms ease-out;
+    }
+  `;
+  document.head.appendChild(style);
+  level19StylesInjected = true;
+}
+
+function hideLegacyHudForLevel19(){
+  const hud = document.querySelector('.hudBox');
+  if(hud){
+    legacyHudState.hud = hud;
+    legacyHudState.hudDisplay = hud.style.display;
+    hud.style.display = 'none';
+  }
+  const center = document.querySelector('.center');
+  if(center){
+    legacyHudState.center = center;
+    legacyHudState.centerDisplay = center.style.display;
+    center.style.display = 'none';
+  }
+}
+
+function showLegacyHudAfterLevel19(){
+  if(legacyHudState.hud){
+    legacyHudState.hud.style.display = legacyHudState.hudDisplay;
+  }
+  if(legacyHudState.center){
+    legacyHudState.center.style.display = legacyHudState.centerDisplay;
+  }
+  legacyHudState.hud = null;
+  legacyHudState.center = null;
+}
+
+function level19TrackDisposable(dispose){
+  if(typeof dispose === 'function'){
+    level19Runtime.disposables.push(dispose);
+  }
+}
+
+function level19AddEvent(target, type, handler, options){
+  target.addEventListener(type, handler, options);
+  level19TrackDisposable(()=>target.removeEventListener(type, handler, options));
+}
+
+function level19AddTimer(fn, delay){
+  const id = window.setTimeout(fn, delay);
+  level19Runtime.timers.push(id);
+  return id;
+}
+
+function level19ClearTimers(){
+  for(const id of level19Runtime.timers){
+    window.clearTimeout(id);
+  }
+  level19Runtime.timers.length = 0;
+}
+
+function level19RemovePointerHint(){
+  if(level19Runtime.pointerHint && level19Runtime.pointerHint.parentNode){
+    level19Runtime.pointerHint.parentNode.removeChild(level19Runtime.pointerHint);
+  }
+  level19Runtime.pointerHint = null;
+}
+
+function level19UpdatePointerHint(){
+  if(!level19Runtime.pointerHint) return;
+  const locked = document.pointerLockElement === canvas;
+  level19Runtime.pointerHint.style.opacity = locked ? '0' : '1';
+}
+
+function level19CreatePointerHint(){
+  ensureLevel19HudStyles();
+  level19RemovePointerHint();
+  const hint = document.createElement('div');
+  hint.className = 'pointer-hint';
+  hint.textContent = 'Click to focus • WASD move • Mouse look • E interact • Click shoot';
+  document.body.appendChild(hint);
+  level19Runtime.pointerHint = hint;
+  level19UpdatePointerHint();
+}
+
+function level19CreatePlayerState(){
+  const baseChecking = Math.max(1, Number.isFinite(player.checking) ? player.checking : CHECKING_MAX);
+  const maxHealth = Math.max(baseChecking, player.checkingMax || CHECKING_MAX);
+  const startingDebt = Number.isFinite(player.loanBalance) ? player.loanBalance : RUN_LOAN_START;
+  return {
+    name: currentPlayerName || 'Runner',
+    health: baseChecking,
+    maxHealth,
+    loanBalance: startingDebt,
+    debt: startingDebt,
+    hasElevatorKey: false,
+    position: { x: 0, y: 0, z: 0 },
+    viewDirection: { x: 0, y: 1, z: 0 },
+    applyDamage(amount){
+      if(!Number.isFinite(amount) || amount <= 0) return;
+      if(level19Runtime.finishing) return;
+      this.health = Math.max(0, this.health - amount);
+      if(this.health <= 0){
+        level19HandleDefeat('You were consumed by the executives.');
+      }
+    },
+    addDebt(amount){
+      if(!Number.isFinite(amount) || amount === 0) return;
+      this.debt = Math.max(0, this.debt + amount);
+      this.loanBalance = this.debt;
+    }
+  };
+}
+
+function level19CleanupRuntime(){
+  if(level19Runtime.rafId){
+    window.cancelAnimationFrame(level19Runtime.rafId);
+    level19Runtime.rafId = 0;
+  }
+  level19ClearTimers();
+  while(level19Runtime.disposables.length){
+    const dispose = level19Runtime.disposables.pop();
+    try {
+      dispose();
+    } catch(err){
+      console.warn('Level 19 cleanup error', err);
+    }
+  }
+  level19Runtime.level?.destroy?.();
+  level19Runtime.renderer?.dispose?.();
+  if(document.pointerLockElement === canvas && document.exitPointerLock){
+    document.exitPointerLock();
+  }
+  level19RemovePointerHint();
+  showLegacyHudAfterLevel19();
+  level19Runtime.level = null;
+  level19Runtime.renderer = null;
+  level19Runtime.player = null;
+  level19Runtime.lastFrame = 0;
+  level19Runtime.active = false;
+  level19Runtime.finishing = false;
+  if(keys){
+    for(const k of Object.keys(keys)){
+      keys[k] = false;
+    }
+  }
+  attackHeld = false;
+  canvas.width = W;
+  canvas.height = H;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  try {
+    canvas.focus({ preventScroll: true });
+  } catch(err) {
+    canvas.focus();
+  }
+}
+
+function level19AnimationLoop(timestamp){
+  if(!level19Runtime.active) return;
+  if(!level19Runtime.lastFrame){
+    level19Runtime.lastFrame = timestamp;
+  }
+  const dt = Math.min(0.1, (timestamp - level19Runtime.lastFrame) / 1000);
+  level19Runtime.lastFrame = timestamp;
+  level19Runtime.renderer?.render(dt);
+  level19Runtime.level?.update(dt, {
+    player: level19Runtime.player,
+    performRaycast: level19Runtime.renderer?.performRaycast,
+    hasLineOfSight: level19Runtime.renderer?.hasLineOfSight
+  });
+  level19Runtime.rafId = window.requestAnimationFrame(level19AnimationLoop);
+}
+
+function level19TryInteract(){
+  if(!level19Runtime.active) return;
+  const level = level19Runtime.level;
+  const renderer = level19Runtime.renderer;
+  if(!level || !renderer) return;
+  level.interact({
+    player: level19Runtime.player,
+    performRaycast: renderer.performRaycast,
+    hasLineOfSight: renderer.hasLineOfSight
+  });
+}
+
+function level19HandleKeyDown(event){
+  if(!level19Runtime.active) return;
+  if(event.code === 'KeyE'){
+    event.preventDefault();
+    level19TryInteract();
+  }
+}
+
+function level19HandleMouseDown(event){
+  if(!level19Runtime.active) return;
+  if(event.button !== 0) return;
+  const renderer = level19Runtime.renderer;
+  if(!renderer || !renderer.controls?.isLocked?.()) return;
+  const hit = renderer.shoot();
+  if(hit && (hit.type === 'executive' || hit.type === 'enemy')){
+    if(hit.eliminated){
+      runStats.kills = (runStats.kills || 0) + 1;
+    }
+  }
+}
+
+function level19SyncBackToPlayer(){
+  if(!level19Runtime.player) return;
+  const levelPlayer = level19Runtime.player;
+  const remaining = Math.round(Math.max(0, levelPlayer.health));
+  player.checking = clamp(remaining, 0, player.checkingMax || CHECKING_MAX);
+  player.loanBalance = clampLoanBalance(Math.round(levelPlayer.debt ?? levelPlayer.loanBalance ?? player.loanBalance));
+  updateHudCommon();
+}
+
+function level19HandleVictory(){
+  if(!level19Runtime.active || level19Runtime.finishing) return;
+  level19Runtime.finishing = true;
+  level19SyncBackToPlayer();
+  level19CleanupRuntime();
+  pause = false;
+  notify('Elevator unlocked. Level 19 cleared.');
+  centerNote('Level 19 — Escape successful!', 1800);
+  window.setTimeout(()=>{
+    const nextFloor = Math.min(FLOORS, 20);
+    enterFloor(nextFloor, { showBanner: true });
+  }, 120);
+}
+
+function level19HandleDefeat(message){
+  if(!level19Runtime.active || level19Runtime.finishing) return;
+  level19Runtime.finishing = true;
+  level19CleanupRuntime();
+  player.checking = 0;
+  updateHudCommon();
+  finishRun('death', { message: message || 'You were consumed by the executives.' });
+}
+
+function startLevel19Experience(){
+  if(level19Runtime.active) return;
+  pause = true;
+  ensureLevel19HudStyles();
+  hideLegacyHudForLevel19();
+  if(keys){
+    for(const k of Object.keys(keys)){
+      keys[k] = false;
+    }
+  }
+  attackHeld = false;
+  level19Runtime.startChecking = player.checking;
+  level19Runtime.startLoanBalance = player.loanBalance;
+  const levelPlayer = level19CreatePlayerState();
+  const level = createLevel19({
+    seed: `level19-${Math.random().toString(36).slice(2, 8)}`,
+    player: levelPlayer,
+    onLevelComplete: level19HandleVictory
+  });
+  level.initialise({ player: levelPlayer });
+  const renderer = renderLevel19Scene(level.layout, levelPlayer, {
+    canvas,
+    executiveController: level.executives,
+    movementSpeed: 4.6,
+    visibilityRadius: 12
+  });
+  level.crosshair?.showToast('Find the elevator key. Search the cubicles.');
+  level19Runtime.level = level;
+  level19Runtime.renderer = renderer;
+  level19Runtime.player = levelPlayer;
+  level19Runtime.lastFrame = 0;
+  level19Runtime.active = true;
+  level19Runtime.finishing = false;
+  level19CreatePointerHint();
+  level19AddEvent(document, 'pointerlockchange', level19UpdatePointerHint, false);
+  level19AddEvent(window, 'keydown', level19HandleKeyDown, false);
+  level19AddEvent(window, 'mousedown', level19HandleMouseDown, false);
+  level19AddEvent(window, 'blur', () => {
+    if(document.pointerLockElement === canvas && document.exitPointerLock){
+      document.exitPointerLock();
+    }
+  }, false);
+  try {
+    canvas.focus({ preventScroll: true });
+  } catch(err) {
+    canvas.focus();
+  }
+  level19Runtime.rafId = window.requestAnimationFrame(level19AnimationLoop);
+}
+
 // ===== Canvas & Timing =====
 let last=performance.now();
 
@@ -1987,6 +2335,7 @@ if(codexCloseBtn){
   codexCloseBtn.addEventListener('click', ()=>toggleCodex(false));
 }
 document.addEventListener('keydown', (event)=>{
+  if(level19Runtime.active) return;
   if(event.key === '9'){
     if(!player.codexUnlocked){
       notify('Collect 10 Special Files to unlock the codex.');
@@ -2953,6 +3302,14 @@ function enterFloor(targetFloor, options={}){
   player.vx = 0;
   player.vy = 0;
   makeLevel(currentFloor);
+  if(level19Runtime.active){
+    if(floorLabelEl) floorLabelEl.textContent = formatFloorLabel(currentFloor);
+    updateMinimapHighlight();
+    if(options.showBanner !== false){
+      showFloorBanner(currentFloor);
+    }
+    return previous !== currentFloor;
+  }
   handleFloorStart(currentFloor);
   if(topDownState){
     player.prevBottom = player.y + player.h;
@@ -2985,6 +3342,9 @@ function enterFloor(targetFloor, options={}){
 
 function startNewRun(name){
   if(runActive) return;
+  if(level19Runtime.active){
+    level19CleanupRuntime();
+  }
   currentPlayerName = name || 'Player';
   currentFloor = OUTSIDE_FLOOR;
   rooftopMissionState = null;
@@ -3026,6 +3386,9 @@ function startNewRun(name){
 
 function finishRun(outcome, { message=null, note=null }={}){
   if(!runActive) return;
+  if(level19Runtime.active){
+    level19CleanupRuntime();
+  }
   toggleCodex(false);
   toggleMinimap(false);
   toggleDeck(false);
@@ -3339,7 +3702,8 @@ function damageWorker(worker, amount){
 // Input
 const keys={};
 let attackHeld=false;
-window.addEventListener('keydown', e=>{ 
+window.addEventListener('keydown', e=>{
+  if(level19Runtime.active) return;
   if(droneMissionState && handleDroneMissionKeyDown(e)) return;
   const k=e.key.toLowerCase();
   if(rooftopMissionState && handleRooftopKeyDown(k, e)) return;
@@ -3403,6 +3767,7 @@ window.addEventListener('keydown', e=>{
   if(k===' '){ interact(); }
 },{passive:false});
 window.addEventListener('keyup', e=>{
+  if(level19Runtime.active) return;
   if(droneMissionState && handleDroneMissionKeyUp(e)) return;
   const k=e.key.toLowerCase();
   keys[k] = false;
@@ -3410,9 +3775,9 @@ window.addEventListener('keyup', e=>{
 }, {passive:false});
 
 // mouse
-window.addEventListener('mousedown', e=>{ if(droneMissionState && handleDroneMissionMouseDown(e)) return; attackHeld=true; attack(); });
-window.addEventListener('mouseup', ()=>{ attackHeld=false; });
-window.addEventListener('blur', ()=>{ attackHeld=false; });
+window.addEventListener('mousedown', e=>{ if(level19Runtime.active) return; if(droneMissionState && handleDroneMissionMouseDown(e)) return; attackHeld=true; attack(); });
+window.addEventListener('mouseup', ()=>{ if(level19Runtime.active) return; attackHeld=false; });
+window.addEventListener('blur', ()=>{ if(level19Runtime.active) return; attackHeld=false; });
 
 // ==== Level generation ====
 function guardArchetypeForFloor(i){
@@ -4568,6 +4933,10 @@ function makeLevel(i){
   arcadePixelOverlay = false;
   arcadeRampage = null;
   arcadeAim = {x:W/2, y:H*0.55};
+  if(i === 19){
+    startLevel19Experience();
+    return;
+  }
   setAmbientForFloor(i);
   sprinklersActiveUntil = 0;
   resetCeoArenaState();
@@ -9762,6 +10131,7 @@ function maybeRespawnFeather(){
 }
 
 function update(dt){
+  if(level19Runtime.active) return;
   if(!runActive) return;
   if(rooftopMissionState){
     updateRooftopMission(dt);
@@ -11529,6 +11899,7 @@ function drawOutside(){
 }
 
 function draw(){
+  if(level19Runtime.active) return;
   if(rooftopMissionState){
     drawRooftopMission();
     return;
