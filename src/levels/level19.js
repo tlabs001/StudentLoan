@@ -3,6 +3,10 @@ import { ExecutiveController, EXECUTIVE_DEFAULTS } from '../entities/executive.j
 import { createDefaultCollectibleManager } from '../items/collectibles.js';
 import { CrosshairHUD, updateCrosshairForRaycast } from '../ui/hud.js';
 
+export const CUBICLE_ROOM_PROB = 0.005;
+export const DOOR_PROB = 0.15;
+export const MAP_SIZE = 200;
+
 /**
  * === Level 19 tuning constants =================================================
  * These values intentionally live at the top of the file so that designers can
@@ -12,16 +16,22 @@ import { CrosshairHUD, updateCrosshairForRaycast } from '../ui/hud.js';
 export const LEVEL19_TUNING = {
   /** Corridor length in world units. Larger values create longer hallways. */
   CORRIDOR_SEGMENT_LENGTH: __level19Defaults.corridorSegmentLength,
-  /** Likelihood that any given door produces a room. */
-  ROOM_FREQUENCY: __level19Defaults.roomFrequency,
-  /** Average number of doors per corridor segment. */
-  DOORS_PER_CORRIDOR: __level19Defaults.doorsPerCorridor,
-  /** Probability that any given door opens into a cubicle mega-room. */
-  CUBICLE_ROOM_PROBABILITY: __level19Defaults.cubicleRoomProbability,
-  /** Manhattan distance target for the elevator location. */
-  AVERAGE_ELEVATOR_DISTANCE: __level19Defaults.averageElevatorDistance,
-  /** Size of the grid in corridor tiles radiating from spawn. */
-  GRID_RADIUS: __level19Defaults.gridRadius,
+  /** Minimum length of a straight corridor segment in grid cells. */
+  MIN_SEGMENT_LENGTH: __level19Defaults.minSegmentLength,
+  /** Maximum length of a straight corridor segment in grid cells. */
+  MAX_SEGMENT_LENGTH: __level19Defaults.maxSegmentLength,
+  /** Probability that carving branches into an orthogonal corridor. */
+  BRANCH_PROBABILITY: __level19Defaults.branchProbability,
+  /** Chance that a segment turns mid-run, generating corners. */
+  TURN_PROBABILITY: __level19Defaults.turnProbability,
+  /** Bias for extending deeper corridors when stuck. */
+  REVISIT_DEPTH_BIAS: __level19Defaults.revisitDepthBias,
+  /** Probability that a wall spawns a door. */
+  DOOR_PROBABILITY: DOOR_PROB,
+  /** Probability that a door leads to a cubicle mega-room. */
+  CUBICLE_ROOM_PROBABILITY: CUBICLE_ROOM_PROB,
+  /** Size of the generated corridor lattice in cells. */
+  MAP_SIZE,
   /** Maximum number of active executives stalking the player. */
   EXECUTIVE_COUNT: 3,
   /** Cooldown before despawned executives reappear elsewhere. */
@@ -66,11 +76,14 @@ export class Level19 {
   initialise(gameContext = {}) {
     const overrides = {
       corridorSegmentLength: LEVEL19_TUNING.CORRIDOR_SEGMENT_LENGTH,
-      gridRadius: LEVEL19_TUNING.GRID_RADIUS,
-      doorsPerCorridor: LEVEL19_TUNING.DOORS_PER_CORRIDOR,
-      cubicleRoomProbability: LEVEL19_TUNING.CUBICLE_ROOM_PROBABILITY,
-      averageElevatorDistance: LEVEL19_TUNING.AVERAGE_ELEVATOR_DISTANCE,
-      roomFrequency: LEVEL19_TUNING.ROOM_FREQUENCY
+      mapSize: LEVEL19_TUNING.MAP_SIZE,
+      minSegmentLength: LEVEL19_TUNING.MIN_SEGMENT_LENGTH,
+      maxSegmentLength: LEVEL19_TUNING.MAX_SEGMENT_LENGTH,
+      branchProbability: LEVEL19_TUNING.BRANCH_PROBABILITY,
+      turnProbability: LEVEL19_TUNING.TURN_PROBABILITY,
+      revisitDepthBias: LEVEL19_TUNING.REVISIT_DEPTH_BIAS,
+      doorProbability: LEVEL19_TUNING.DOOR_PROBABILITY,
+      cubicleRoomProbability: LEVEL19_TUNING.CUBICLE_ROOM_PROBABILITY
     };
     this.layout = generateLevel19Layout(this.seed, overrides);
     this.collectibles.loadFromLayout(this.layout);
