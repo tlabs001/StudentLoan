@@ -97,6 +97,9 @@ const SABER_BASE_DAMAGE = 250;
 const FLAMETHROWER_MAX_HEAT_MS = 10000;
 const GRENADE_MAG_CAPACITY = 12;
 const GRENADE_RESERVE_MAX = 120;
+const TAX_EVASION_DASH_DURATION_MS = 360;
+const TAX_EVASION_DASH_COOLDOWN_MS = 3000;
+const TAX_EVASION_DASH_SPEED = RUN * 4;
 const GUARD_WIDTH = 20;
 const GUARD_HEIGHT = 42;
 const initialSpawnX = GAME_PARAMS.player.spawnX;
@@ -1573,11 +1576,17 @@ const player = {
   alarmLockUntil:0,
   cashMultiplier:1,
   interestRate:0,
+  loanInterestPercentPerMinute:0,
+  loanInterestFlatPerMinute:0,
+  interestDeferralUntil:0,
   printerJams:0,
   prevBottom: GAME_PARAMS.player.height,
   prevVy: 0,
   dropThroughUntil: 0,
   dropThroughFloor: null,
+  maxAirJumps:0,
+  remainingAirJumps:0,
+  jumpButtonHeld:false,
   contactDamagePending:false,
   contactDamageApplyAt:0,
   contactInterferenceStart:0,
@@ -1588,7 +1597,51 @@ const player = {
   hopeBuffUntil:0,
   punchAnimUntil:0,
   punchCombo:0,
-  punchAnimSide:1
+  punchAnimSide:1,
+  extraLives:0,
+  ceoSecretNote:false,
+  checkingAmmoEnabled:false,
+  checkingAmmoCostPerShot:1,
+  armyAmmoDebt:false,
+  loanSharkFang:false,
+  loanSharkDebtCollectorPending:false,
+  interestCannonStacks:0,
+  checkingAmmoInfinite:false,
+  critBonus:0,
+  spellPowerBonus:0,
+  shopCostMultiplier:1,
+  speedDebuffUntil:0,
+  creditBoostUntil:0,
+  creditInterestStacks:0,
+  variableNukeCharges:0,
+  cloneGeneratorCharges:0,
+  irsFlareCharges:0,
+  brainFogGrenades:0,
+  paperclipPower:false,
+  loanRefinancerInsights:false,
+  goldenPaycheckActive:false,
+  debtReaperScythe:false,
+  futureIntelUntil:0,
+  flameOfInflation:false,
+  sallieMaeShades:false,
+  executiveNukes:0,
+  bankruptcyHaloUntil:0,
+  bankruptcyHaloEmpowered:false,
+  bankruptcyHaloDebtApplied:false,
+  magnetOrbUntil:0,
+  hallucinationUntil:0,
+  defaultDemonUntil:0,
+  pendingMaxHpLoss:0,
+  taxEvasionDashUnlocked:false,
+  taxEvasionDashActiveUntil:0,
+  taxEvasionDashCooldownUntil:0,
+  taxEvasionDashVelocity:0,
+  taxEvasionDashStartedAt:0,
+  truthRifleUnlocked:false,
+  hrGrenadeUnlocked:false,
+  collectionsJammerActiveUntil:0,
+  collectionsJamCooldownUntil:0,
+  shadesNextDodge:0
 };
 
 const HOSTAGE_SEQUENCE = ['Grandpa','Mom','Dad','Grandma','Brother','Sister',
@@ -1621,6 +1674,420 @@ const state = {
   midnightMachineGunLocked: false,
   midnightDebtLastApplied: 0
 };
+
+const DROP_RARITY_CHANCES = [
+  { rarity:'common', chance:0.65 },
+  { rarity:'uncommon', chance:0.25 },
+  { rarity:'rare', chance:0.07 },
+  { rarity:'legendary', chance:0.02 },
+  { rarity:'mythic', chance:0.01 }
+];
+
+const DEBT_RARITY_ITEMS = {
+  common:['coffee','stickyNoteGrenade','pencilKnife','hrExcuseCard','printerInk','turkeySandwich'],
+  uncommon:['checkingAmmoPack','jumpSneakers','tylenol','usbDrive','stressBall','temporaryDeferral'],
+  rare:['truthRifle','hrFolderGrenade','elevatorSkipKey','magnetizedDebtOrb','diplomaDelusion','loanForgivenessTicket','taxEvasionDash'],
+  legendary:['bankruptcyHalo','paperclipPower','infiniteAmmoChecking','loanSharkFang','loanRefinancer','forgivenessStamp','espresso','corporateCreditCard','variableRateNuke','w2CloneGenerator','irsSignalFlare','doctorateDestruction','printerLimitless','defaultDemonContract','brainFogGrenade','loanRefinancerArtifact'],
+  mythic:['interestCannon','extraLifeInsurance','supremeFakeIdentity','goldenPaycheck','debtReaperScythe','futurePayStub','flameOfInflation','forbiddenTextbook','sallieMaeShades','executiveBriefcaseNuke','magnetizedDebtHalo']
+};
+
+const DEBT_POWERED_ITEM_INFO = {
+  coffee:{ name:'Debt Brew Coffee', description:'+5% speed boost for a short burst.', rarity:'common' },
+  stickyNoteGrenade:{ name:'Sticky Notes', description:'Weak grenade of paperwork confetti.', rarity:'common' },
+  pencilKnife:{ name:'Pencil Knife', description:'Light melee damage bump.', rarity:'common' },
+  hrExcuseCard:{ name:'HR Excuse Card', description:'Lowers collections pressure briefly.', rarity:'common' },
+  printerInk:{ name:'Printer Ink', description:'Refills ammo reserves.', rarity:'common' },
+  turkeySandwich:{ name:'Turkey Sandwich', description:'Restores 10 checking health.', rarity:'common' },
+  checkingAmmoPack:{ name:'Checking Ammo Pack', description:'Convert health into bullets.', rarity:'uncommon' },
+  jumpSneakers:{ name:'Double Jump Sneakers', description:'Unlocks a second jump.', rarity:'uncommon' },
+  tylenol:{ name:'Tylenol', description:'Clears status effects.', rarity:'uncommon' },
+  usbDrive:{ name:'USB Drive — Intern Pay Data', description:'+5% damage and crit chance.', rarity:'uncommon' },
+  stressBall:{ name:'Stress Ball', description:'Purge status effects; beware cramps.', rarity:'uncommon' },
+  temporaryDeferral:{ name:'Temporary Deferral', description:'Pauses loan interest briefly.', rarity:'uncommon' },
+  truthRifle:{ name:'Truth Rifle', description:'Piercing shots that slow enemies.', rarity:'rare' },
+  hrFolderGrenade:{ name:'HR Folder Grenade', description:'Stuns nearby guards.', rarity:'rare' },
+  elevatorSkipKey:{ name:'Elevator Skip Key', description:'Skip two floors instantly.', rarity:'rare' },
+  magnetizedDebtOrb:{ name:'Magnetized Debt Orb', description:'Pulls loot and foes to you.', rarity:'rare' },
+  diplomaDelusion:{ name:'Diploma of Delusion', description:'Boost damage at the cost of hallucinations.', rarity:'rare' },
+  loanForgivenessTicket:{ name:'Loan Forgiveness Lottery Ticket', description:'High risk debt wipe gamble.', rarity:'rare' },
+  taxEvasionDash:{ name:'Tax Evasion Dash', description:'Adds a phase dodge roll.', rarity:'rare' },
+  bankruptcyHalo:{ name:'Bankruptcy Halo', description:'Become untouchable, debt surges later.', rarity:'legendary' },
+  paperclipPower:{ name:'Paperclip of Power', description:'All guns become automatic (with jams).', rarity:'legendary' },
+  infiniteAmmoChecking:{ name:'Infinite Ammo Checking Account', description:'Ammo paid directly from checking.', rarity:'legendary' },
+  loanSharkFang:{ name:"Loan Shark's Fang", description:'Melee lifesteal but summons collectors.', rarity:'legendary' },
+  loanRefinancer:{ name:'Loan Refinancer', description:'Halves interest but adds random fees.', rarity:'legendary' },
+  forgivenessStamp:{ name:'Forgiveness Stamp', description:'Earn debt relief for flawless rooms.', rarity:'legendary' },
+  espresso:{ name:'Espresso of Eternal Deferral', description:'Delay interest accrual for 30 minutes.', rarity:'legendary' },
+  corporateCreditCard:{ name:'Corporate Credit Card', description:'Huge buying power with massive interest.', rarity:'legendary' },
+  variableRateNuke:{ name:'Variable Rate Nuke', description:'Clears a floor but spikes interest.', rarity:'legendary' },
+  w2CloneGenerator:{ name:'W2 Clone Generator', description:'Clone fights for you, skims your cash.', rarity:'legendary' },
+  irsSignalFlare:{ name:'IRS Signal Flare', description:'Summon aid—or an audit.', rarity:'legendary' },
+  doctorateDestruction:{ name:'Doctorate of Destruction', description:'Mega power, prices double.', rarity:'legendary' },
+  printerLimitless:{ name:'Printer of Limitless Copies', description:'Duplicate drops with curse risk.', rarity:'legendary' },
+  defaultDemonContract:{ name:'Default Demon Contract', description:'+300% damage for a floor, lose max HP.', rarity:'legendary' },
+  brainFogGrenade:{ name:'Brain Fog Grenade', description:'Confuses enemies.', rarity:'legendary' },
+  loanRefinancerArtifact:{ name:'Forgiveness Analyzer', description:'Stacks with loan refinancer to monitor fees.', rarity:'legendary' },
+  interestCannon:{ name:'Interest Cannon', description:'APR beams grow with interest.', rarity:'mythic' },
+  extraLifeInsurance:{ name:'Extra Life Insurance Policy', description:'Gain an extra life with hidden fees.', rarity:'mythic' },
+  supremeFakeIdentity:{ name:'Supreme Fake Identity', description:'Erase all debt; lose a random stat.', rarity:'mythic' },
+  goldenPaycheck:{ name:'Golden Paycheck', description:'Earn $1,000,000 per floor, enemies scale harder.', rarity:'mythic' },
+  debtReaperScythe:{ name:"Debt Reaper's Scythe", description:'One-shot enemies at a debt cost.', rarity:'mythic' },
+  futurePayStub:{ name:'Future Pay Stub', description:'Reveal future floors at a difficulty cost.', rarity:'mythic' },
+  flameOfInflation:{ name:'Flame of Inflation', description:'Periodic enemy HP burn, shop prices inflate.', rarity:'mythic' },
+  forbiddenTextbook:{ name:'Forbidden Textbook', description:'Instant skill upgrades with debt spike.', rarity:'mythic' },
+  sallieMaeShades:{ name:'Sallie Mae Shades', description:'Bullet time at low health.', rarity:'mythic' },
+  executiveBriefcaseNuke:{ name:'Executive Briefcase Nuke', description:'Single-use boss killer.', rarity:'mythic' },
+  magnetizedDebtHalo:{ name:'Debt Halo Reserve', description:'Enhances halo effects for debt builds.', rarity:'mythic' }
+};
+
+function pickFromList(list, rng=Math.random){
+  if(!Array.isArray(list) || list.length===0) return null;
+  const index = Math.floor(rng() * list.length);
+  return list[Math.max(0, Math.min(list.length-1, index))];
+}
+
+function rollDebtPoweredItem(rng=Math.random){
+  const roll = rng();
+  let cumulative = 0;
+  for(const bucket of DROP_RARITY_CHANCES){
+    cumulative += bucket.chance;
+    if(roll <= cumulative){
+      const pool = DEBT_RARITY_ITEMS[bucket.rarity] || [];
+      const pick = pickFromList(pool, rng);
+      if(pick) return pick;
+    }
+  }
+  const fallback = DEBT_RARITY_ITEMS.mythic || [];
+  return pickFromList(fallback, rng);
+}
+
+function lookupDebtItem(id){
+  if(!id) return null;
+  return DEBT_POWERED_ITEM_INFO[id] || null;
+}
+
+function grantDebtPoweredItem(id, options={}){
+  const info = lookupDebtItem(id);
+  if(!info){
+    return null;
+  }
+  const result = { id, info };
+  switch(id){
+    case 'coffee':
+      applySpeedBoost(0.05, 40000);
+      centerNote('Speed +5% for 40s', 1400);
+      notify('Debt brew coffee kicks in.');
+      break;
+    case 'stickyNoteGrenade':
+      player.grenade.reserve = Math.min((player.grenade.maxReserve||GRENADE_RESERVE_MAX), (player.grenade.reserve||0)+1);
+      centerNote('Sticky note grenade stocked.', 1400);
+      notify('Paperwork grenade acquired.');
+      break;
+    case 'pencilKnife':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.06);
+      centerNote('Damage up! Pencil knife ready.', 1500);
+      notify('Pencil knife improves melee damage.');
+      break;
+    case 'hrExcuseCard':
+      collectionsPressure = Math.max(0.5, collectionsPressure - 0.25);
+      centerNote('Collections pressure eased.', 1400);
+      notify('HR excuse temporarily calms collectors.');
+      break;
+    case 'printerInk':
+      addAmmo(30);
+      centerNote('Ammo restocked by printer ink.', 1400);
+      notify('Ink cartridges converted into ammo.');
+      break;
+    case 'turkeySandwich':
+      addChecking(10);
+      centerNote('Turkey sandwich: +10 checking.', 1400);
+      notify('Quick snack restores health.');
+      break;
+    case 'checkingAmmoPack':
+      loseChecking(20);
+      addAmmo(45);
+      centerNote('Paid 20 checking for ammo.', 1500);
+      notify('Checking account converted into bullets.');
+      break;
+    case 'jumpSneakers':
+      if(player.maxAirJumps < 1){ player.maxAirJumps = 1; }
+      player.remainingAirJumps = Math.max(player.remainingAirJumps, player.maxAirJumps);
+      centerNote('Double jump unlocked!', 1600);
+      notify('Jump sneakers add a mid-air jump.');
+      break;
+    case 'tylenol':
+      player.lawsuitSlowUntil = 0;
+      player.screenFlashUntil = 0;
+      player.contactDamagePending = false;
+      centerNote('Status ailments cleared.', 1400);
+      notify('Tylenol neutralises debuffs.');
+      break;
+    case 'usbDrive':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.05);
+      player.critBonus = Math.max(player.critBonus||0, (player.critBonus||0) + 0.05);
+      centerNote('Damage & crit +5%.', 1600);
+      notify('Intern pay data inspires confidence.');
+      break;
+    case 'stressBall':
+      player.lawsuitSlowUntil = 0;
+      player.speedBoostUntil = now();
+      centerNote('Stress released.', 1400);
+      notify('Stress ball clears status ailments.');
+      break;
+    case 'temporaryDeferral':
+      player.loanInterestFlatPerMinute = Math.max(0, player.loanInterestFlatPerMinute - 5000);
+      player.loanInterestPercentPerMinute = Math.max(0, player.loanInterestPercentPerMinute - 0.02);
+      player.interestRate = 0;
+      player.interestDeferralUntil = now() + 30 * 1000;
+      centerNote('Interest deferred briefly.', 1500);
+      notify('Temporary deferral pauses loan pressure.');
+      break;
+    case 'truthRifle':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.12);
+      player.truthRifleUnlocked = true;
+      centerNote('Truth rifle rhetoric loaded.', 1500);
+      notify('Enemies hesitate before the truth.');
+      break;
+    case 'hrFolderGrenade':
+      player.grenade.reserve = Math.min((player.grenade.maxReserve||GRENADE_RESERVE_MAX), (player.grenade.reserve||0)+2);
+      player.hrGrenadeUnlocked = true;
+      centerNote('HR folder grenade ready.', 1600);
+      notify('Paperwork stun charges stocked.');
+      break;
+    case 'elevatorSkipKey':
+      centerNote('Elevator skip engaged!', 1600);
+      notify('Skipping two floors. Hold tight.');
+      setTimeout(()=>{
+        enterFloor(Math.min(FLOORS, currentFloor + 2), {});
+      }, 400);
+      break;
+    case 'magnetizedDebtOrb':
+      player.magnetOrbUntil = now() + 20 * 1000;
+      centerNote('Magnetized debt orb active!', 1600);
+      notify('Loot magnet engaged — mind the chaos.');
+      break;
+    case 'diplomaDelusion':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.5);
+      player.hallucinationUntil = now() + 45 * 1000;
+      centerNote('Damage +50% (hallucinations ahead).', 1700);
+      notify('Diploma of Delusion warps reality.');
+      break;
+    case 'loanForgivenessTicket':
+      resolveLoanForgivenessTicket();
+      break;
+    case 'taxEvasionDash':
+      player.taxEvasionDashUnlocked = true;
+      player.taxEvasionDashCooldownUntil = 0;
+      player.taxEvasionDashActiveUntil = 0;
+      player.taxEvasionDashVelocity = 0;
+      player.taxEvasionDashStartedAt = 0;
+      centerNote('Phase dash unlocked.', 1600);
+      notify('Tax evasion dash lets you slip through foes.');
+      break;
+    case 'bankruptcyHalo':
+      player.bankruptcyHaloUntil = now() + 30 * 1000;
+      player.bankruptcyHaloDebtApplied = false;
+      centerNote('Bankruptcy halo: untouchable!', 1700);
+      notify('Brace for 25% debt spike afterwards.');
+      break;
+    case 'paperclipPower':
+      player.paperclipPower = true;
+      centerNote('All weapons go auto!', 1600);
+      notify('Paperclip of Power rewires your arsenal.');
+      break;
+    case 'infiniteAmmoChecking':
+      player.checkingAmmoEnabled = true;
+      player.checkingAmmoCostPerShot = 1;
+      player.checkingAmmoInfinite = true;
+      centerNote('Ammo paid from checking.', 1700);
+      notify('Infinite ammo checking account activated.');
+      break;
+    case 'loanSharkFang':
+      player.loanSharkFang = true;
+      player.loanSharkDebtCollectorPending = true;
+      centerNote('Melee lifesteal activated.', 1600);
+      notify('Loan shark fang draws blood and debt collectors.');
+      break;
+    case 'loanRefinancer':
+      player.loanInterestPercentPerMinute = Math.max(0, player.loanInterestPercentPerMinute * 0.5);
+      scheduleRandomFee();
+      centerNote('Interest rate halved.', 1600);
+      notify('Loan refinancer activated — watch for fees.');
+      break;
+    case 'forgivenessStamp':
+      player.forgivenessStampStacks = Math.max(0, (player.forgivenessStampStacks||0) + 1);
+      centerNote('Forgiveness stamp ready.', 1600);
+      notify('Complete flawless rooms to erase debt.');
+      break;
+    case 'espresso':
+      player.interestDeferralUntil = Math.max(player.interestDeferralUntil||0, now() + 30 * 60 * 1000);
+      centerNote('Interest frozen for 30 minutes.', 1700);
+      notify('Espresso of Eternal Deferral slows the bank.');
+      break;
+    case 'corporateCreditCard':
+      player.creditBoostUntil = now() + 5 * 60 * 1000;
+      player.cashMultiplier = Math.max(player.cashMultiplier||1, 3);
+      player.loanInterestPercentPerMinute += 5;
+      centerNote('Corporate card: +200% buying power.', 1700);
+      notify('Corporate credit card unlocked. Interest skyrockets.');
+      break;
+    case 'variableRateNuke':
+      player.variableNukeCharges = (player.variableNukeCharges||0) + 1;
+      player.loanInterestPercentPerMinute += 0.05;
+      centerNote('Variable rate nuke armed.', 1700);
+      notify('Floor-clearing option loaded. Interest climbs.');
+      break;
+    case 'w2CloneGenerator':
+      player.cloneGeneratorCharges = (player.cloneGeneratorCharges||0) + 1;
+      centerNote('Clone generator ready.', 1600);
+      notify('A clone will fight — and skim 10% of your money.');
+      break;
+    case 'irsSignalFlare':
+      player.irsFlareCharges = (player.irsFlareCharges||0) + 1;
+      centerNote('IRS flare primed.', 1600);
+      notify('Summon help—or an audit.');
+      break;
+    case 'defaultDemonContract':
+      player.defaultDemonUntil = now() + 60 * 1000;
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 3);
+      player.pendingMaxHpLoss = Math.max(player.pendingMaxHpLoss||0, player.hpMax * 0.5);
+      centerNote('Damage +300% this floor.', 1700);
+      notify('Default demon contract signed.');
+      break;
+    case 'doctorateDestruction':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 2);
+      player.spellPowerBonus = Math.max(player.spellPowerBonus||0, (player.spellPowerBonus||0) + 2);
+      player.maxAirJumps = Math.max(player.maxAirJumps, 2);
+      player.remainingAirJumps = player.maxAirJumps;
+      player.critBonus = Math.max(player.critBonus||0, (player.critBonus||0) + 0.1);
+      player.shopCostMultiplier = Math.max(player.shopCostMultiplier||1, (player.shopCostMultiplier||1) * 2);
+      centerNote('Doctorate of Destruction obtained!', 1700);
+      notify('Prices double but power skyrockets.');
+      break;
+    case 'paperclipPower':
+      player.paperclipPower = true;
+      centerNote('Paperclip automation engaged.', 1600);
+      notify('All weapons now fully automatic.');
+      break;
+    case 'brainFogGrenade':
+      player.brainFogGrenades = (player.brainFogGrenades||0) + 1;
+      centerNote('Brain fog grenade stocked.', 1600);
+      notify('Confusion device ready.');
+      break;
+    case 'loanRefinancerArtifact':
+      player.loanRefinancerInsights = true;
+      centerNote('Fee tracker activated.', 1500);
+      notify('You now preview refinancer fees.');
+      break;
+    case 'interestCannon':
+      player.interestCannonStacks = Math.max(0, (player.interestCannonStacks||0));
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.35);
+      player.loanInterestPercentPerMinute += 0.01;
+      centerNote('Interest cannon armed.', 1700);
+      notify('Each shot now feeds APR growth.');
+      break;
+    case 'extraLifeInsurance':
+      player.extraLives = Math.max(0, (player.extraLives||0) + 1);
+      scheduleRandomFee(0.5, 0.9);
+      centerNote('Extra life secured.', 1700);
+      notify('Insurance policy hides a future fee.');
+      break;
+    case 'supremeFakeIdentity':
+      player.loanBalance = 0;
+      const penaltyRoll = Math.random();
+      if(penaltyRoll < 0.33){ player.hpMax = Math.max(10, player.hpMax - 10); }
+      else if(penaltyRoll < 0.66){ player.critBonus = Math.max(0, (player.critBonus||0) - 0.05); }
+      else { player.speedDebuffUntil = now() + 90 * 1000; }
+      centerNote('Identity scrubbed. Debt erased!', 1800);
+      notify('Supreme fake identity active.');
+      break;
+    case 'goldenPaycheck':
+      player.goldenPaycheckActive = true;
+      centerNote('Earn $1,000,000 per floor.', 1700);
+      notify('Golden paycheck acquired — enemies toughen up.');
+      break;
+    case 'debtReaperScythe':
+      player.debtReaperScythe = true;
+      centerNote('Debt Reaper scythe equipped.', 1700);
+      notify('Every kill now adds $1,000 debt.');
+      break;
+    case 'futurePayStub':
+      player.futureIntelUntil = now() + 5 * 60 * 1000;
+      centerNote('Future floors revealed.', 1600);
+      notify('Next floor becomes harder as foresight taxes you.');
+      break;
+    case 'flameOfInflation':
+      player.flameOfInflation = true;
+      centerNote('Inflation flame ignited.', 1700);
+      notify('Enemy HP ticks down — shop prices creep up.');
+      break;
+    case 'forbiddenTextbook':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.25);
+      player.loanBalance = clampLoanBalance(player.loanBalance + 50000);
+      centerNote('Skills upgraded instantly.', 1700);
+      notify('Forbidden knowledge boosts power and debt.');
+      break;
+    case 'sallieMaeShades':
+      player.sallieMaeShades = true;
+      centerNote('Bullet time unlocked at 20% HP.', 1700);
+      notify('Sallie Mae shades watch over you.');
+      break;
+    case 'executiveBriefcaseNuke':
+      player.executiveNukes = (player.executiveNukes||0) + 1;
+      centerNote('Briefcase nuke armed.', 1700);
+      notify('One boss will feel this.');
+      break;
+    case 'magnetizedDebtHalo':
+      player.bankruptcyHaloEmpowered = true;
+      if(player.bankruptcyHaloUntil){
+        const current = now();
+        if(current < player.bankruptcyHaloUntil){
+          player.bankruptcyHaloUntil += 15000;
+        }
+      }
+      centerNote('Debt halo empowered.', 1600);
+      notify('Halo duration and effect improved.');
+      break;
+    default:
+      notify(`${info.name || 'Reward'} acquired.`);
+      break;
+  }
+  updateHudCommon();
+  return result;
+}
+
+function scheduleRandomFee(minDelay=0.35, maxDelay=0.75){
+  const nowTs = now();
+  const delay = (Math.random() * (maxDelay - minDelay) + minDelay) * 60000;
+  const amount = Math.round(2000 + Math.random()*8000);
+  pendingFeeDebuffs.push({ triggerAt: nowTs + delay, amount, type:'fee' });
+  if(player.loanRefinancerInsights){
+    notify(`Upcoming fee scheduled in ${Math.round(delay/1000)}s (+$${fmtCurrency(amount)})`);
+  }
+}
+
+function resolveLoanForgivenessTicket(){
+  const roll = Math.random();
+  if(roll < 1/500){
+    player.loanBalance = 0;
+    centerNote('Jackpot! Debt erased.', 2000);
+    notify('Loan forgiveness lottery paid off!');
+  } else if(roll < (1/500) + (1/20)){
+    const increase = Math.round(player.loanBalance * 0.25);
+    player.loanBalance = clampLoanBalance(player.loanBalance + increase);
+    centerNote('Lottery backfire: debt +25%.', 1800);
+    notify('Lottery ticket added more debt.');
+  } else if(roll < (1/500) + (1/20) + (1/5)){
+    centerNote('Lottery ticket fizzled.', 1500);
+    notify('No change to debt.');
+  } else {
+    const rewardId = rollDebtPoweredItem();
+    if(rewardId){
+      grantDebtPoweredItem(rewardId, { source:'lottery' });
+    }
+  }
+}
+
 
 const CEO_ARENA_WAVES = [
   { id:'guards', label:'Wave 1 — Upgraded Guards', type:'heavy', count:15, hpMult:1.35, speedMult:1.1, damageMult:1.1, spawnInterval:0.45 },
@@ -1657,6 +2124,10 @@ let ventDungeonState = null;
 let droneMissionState = null;
 let rooftopMissionState = null;
 let warzoneMissionState = null;
+let loanInterestTickTimer = 0;
+const pendingFeeDebuffs = [];
+let debtCollectorAlertNotified = false;
+let inflationTickTimer = 0;
 
 // Time helpers (driven by GAME_PARAMS.timing)
 let startClock = 0;
@@ -2430,6 +2901,21 @@ function createAdvancedVendingInventory(){
     sold:false
   });
   items.push({
+    id:'maxhp50',
+    name:'Wellness Bond',
+    description:'Increase max checking by 50.',
+    cost:{ type:'files', amount:3 },
+    sold:false,
+    reusable:true
+  });
+  items.push({
+    id:'damage25',
+    name:'Aggression Policy',
+    description:'+25% total damage output.',
+    cost:{ type:'files', amount:13 },
+    sold:false
+  });
+  items.push({
     id:'speed',
     name:'Debt Sprint',
     description:'25% speed boost for 45 seconds.',
@@ -2444,10 +2930,39 @@ function createAdvancedVendingInventory(){
     sold:false
   });
   items.push({
+    id:'doubleJump',
+    name:'Double Jump Sneakers',
+    description:'Adds a mid-air jump for the rest of the run.',
+    cost:{ type:'files', amount:20 },
+    sold:false
+  });
+  items.push({
+    id:'tripleJump',
+    name:'Triple Jump Sneakers',
+    description:'Adds a third jump. +29% interest per minute.',
+    cost:{ type:'files', amount:30 },
+    sold:false
+  });
+  items.push({
     id:'launcher',
     name:'Rocket Launcher',
     description:'Trade printer jams for heavy firepower.',
     cost:{ type:'jams', amount:10 },
+    sold:false
+  });
+  items.push({
+    id:'checkingAmmoBuy',
+    name:'Checking Ammo',
+    description:'Spend 30 health for 50 bullets.',
+    cost:{ type:'checking', amount:30 },
+    sold:false,
+    reusable:true
+  });
+  items.push({
+    id:'armyAmmo',
+    name:'Army Ammo IOU',
+    description:'Bullets charge $1,000 debt each when fired.',
+    cost:{ type:'debt', amount:25000 },
     sold:false
   });
   items.push({
@@ -2472,10 +2987,62 @@ function createAdvancedVendingInventory(){
     sold:false
   });
   items.push({
+    id:'lotteryIntel',
+    name:'Lottery Ticket Machine (Intel)',
+    description:'1 intel → random drop chance.',
+    cost:{ type:'intel', amount:1 },
+    sold:false,
+    reusable:true
+  });
+  items.push({
+    id:'lotteryFile',
+    name:'Lottery Ticket Machine (File)',
+    description:'1 file → random drop chance.',
+    cost:{ type:'files', amount:1 },
+    sold:false,
+    reusable:true
+  });
+  items.push({
+    id:'lotteryDebt',
+    name:'Lottery Ticket Machine (Debt)',
+    description:'Borrow $100M for a random drop chance.',
+    cost:{ type:'debt', amount:100000000 },
+    sold:false,
+    reusable:true
+  });
+  items.push({
     id:'mystery',
     name:'Mystery Capsule',
     description:'Random corporate perk. No refunds.',
     cost:{ type:'debt', amount:jitterPrice(75000, 15000) },
+    sold:false
+  });
+  items.push({
+    id:'truthRifleIntel',
+    name:'Truth Rifle License',
+    description:'Unlock the Truth Rifle for 10 intel.',
+    cost:{ type:'intel', amount:10 },
+    sold:false
+  });
+  items.push({
+    id:'collectionsJammer',
+    name:'Collections Jammer',
+    description:'15 intel to shut down AI briefly.',
+    cost:{ type:'intel', amount:15 },
+    sold:false
+  });
+  items.push({
+    id:'hrFolderIntel',
+    name:'HR Folder Grenade',
+    description:'Purchase stun grenades for 8 intel.',
+    cost:{ type:'intel', amount:8 },
+    sold:false
+  });
+  items.push({
+    id:'extraLifePolicy',
+    name:'Extra Life Insurance',
+    description:'Gain an extra life. Adds hidden fees later.',
+    cost:{ type:'debt', amount:2000000000 },
     sold:false
   });
   items.push({
@@ -2561,6 +3128,18 @@ function handleVendingReward(item){
       centerNote('Ammo +10 (health spent)', 1500);
       notify('Vending machine dispensed ammo.');
       break;
+    case 'maxhp50':
+      player.checkingMax = (player.checkingMax || CHECKING_MAX) + 50;
+      player.hpMax = player.checkingMax;
+      player.checking = Math.min(player.checking, player.checkingMax);
+      centerNote('Max health +50.', 1600);
+      notify('Corporate wellness plan expanded your health bar.');
+      break;
+    case 'damage25':
+      player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.25);
+      centerNote('Damage +25%.', 1600);
+      notify('Aggression policy approved.');
+      break;
     case 'speed':
       applySpeedBoost(0.25, 45000);
       centerNote('Speed boost +25%', 1600);
@@ -2573,6 +3152,19 @@ function handleVendingReward(item){
       centerNote('Health bar extended to 300.', 1700);
       notify('Corporate insurance upgraded your health.');
       break;
+    case 'doubleJump':
+      player.maxAirJumps = Math.max(player.maxAirJumps, 1);
+      player.remainingAirJumps = player.maxAirJumps;
+      centerNote('Double jump unlocked!', 1600);
+      notify('Sneakers installed for a second jump.');
+      break;
+    case 'tripleJump':
+      player.maxAirJumps = Math.max(player.maxAirJumps, 2);
+      player.remainingAirJumps = player.maxAirJumps;
+      player.loanInterestPercentPerMinute += 0.29;
+      centerNote('Triple jump unlocked! Interest surges.', 1700);
+      notify('Every minute adds +29% interest now.');
+      break;
     case 'launcher': {
       const wasUnlocked = player.weaponsUnlocked && player.weaponsUnlocked.grenade;
       unlockWeapon('grenade', 'Grenade launcher');
@@ -2581,6 +3173,16 @@ function handleVendingReward(item){
       notify('Rocket launcher stocked via vending machine.');
       break;
     }
+    case 'checkingAmmoBuy':
+      addAmmo(50);
+      centerNote('Purchased 50 bullets with checking.', 1500);
+      notify('Checking account converted into ammo.');
+      break;
+    case 'armyAmmo':
+      player.armyAmmoDebt = true;
+      centerNote('Army ammo IOU activated.', 1600);
+      notify('Each bullet now adds $1,000 debt.');
+      break;
     case 'intel':
       player.intel += 1;
       evaluateWeaponUnlocks();
@@ -2598,6 +3200,17 @@ function handleVendingReward(item){
       centerNote('Secret file acquired!', 1600);
       notify('Shadow dossier secured.');
       break;
+    case 'lotteryIntel':
+    case 'lotteryFile':
+    case 'lotteryDebt': {
+      const rewardId = rollDebtPoweredItem();
+      if(rewardId){
+        grantDebtPoweredItem(rewardId, { source:'vendingLottery' });
+      } else {
+        notify('Lottery machine malfunctioned.');
+      }
+      break;
+    }
     case 'mystery': {
       const rewards = [
         ()=>{ addAmmo(18); centerNote('Mystery reward: ammo cache', 1500); notify('Mystery capsule spilled ammo.'); },
@@ -2612,6 +3225,23 @@ function handleVendingReward(item){
       pick();
       break;
     }
+    case 'truthRifleIntel':
+      grantDebtPoweredItem('truthRifle', { source:'vending' });
+      break;
+    case 'collectionsJammer':
+      player.collectionsJammerActiveUntil = now() + 7000;
+      centerNote('Collections jammer deployed!', 1600);
+      notify('Enemy AI disrupted for 7 seconds.');
+      break;
+    case 'hrFolderIntel':
+      player.hrGrenadeUnlocked = true;
+      player.grenade.reserve = Math.min((player.grenade.maxReserve||GRENADE_RESERVE_MAX), (player.grenade.reserve||0)+2);
+      centerNote('HR stun grenades acquired.', 1600);
+      notify('Paperwork explosions ready.');
+      break;
+    case 'extraLifePolicy':
+      grantDebtPoweredItem('extraLifeInsurance', { source:'vending' });
+      break;
     default:
       break;
   }
@@ -2697,10 +3327,13 @@ function attemptVendingPurchase(machine, item){
     }
     return;
   }
+  const reusable = item.reusable;
   applyVendingCost(item.cost);
   handleVendingReward(item);
-  item.sold = true;
-  machine.depleted = vendingMachineSoldOut(machine);
+  if(!reusable){
+    item.sold = true;
+    machine.depleted = vendingMachineSoldOut(machine);
+  }
   chime();
   updateHudCommon();
   renderVendingMenu();
@@ -3232,6 +3865,55 @@ function resetPlayerState(){
   player.contactInterferencePhase = 0;
   player.stepPhase = 0;
   player.stepStride = 0;
+  player.maxAirJumps = 0;
+  player.remainingAirJumps = 0;
+  player.jumpButtonHeld = false;
+  player.loanInterestPercentPerMinute = 0;
+  player.loanInterestFlatPerMinute = 0;
+  player.interestDeferralUntil = 0;
+  player.extraLives = 0;
+  player.ceoSecretNote = false;
+  player.checkingAmmoEnabled = false;
+  player.checkingAmmoInfinite = false;
+  player.checkingAmmoCostPerShot = 1;
+  player.armyAmmoDebt = false;
+  player.loanSharkFang = false;
+  player.loanSharkDebtCollectorPending = false;
+  player.interestCannonStacks = 0;
+  player.critBonus = 0;
+  player.spellPowerBonus = 0;
+  player.shopCostMultiplier = 1;
+  player.speedDebuffUntil = 0;
+  player.creditBoostUntil = 0;
+  player.variableNukeCharges = 0;
+  player.cloneGeneratorCharges = 0;
+  player.irsFlareCharges = 0;
+  player.brainFogGrenades = 0;
+  player.paperclipPower = false;
+  player.loanRefinancerInsights = false;
+  player.goldenPaycheckActive = false;
+  player.debtReaperScythe = false;
+  player.futureIntelUntil = 0;
+  player.flameOfInflation = false;
+  player.sallieMaeShades = false;
+  player.executiveNukes = 0;
+  player.bankruptcyHaloUntil = 0;
+  player.bankruptcyHaloEmpowered = false;
+  player.bankruptcyHaloDebtApplied = false;
+  player.magnetOrbUntil = 0;
+  player.hallucinationUntil = 0;
+  player.defaultDemonUntil = 0;
+  player.pendingMaxHpLoss = 0;
+  player.taxEvasionDashUnlocked = false;
+  player.taxEvasionDashActiveUntil = 0;
+  player.taxEvasionDashCooldownUntil = 0;
+  player.taxEvasionDashVelocity = 0;
+  player.taxEvasionDashStartedAt = 0;
+  player.truthRifleUnlocked = false;
+  player.hrGrenadeUnlocked = false;
+  player.collectionsJammerActiveUntil = 0;
+  player.collectionsJamCooldownUntil = 0;
+  player.shadesNextDodge = 0;
   updateSpecialFileUI();
   state.midnightRage = false;
   state.midnightRageTriggered = false;
@@ -3239,6 +3921,10 @@ function resetPlayerState(){
   state.midnightRageUntil = 0;
   state.midnightMachineGunLocked = false;
   state.midnightDebtLastApplied = 0;
+  loanInterestTickTimer = 0;
+  inflationTickTimer = 0;
+  pendingFeeDebuffs.length = 0;
+  debtCollectorAlertNotified = false;
 }
 
 function scaledPlayerDamage(base){
@@ -3616,11 +4302,15 @@ function updateOutside(dt){
       continue;
     }
     if(!sniper.fired && t >= sniper.fireAt){
-      loseChecking(10);
-      clearFeather('damage');
-      player.hurtUntil = Math.max(player.hurtUntil||0, t + 160);
-      notify('Counter sniper shot you! -$10');
-      centerNote('Counter sniper hit! -$10', 1400);
+      if(!playerIsInvulnerable(t)){
+        loseChecking(10);
+        clearFeather('damage');
+        player.hurtUntil = Math.max(player.hurtUntil||0, t + 160);
+        notify('Counter sniper shot you! -$10');
+        centerNote('Counter sniper hit! -$10', 1400);
+      } else {
+        notify('You phase through a counter-sniper round.');
+      }
       sniper.fired = true;
       sniper.dead = true;
       sniper.removeAt = t + 1500;
@@ -3890,6 +4580,16 @@ function handleFloorStart(floor){
   clearFeather();
   state.ceoPassive = false;
   state.playerWeaponsDisabled = false;
+  if(player.goldenPaycheckActive && floor > 1){
+    addChecking(1000000);
+    notify('Golden paycheck deposited $1,000,000.');
+  }
+  if(player.loanSharkDebtCollectorPending){
+    spawnDebtCollectorCommando();
+    player.loanSharkDebtCollectorPending = false;
+    centerNote('Debt collector mini-boss approaches!', 1800);
+    notify('Loan shark sends a collector to the next room.');
+  }
   if(floor === ECO_BOSS_FLOOR && getActiveHostages().length){
     ui.toast('Hostages detected ahead. Free them to reduce the loan!');
   }
@@ -3921,13 +4621,50 @@ function handleDeath(){
       notify("Revived on same floor.");
     }, 700);
   } else {
+    if(player.extraLives && player.extraLives>0){
+      player.extraLives = Math.max(0, player.extraLives - 1);
+      const restore = player.checkingMax || CHECKING_MAX;
+      centerNote('Extra life insurance payout!', 1800);
+      notify('Debt insurance revived you.');
+      setTimeout(()=>{
+        player.checking = restore;
+        player.onGround = false;
+        player.vx = 0;
+        player.vy = 0;
+        player.y = floorSlab ? floorSlab.y - player.h : player.y;
+        player.prevBottom = player.y + player.h;
+        player.prevVy = 0;
+        pause = false;
+        updateHudCommon();
+      }, 650);
+      return;
+    }
     if(offerRefinanceOnDeath()) return;
     notify("Checking drained. Run failed.");
     finishRun('death', { message:"You ran out of Checking." });
   }
 }
+function playerPhaseActive(atTime){
+  if(!player || !player.taxEvasionDashActiveUntil) return false;
+  const t = atTime === undefined ? now() : atTime;
+  return t < player.taxEvasionDashActiveUntil;
+}
+
+function playerIsInvulnerable(atTime){
+  if(!player) return false;
+  const t = atTime === undefined ? now() : atTime;
+  if(player.bankruptcyHaloUntil && t < player.bankruptcyHaloUntil){
+    return true;
+  }
+  if(playerPhaseActive(t)) return true;
+  return false;
+}
+
 function damage(){
   const t=now();
+  if(playerIsInvulnerable(t)){
+    return;
+  }
   loseChecking(GUARD_BASE_DAMAGE);
   clearFeather('damage');
   player.hurtUntil = t+120;
@@ -3979,7 +4716,11 @@ function applyHopeBuff(){
 }
 function updateCollectionsPressure(){
   const refinances = runStats && Number.isFinite(runStats.refinances) ? runStats.refinances : 0;
-  collectionsPressure = 1 + 0.1 * Math.max(0, refinances - 2);
+  const base = 1 + 0.1 * Math.max(0, refinances - 2);
+  const debt = player && Number.isFinite(player.loanBalance) ? Math.max(0, player.loanBalance) : 0;
+  const debtFactor = Math.min(1, Math.max(0, (debt - 200000000) / 800000000));
+  const goldenFactor = player && player.goldenPaycheckActive ? 0.25 : 0;
+  collectionsPressure = base * (1 + debtFactor * 1.5 + goldenFactor);
 }
 function loseChecking(amount){
   if(amount<=0) return 0;
@@ -4099,6 +4840,33 @@ function damageWorker(worker, amount){
 }
 
 // Input
+function tryActivateTaxEvasionDash(){
+  if(!player.taxEvasionDashUnlocked) return false;
+  const nowMs = now();
+  if(player.taxEvasionDashCooldownUntil && nowMs < player.taxEvasionDashCooldownUntil){
+    if(nowMs - (player.taxEvasionDashStartedAt || 0) > 180){
+      centerNote('Dash recharging…', 800);
+      lockedBuzz();
+    }
+    return false;
+  }
+  const left = keys['a'] || keys['arrowleft'];
+  const right = keys['d'] || keys['arrowright'];
+  let dir = right && !left ? 1 : left && !right ? -1 : 0;
+  if(dir === 0){ dir = player.facing >= 0 ? 1 : -1; }
+  player.taxEvasionDashVelocity = dir * TAX_EVASION_DASH_SPEED;
+  player.taxEvasionDashActiveUntil = nowMs + TAX_EVASION_DASH_DURATION_MS;
+  player.taxEvasionDashCooldownUntil = nowMs + TAX_EVASION_DASH_COOLDOWN_MS;
+  player.taxEvasionDashStartedAt = nowMs;
+  player.contactDamagePending = false;
+  player.contactDamageApplyAt = 0;
+  player.contactInterferenceStart = 0;
+  player.contactInterferenceUntil = 0;
+  centerNote('Phase dash!', 900);
+  notify('You slip through the collectors.');
+  beep({freq:640,dur:0.05});
+  return true;
+}
 const keys={};
 let attackHeld=false;
 window.addEventListener('keydown', e=>{
@@ -4161,6 +4929,12 @@ window.addEventListener('keydown', e=>{
   }
   const wasDown = !!keys[k];
   keys[k]=true;
+  if(k==='f' && !wasDown){
+    if(tryActivateTaxEvasionDash()){
+      e.preventDefault();
+      return;
+    }
+  }
   if(k==='r'){
     const couldReload = reloadWeapon();
     if(!couldReload){
@@ -4530,6 +5304,12 @@ function spawnCeoBoss(){
     speed: 0.55,
     direction: -1
   });
+  if(player.ceoSecretNote){
+    ceo.hp = Math.max(1, Math.round(ceo.hp * 0.75));
+    ceo.maxHp = ceo.hp;
+    player.ceoSecretNote = false;
+    notify('CEO exposed — boss enters with 25% less health.');
+  }
   ceo.spawnOrigin = spawnX;
   ceo.boss = true;
   ceo.damageReduction = 0.45;
@@ -4652,12 +5432,14 @@ function updateCeoBoss(ceo, dt, playerCenterX){
       const dx = Math.abs(playerCenterX - center);
       if(dx <= radius){
         if(player.onGround && !player.inVent){
-          loseChecking(Math.round(GUARD_BASE_DAMAGE * 1.8));
-          player.hurtUntil = now() + 500;
-          player.vy = -Math.max(JUMP*0.55, 7);
-          player.onGround = false;
-          player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+220);
-          inflicted = true;
+          if(!playerIsInvulnerable(now())){
+            loseChecking(Math.round(GUARD_BASE_DAMAGE * 1.8));
+            player.hurtUntil = now() + 500;
+            player.vy = -Math.max(JUMP*0.55, 7);
+            player.onGround = false;
+            player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+220);
+            inflicted = true;
+          }
         }
       }
       ceoArenaState.shockwaves.push({ x:center, y:(floorSlab ? floorSlab.y : (H-50)), radius:80, life:0.55, grow:360 });
@@ -4895,6 +5677,34 @@ function spawnHellscapeCommando(spawnX){
   commando.flashlight = false;
   commando.spawnOrigin = x;
   commando.hellscape = true;
+  guards.push(commando);
+  return commando;
+}
+
+function spawnDebtCollectorCommando(spawnX){
+  const x = Number.isFinite(spawnX) ? spawnX : pickGuardSpawn([]);
+  const groundY = floorSlab ? floorSlab.y : (H - GUARD_HEIGHT - 40);
+  const commando = new Agent({
+    x,
+    y: groundY - GUARD_HEIGHT,
+    w: GUARD_WIDTH,
+    h: GUARD_HEIGHT,
+    vx: 0,
+    hp: 48,
+    maxHp: 48,
+    dmg: Math.round(GUARD_BASE_DAMAGE * 1.35),
+    type: 'commando',
+    weapon: 'auto',
+    attackInterval: 520,
+    shotInterval: 170,
+    speed: 1.2,
+    direction: Math.random()<0.5 ? -1 : 1,
+    aggressive: true,
+    chaser: true
+  });
+  commando.flashlight = false;
+  commando.spawnOrigin = x;
+  commando.debtCollector = true;
   guards.push(commando);
   return commando;
 }
@@ -8022,10 +8832,12 @@ function updateRooftopMission(dt){
       if(Math.abs(bullet.x - px) < 20 && bullet.y < py + 14 && bullet.y > py - 38){
         mission.bullets.splice(i,1);
         mission.hitFlashUntil = nowTs + 240;
-        loseChecking(6);
-        player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 260);
-        notify('Incoming fire grazed you on the zip line! -$6');
-        beep({freq:320});
+        if(!playerIsInvulnerable(nowTs)){
+          loseChecking(6);
+          player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 260);
+          notify('Incoming fire grazed you on the zip line! -$6');
+          beep({freq:320});
+        }
         continue;
       }
     }
@@ -8360,19 +9172,23 @@ function updateWarzoneMission(dt){
       enemy.fireTimer = 0;
       mission.totalEnemyShots++;
       if(mission.totalEnemyShots % 200 === 0){
-        loseChecking(8);
-        mission.playerHitFlashUntil = nowTs + 240;
-        player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 320);
-        notify('A stray bullet clips you through the storm! -$8');
-        beep({freq:260});
+        if(!playerIsInvulnerable(nowTs)){
+          loseChecking(8);
+          mission.playerHitFlashUntil = nowTs + 240;
+          player.hurtUntil = Math.max(player.hurtUntil||0, nowTs + 320);
+          notify('A stray bullet clips you through the storm! -$8');
+          beep({freq:260});
+        }
       }
     }
     if(enemy.distance <= 0){
       mission.enemies.splice(i,1);
-      loseChecking(12);
-      mission.playerHitFlashUntil = nowTs + 260;
-      notify('A soldier breaches the barricade! -$12');
-      beep({freq:320});
+      if(!playerIsInvulnerable(nowTs)){
+        loseChecking(12);
+        mission.playerHitFlashUntil = nowTs + 260;
+        notify('A soldier breaches the barricade! -$12');
+        beep({freq:320});
+      }
       continue;
     }
   }
@@ -10011,15 +10827,18 @@ function spawnSolarFlare(){
   ecoProjectiles.push({ type:'flare', x:startX, y:80, w:28, h:floorSlab ? (floorSlab.y-80) : (H-120), life:1.2, flashed:false });
 }
 
-function updateEcoProjectiles(dt){
+function updateEcoProjectiles(dt, frameTime){
   if(!ecoProjectiles.length) return;
   const playerBox = { x:player.x, y:player.y, w:player.w, h:player.h };
+  const timeRef = frameTime === undefined ? now() : frameTime;
   for(const proj of ecoProjectiles){
     proj.life -= dt;
     if(proj.type==='root'){
       if(!proj.triggered && rect(playerBox, {x:proj.x, y:proj.y, w:proj.w, h:proj.h})){
-        loseChecking(15);
-        player.vx *= 0.2;
+        if(!playerIsInvulnerable(timeRef)){
+          loseChecking(15);
+          player.vx *= 0.2;
+        }
         proj.triggered = true;
       }
     } else if(proj.type==='spore'){
@@ -10028,8 +10847,10 @@ function updateEcoProjectiles(dt){
       const dx = (player.x + player.w/2) - proj.x;
       const dy = (player.y + player.h/2) - proj.y;
       if(Math.hypot(dx, dy) < (proj.radius||24)){
-        loseChecking(6);
-        player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+700);
+        if(!playerIsInvulnerable(timeRef)){
+          loseChecking(6);
+          player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+700);
+        }
         proj.life -= 0.6;
       }
     } else if(proj.type==='flare'){
@@ -10038,7 +10859,9 @@ function updateEcoProjectiles(dt){
         proj.flashed = true;
       }
       if(rect(playerBox, {x:proj.x, y:proj.y, w:proj.w, h:proj.h})){
-        loseChecking(18);
+        if(!playerIsInvulnerable(timeRef)){
+          loseChecking(18);
+        }
         proj.life -= 0.4;
       }
     }
@@ -10457,7 +11280,16 @@ function interact(){
       }
     }
 
+    const magnetActive = player.magnetOrbUntil && now() < player.magnetOrbUntil;
     for(const it of pickups){
+      if(magnetActive && it && it.type){
+        const cx = it.x + (it.w||0)/2;
+        const cy = it.y + (it.h||0)/2;
+        const pxCenter = player.x + player.w/2;
+        const pyCenter = player.y + player.h/2;
+        it.x += (pxCenter - cx) * 0.08;
+        it.y += (pyCenter - cy) * 0.08;
+      }
       if(it.type && rect(p,it)){
         if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
         if(it.type==='ammo'){ const amount = Math.round(it.amount || 18); addAmmo(amount); it.type=null; centerNote(`Ammo +${amount}`); beep({freq:520}); notify("Ammo restocked."); }
@@ -10613,13 +11445,27 @@ function interact(){
         drawer.used=true;
         const roll = Math.random();
         if(roll < 0.001){
+          centerNote('Found a $100,000,000 bonus check!', 2000);
+          notify('Big check discovered. Cashing in 10 seconds.');
+          setTimeout(()=>{
+            addChecking(100000000);
+            notify('Big check cashed for $100,000,000.');
+            updateHudCommon();
+          }, 10000);
+          chime();
+        } else if(roll < 0.006){
+          player.ceoSecretNote = true;
+          centerNote('Sticky note: CEO secret acquired.', 1800);
+          notify('CEO will start battle with 25% less health.');
+          chime();
+        } else if(roll < 0.016){
           player.loanBalance = 0;
-          centerNote('Loan record shredded! Debt wiped clean.', 2000);
-          notify('You destroyed your loan record — debt forgiven.');
-          ui.toast('Debt wiped clean. Keep going!');
+          centerNote('Fake ID erases your debt!', 2000);
+          notify('Security drawer held a fake student ID. Debt reset.');
+          ui.toast('All debt forgiven.');
           chime();
           updateHudCommon();
-        } else if(roll < 0.101){
+        } else if(roll < 0.116){
           const reward=['intel','feather','upgrade'][Math.floor(Math.random()*3)];
           if(reward==='intel'){
             player.intel++;
@@ -10814,6 +11660,18 @@ function interact(){
 // Attacks / weapons
 function handlePlayerBulletFired(projectileType){
   if(projectileType !== 'bullet') return;
+  if(player.checkingAmmoEnabled){
+    const cost = Math.max(0, Math.round(player.checkingAmmoCostPerShot || 1));
+    if(cost>0){ player.checking = Math.max(0, player.checking - cost); }
+    if(player.checkingAmmoInfinite){
+      const stats = player.weapon==='silenced' ? player.silenced : player.pistol;
+      if(stats && stats.ammo <= 0){ stats.ammo = Math.max(1, stats.mag || GAME_PARAMS.player.pistol.magazine); }
+      if(stats && stats.reserve < stats.mag){ stats.reserve = Math.max(stats.reserve, stats.mag || GAME_PARAMS.player.pistol.magazine); }
+    }
+  }
+  if(player.armyAmmoDebt){
+    player.loanBalance = clampLoanBalance(player.loanBalance + 1000);
+  }
   if(!ventDungeonState || !Array.isArray(ventDungeonState.hellscapeZones)) return;
   if(!ventDungeonState.hellscapeZones.length) return;
   ventDungeonState.hellscapeShotsFired = (ventDungeonState.hellscapeShotsFired || 0) + 1;
@@ -10852,9 +11710,17 @@ function attack(){
   if(player.weapon==='pistol' || player.weapon==='silenced'){
     const stats = player.weapon==='pistol' ? player.pistol : player.silenced;
     const baseCooldown = stats.cooldown || player.pistol.cooldown;
-    const weaponCooldown = now()<player.hopeBuffUntil ? Math.max(40, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    let weaponCooldown = now()<player.hopeBuffUntil ? Math.max(40, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    if(player.paperclipPower){ weaponCooldown = Math.max(20, Math.round(weaponCooldown * 0.6)); }
     if(t - (stats.last||0) < weaponCooldown) return;
     if(stats.ammo<=0){ centerNote('Reload (R)'); beep({freq:320}); notify('Out of ammo.'); return; }
+    if(player.paperclipPower && Math.random()<0.05){
+      stats.last = t;
+      lockedBuzz();
+      centerNote('Paperclip jam!', 1400);
+      notify('Paperclip power jammed your weapon briefly.');
+      return;
+    }
     stats.last=t;
     stats.ammo--;
     const dir = player.facing>0 ? 1 : -1;
@@ -10893,9 +11759,17 @@ function attack(){
   } else if(player.weapon==='machineGun'){
     const stats = player.machineGun;
     const baseCooldown = stats.cooldown || 80;
-    const weaponCooldown = now()<player.hopeBuffUntil ? Math.max(24, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    let weaponCooldown = now()<player.hopeBuffUntil ? Math.max(24, Math.round(baseCooldown * 0.85)) : baseCooldown;
+    if(player.paperclipPower){ weaponCooldown = Math.max(12, Math.round(weaponCooldown * 0.7)); }
     if(t - (stats.last||0) < weaponCooldown) return;
     if(stats.ammo<=0){ centerNote('Machine gun empty — reload (R)'); beep({freq:300}); notify('Reload the machine gun.'); return; }
+    if(player.paperclipPower && Math.random()<0.05){
+      stats.last = t;
+      lockedBuzz();
+      centerNote('Machine gun jammed!', 1400);
+      notify('Paperclip of Power caused a jam.');
+      return;
+    }
     stats.last=t;
     stats.ammo--;
     const dir = player.facing>0 ? 1 : -1;
@@ -10932,8 +11806,21 @@ function attack(){
     for(const g of list){
       if(g.hp <= 0) continue;
       if(rect(hitBox,g)){
-        const defeated = applyGuardDamage(g, dmgValue);
+        let defeated = applyGuardDamage(g, dmgValue);
+        if(player.debtReaperScythe){
+          if(g.boss){
+            const chunk = Math.max(1, Math.round((g.maxHp || g.hp || 100) * 0.1));
+            g.hp = Math.max(0, g.hp - chunk);
+            defeated = g.hp===0;
+          } else {
+            g.hp = 0;
+            defeated = true;
+          }
+        }
         if(defeated){ g.hp = 0; }
+        if(player.debtReaperScythe && defeated){
+          player.loanBalance = clampLoanBalance(player.loanBalance + 1000);
+        }
         g.hitFlashUntil = now() + 160;
         hits++;
       }
@@ -10959,6 +11846,10 @@ function attack(){
     if(hits){
       player.hopeBuffUntil = Math.max(player.hopeBuffUntil, now()+1000);
       beep({freq: player.weapon==='saber'?520:480});
+      if(player.loanSharkFang){
+        const heal = Math.max(0, Math.round(dmgValue * hits * 0.5));
+        if(heal>0){ addChecking(heal); }
+      }
       if(arcadeBeatdownActive || isArcadeBeatdownFloor(currentFloor)){
         player.punchAnimUntil = now()+260;
         player.punchAnimSide = player.facing>=0 ? 1 : -1;
@@ -11154,6 +12045,11 @@ function update(dt){
     return;
   }
   const frameNow = now();
+  if(player.taxEvasionDashActiveUntil && frameNow >= player.taxEvasionDashActiveUntil){
+    player.taxEvasionDashActiveUntil = 0;
+    player.taxEvasionDashVelocity = 0;
+  }
+  const dashActive = playerPhaseActive(frameNow);
   manageFlamethrowerHeat(frameNow);
   maybeRespawnFeather();
   if(hellscapeState){
@@ -11230,6 +12126,97 @@ function update(dt){
     if(player.checking===0){ notify('Interest drained checking to zero!'); }
   }
 
+  const interestSuppressed = player.interestDeferralUntil && frameNow < player.interestDeferralUntil;
+  if(!interestSuppressed && (player.loanInterestPercentPerMinute>0 || player.loanInterestFlatPerMinute>0)){
+    if(!loanInterestTickTimer){ loanInterestTickTimer = frameNow; }
+    const elapsed = frameNow - loanInterestTickTimer;
+    const interval = 60000;
+    if(elapsed >= interval){
+      const steps = Math.floor(elapsed / interval);
+      loanInterestTickTimer += steps * interval;
+      for(let i=0;i<steps;i++){
+        const previous = player.loanBalance;
+        const percent = Math.max(0, player.loanInterestPercentPerMinute || 0);
+        if(percent>0 && previous>0){
+          const grown = Math.ceil(previous * (1 + percent));
+          player.loanBalance = clampLoanBalance(grown);
+        }
+        if(player.loanInterestFlatPerMinute){
+          player.loanBalance = clampLoanBalance(player.loanBalance + Math.round(player.loanInterestFlatPerMinute));
+        }
+      }
+      notify('Interest compounds on your loan.');
+      updateHudCommon();
+    }
+  } else {
+    loanInterestTickTimer = frameNow;
+  }
+
+  if(pendingFeeDebuffs.length){
+    const nowTs = frameNow;
+    for(let i=pendingFeeDebuffs.length-1;i>=0;i--){
+      const fee = pendingFeeDebuffs[i];
+      if(!fee || !fee.triggerAt || nowTs < fee.triggerAt) continue;
+      const amount = Math.max(0, Math.round(fee.amount || 0));
+      if(amount>0){
+        player.loanBalance = clampLoanBalance(player.loanBalance + amount);
+        const label = fee.type==='fee' ? 'Hidden fee posted' : 'Debt penalty applied';
+        const formatted = `$${fmtCurrency(amount)}`;
+        notify(`${label}: +${formatted}`);
+        centerNote(`${label}: +${formatted}`, 1600);
+      }
+      pendingFeeDebuffs.splice(i,1);
+      updateHudCommon();
+    }
+  }
+
+  if(player.defaultDemonUntil && frameNow > player.defaultDemonUntil){
+    player.defaultDemonUntil = 0;
+    player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) / 3);
+    if(player.pendingMaxHpLoss){
+      const loss = Math.max(0, Math.round(player.pendingMaxHpLoss));
+      const max = player.checkingMax || CHECKING_MAX;
+      const newMax = Math.max(20, max - loss);
+      player.checkingMax = newMax;
+      player.hpMax = newMax;
+      player.checking = Math.min(player.checking, newMax);
+      player.pendingMaxHpLoss = 0;
+      centerNote('Default demon repossessed your health cap.', 1700);
+      notify('Lost 50% max HP after the default demon deal.');
+    }
+  }
+
+  if(player.bankruptcyHaloUntil){
+    if(frameNow < player.bankruptcyHaloUntil){
+      player.screenFlashUntil = Math.max(player.screenFlashUntil, frameNow + 90);
+    } else if(!player.bankruptcyHaloDebtApplied){
+      const increase = Math.round((player.loanBalance || 0) * 0.25);
+      player.loanBalance = clampLoanBalance(player.loanBalance + increase);
+      player.bankruptcyHaloDebtApplied = true;
+      player.bankruptcyHaloUntil = 0;
+      notify('Bankruptcy halo ended: debt rose by 25%.');
+      centerNote('Debt collectors returned.', 1700);
+      updateHudCommon();
+    }
+  }
+
+  if(player.sallieMaeShades){
+    const threshold = (player.hpMax || CHECKING_MAX) * 0.2;
+    if(player.checking <= threshold){
+      player.speedBoostAmount = Math.max(player.speedBoostAmount || 0, 0.25);
+      player.speedBoostUntil = Math.max(player.speedBoostUntil || 0, frameNow + 240);
+      if(!player.shadesNextDodge || frameNow >= player.shadesNextDodge){
+        player.stealthGraceUntil = Math.max(player.stealthGraceUntil || 0, frameNow + 600);
+        player.shadesNextDodge = frameNow + 10000;
+        notify('Sallie Mae Shades auto-dodged an attack.');
+      }
+    }
+  }
+  if(player.creditBoostUntil && frameNow > player.creditBoostUntil){
+    player.creditBoostUntil = 0;
+    player.cashMultiplier = Math.max(1, player.cashMultiplier || 1);
+  }
+
   if(currentFloor === FLOORS && ceoArenaState.bounds){
     updateCeoArena(dt);
   }
@@ -11239,6 +12226,7 @@ function update(dt){
   const dropCombo = (keys['w'] && keys['z']) || (keys['arrowup'] && keys['arrowdown']);
   const hacking = !!activeHack;
   const jumpPressed = !dropCombo && !hacking && (keys['w']||keys['arrowup']);
+  const jumpJustPressed = jumpPressed && !player.jumpButtonHeld;
   if(player.dropThroughUntil && now() > player.dropThroughUntil){
     player.dropThroughUntil = 0;
     player.dropThroughFloor = null;
@@ -11295,10 +12283,19 @@ function update(dt){
   if(player.climbing){
     player.vy = (keys['w']||keys['arrowup'])? -3 : (keys['s']||keys['arrowdown'])? 3 : 0;
   } else {
-    // Ground jump
-    if(jumpPressed && player.onGround){ player.vy = -JUMP; player.onGround=false; }
-    // Air flap if feather
-    if(jumpPressed && !player.onGround && player.hasFeather && (now()-player.lastFlap>player.flapCooldown) && player.featherEnergy>0){
+    let jumpConsumed = false;
+    if(jumpJustPressed && player.onGround){
+      player.vy = -JUMP;
+      player.onGround = false;
+      player.remainingAirJumps = player.maxAirJumps;
+      jumpConsumed = true;
+    } else if(jumpJustPressed && !player.onGround && player.remainingAirJumps > 0){
+      player.vy = -Math.max(JUMP * 0.92, 9);
+      player.remainingAirJumps = Math.max(0, player.remainingAirJumps - 1);
+      jumpConsumed = true;
+      beep({freq:860,dur:0.05});
+    }
+    if(!jumpConsumed && jumpPressed && !player.onGround && player.hasFeather && (now()-player.lastFlap>player.flapCooldown) && player.featherEnergy>0){
       player.vy = Math.min(player.vy, -9);
       player.lastFlap = now();
       player.featherEnergy = Math.max(0, player.featherEnergy - 12);
@@ -11309,10 +12306,14 @@ function update(dt){
   const previousBottom = player.y + player.h;
 
   // Movement
-  player.vx += ax*0.8;
-  if(hacking){ player.vx *= 0.6; }
-  player.vx *= player.onGround?FRICTION:0.99;
-  player.vx = clamp(player.vx, -maxRun, maxRun);
+  if(dashActive){
+    player.vx = player.taxEvasionDashVelocity;
+  } else {
+    player.vx += ax*0.8;
+    if(hacking){ player.vx *= 0.6; }
+    player.vx *= player.onGround?FRICTION:0.99;
+    player.vx = clamp(player.vx, -maxRun, maxRun);
+  }
   if(!player.climbing) player.vy += GRAV*(player.hasFeather?0.92:1);
   const vyBeforeMove = player.vy;
 
@@ -11345,6 +12346,7 @@ function update(dt){
         player.dropThroughUntil = 0;
         player.dropThroughFloor = null;
         dropActive=false; dropIgnoreY=-Infinity;
+        player.remainingAirJumps = player.maxAirJumps;
       }
     }
     for(const w of walls){
@@ -11355,6 +12357,7 @@ function update(dt){
           player.dropThroughUntil = 0;
           player.dropThroughFloor = null;
           dropActive=false; dropIgnoreY=-Infinity;
+          player.remainingAirJumps = player.maxAirJumps;
         }
       }
     }
@@ -11369,6 +12372,7 @@ function update(dt){
           player.dropThroughFloor = null;
           dropActive=false; dropIgnoreY=-Infinity;
           player.x += m.vx;
+          player.remainingAirJumps = player.maxAirJumps;
         }
       }
     }
@@ -11506,8 +12510,53 @@ function update(dt){
     }
     const px = player.x + player.w/2;
     const py = player.y + player.h/2;
+    const jammerActive = player.collectionsJammerActiveUntil && frameNow < player.collectionsJammerActiveUntil;
+    const loanBalance = player.loanBalance || 0;
+    const debtPressure = Math.min(1, Math.max(0, (loanBalance - 400000000) / 600000000));
+    if(debtPressure > 0){
+      const activeCollectors = guards.filter(g=>g && g.hp>0 && g.type==='commando' && g.debtCollector).length;
+      const maxCollectors = Math.max(1, Math.ceil(debtPressure * 3));
+      if(activeCollectors < maxCollectors){
+        const spawnChance = 0.01 + debtPressure * 0.08;
+        if(Math.random() < spawnChance){
+          const existing = guards.filter(g=>g && g.hp>0).map(g=>g.spawnOrigin ?? g.x);
+          const spawnX = pickGuardSpawn(existing);
+          spawnDebtCollectorCommando(spawnX);
+          notify('Debt collectors arrive to enforce payment!');
+        }
+      }
+      if(debtPressure >= 1 && !debtCollectorAlertNotified){
+        notify('Debt above $1B — commandos will pursue you relentlessly.');
+        debtCollectorAlertNotified = true;
+      } else if(debtPressure < 1 && debtCollectorAlertNotified){
+        debtCollectorAlertNotified = false;
+      }
+    } else {
+      debtCollectorAlertNotified = false;
+    }
+    if(player.flameOfInflation){
+      if(!inflationTickTimer){ inflationTickTimer = frameNow; }
+      if(frameNow - inflationTickTimer >= 15000){
+        inflationTickTimer = frameNow;
+        for(const g of guards){
+          if(!g || g.hp <= 0 || g.boss) continue;
+          const reduction = Math.max(1, Math.round(g.maxHp ? g.maxHp * 0.05 : g.hp * 0.05));
+          g.hp = Math.max(1, g.hp - reduction);
+          g.hitFlashUntil = Math.max(g.hitFlashUntil||0, now() + 120);
+        }
+        notify('Inflation flame scorches every enemy.');
+      }
+    } else {
+      inflationTickTimer = frameNow;
+    }
     for(const g of guards){
       if(g.hp <= 0) continue;
+      if(jammerActive){
+        g.vx = 0;
+        g.lastShot = frameNow;
+        g.lastAttack = frameNow;
+        continue;
+      }
       updateNinjaMovement(g, dt, px, py, yGround);
       g.t += dt*TIME_SCALE;
       const evacBoost = (evacuationActive && now()<evacuationUntil) ? 1.25 : 1;
@@ -11577,7 +12626,8 @@ function update(dt){
       const overlapping = rect(player,g);
       const shielded = player.hidden && player.crouch;
       let stomped = false;
-      const nowMs = now();
+      const nowMs = frameNow;
+      const dashActiveNow = dashActive;
       const zombieImmune = !!(hellscapeState && g.type==='zombie' && hellscapeState.buffUntil && hellscapeState.buffUntil > nowMs);
       if(hellscapeState && g.type==='zombie'){
         const hostages = hellscapeState.hostages || [];
@@ -11593,7 +12643,7 @@ function update(dt){
           }
         }
       }
-      if(overlapping && !shielded){
+      if(!dashActiveNow && overlapping && !shielded){
         const guardTop = g.y;
         const cameFromAbove = player.prevBottom <= guardTop + 6 && player.prevVy > 0.5;
         if(cameFromAbove){
@@ -11615,7 +12665,7 @@ function update(dt){
         alarm=true; alarmUntil=now()+7000;
         if(Math.abs(dx)<40 && Math.abs(dy)<20){
           if(!stomped){
-            if(!zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
+            if(!dashActiveNow && !zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
           }
         } else if(g.type!=='ninja' && g.type!=='ceo') {
           guardFire(g);
@@ -11624,7 +12674,7 @@ function update(dt){
       if(g.type==='ninja' && !inflicted){
         const close = Math.abs(px - (g.x+g.w/2))<90 && Math.abs(py - (g.y+g.h/2))<40;
         if(close && overlapping && !stomped && !shielded){
-          if(!zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
+          if(!dashActiveNow && !zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
         }
       }
       if(g.type==='thug' && !inflicted){
@@ -11638,14 +12688,14 @@ function update(dt){
         }
         if(Math.abs(horizontal) < 42 && vertical < 36){
           if(g.readyToAttack(now())){
-            if(!zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
+            if(!dashActiveNow && !zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
             g.markAttack(now());
             g.punchWindupUntil = now() + 220;
           }
         }
       }
       if(overlapping && !stomped && !inflicted && !shielded){
-        if(!zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
+        if(!dashActiveNow && !zombieImmune && scheduleGuardContactDamage()){ inflicted = true; }
       }
     }
     // kills + reward
@@ -11707,7 +12757,7 @@ function update(dt){
     if(ecoBossActive){
       updateEcoBoss(dt);
       updateHostageChairs(dt);
-      updateEcoProjectiles(dt);
+      updateEcoProjectiles(dt, frameNow);
       if(ecoBoss && ecoBoss.hp <= 0 && !ecoBoss.defeated){
         ecoBoss.hp = 0;
         onEcoBossDeath();
@@ -11788,7 +12838,9 @@ function update(dt){
             player.vy = -Math.max(JUMP*0.55, 7);
             player.onGround = false;
           } else {
-          scheduleGuardContactDamage();
+            if(!playerIsInvulnerable(frameNow)){
+              scheduleGuardContactDamage();
+            }
           }
         }
     }
@@ -11915,21 +12967,27 @@ function update(dt){
         if(b.type==='policy'){
           if(rect2(b.x-4,b.y-4,8,8,pbox)){
             const loss = 40;
-            loseChecking(loss);
-            player.hurtUntil = now()+200;
-            notify('Policy binder drained funds!');
+            if(!playerIsInvulnerable(now())){
+              loseChecking(loss);
+              player.hurtUntil = now()+200;
+              notify('Policy binder drained funds!');
+            }
             b.life=0;
           }
         } else if(b.type==='ad'){
           if(rect2(b.x-6,b.y-6,12,12,pbox)){
-            player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+1500);
-            notify('Ad grenade blinded you!');
+            if(!playerIsInvulnerable(now())){
+              player.screenFlashUntil = Math.max(player.screenFlashUntil, now()+1500);
+              notify('Ad grenade blinded you!');
+            }
             b.life=0;
           }
         } else if(b.type==='lawsuit'){
           if(rect2(b.x-6,b.y-6,12,12,pbox)){
-            player.lawsuitSlowUntil = now()+2000;
-            notify('Caught in a lawsuit! Movement slowed.');
+            if(!playerIsInvulnerable(now())){
+              player.lawsuitSlowUntil = now()+2000;
+              notify('Caught in a lawsuit! Movement slowed.');
+            }
             b.life=0;
           }
         } else if(b.type!=='rocket' && rect2(b.x-2,b.y-2,4,4,pbox)){ damage(); b.life=0; }
@@ -11969,6 +13027,8 @@ function update(dt){
     }
   }
   for(let i=bullets.length-1;i>=0;i--) if(bullets[i].life<=0) bullets.splice(i,1);
+
+  player.jumpButtonHeld = jumpPressed;
 
   updateHudCommon();
 }
