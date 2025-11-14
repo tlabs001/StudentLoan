@@ -27,6 +27,14 @@ function randomId() {
   return Math.random().toString(36).slice(2);
 }
 
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
 export class JobApplicationTerminalUI {
   constructor(options = {}) {
     this.options = options;
@@ -46,6 +54,7 @@ export class JobApplicationTerminalUI {
     (options.parent ?? document.body).appendChild(this.root);
     this.root.style.display = 'none';
 
+    this.jobPool = shuffle([...JOB_LISTING_POOL]);
     this.listings = [];
     this.appliedCount = 0;
     this.isOpenFlag = false;
@@ -59,19 +68,22 @@ export class JobApplicationTerminalUI {
   }
 
   setAppliedCount(value) {
-    this.appliedCount = value;
+    const clamped = Math.max(0, Math.min(this.requiredApplications, value));
+    this.appliedCount = clamped;
     this.updateProgress();
+    if (this.isOpenFlag) {
+      this.ensureListingCapacity();
+      this.renderListings();
+    }
   }
 
-  open(existingListings) {
+  open() {
     this.isOpenFlag = true;
     this.root.style.display = 'block';
     document.body.classList.add('job-terminal-ui--open');
 
-    if (existingListings && existingListings.length > 0) {
-      this.listings = existingListings;
-      this.renderListings();
-    }
+    this.ensureListingCapacity();
+    this.renderListings();
   }
 
   close() {
@@ -91,22 +103,39 @@ export class JobApplicationTerminalUI {
   }
 
   refreshListings() {
-    const total = 12;
-    const shuffled = [...JOB_LISTING_POOL];
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-
-    this.listings = shuffled.slice(0, total).map((item) => ({
-      id: randomId(),
-      title: item.title,
-      requirement: item.requirement,
-      pay: item.pay,
-      applied: false
-    }));
-
+    this.listings = [];
+    this.ensureListingCapacity();
     this.renderListings();
+  }
+
+  ensureListingCapacity() {
+    const remaining = Math.max(0, this.requiredApplications - this.appliedCount);
+    const target = remaining > 0 ? Math.min(12, Math.max(3, remaining)) : 0;
+    while (this.listings.length > target) {
+      this.listings.pop();
+    }
+    while (this.listings.length < target) {
+      this.listings.push(this.createListing());
+    }
+  }
+
+  drawFromPool() {
+    if (this.jobPool.length === 0) {
+      this.jobPool = shuffle([...JOB_LISTING_POOL]);
+    }
+    const job = this.jobPool.pop();
+    return job;
+  }
+
+  createListing() {
+    const job = this.drawFromPool();
+    return {
+      id: randomId(),
+      title: job.title,
+      requirement: job.requirement,
+      pay: job.pay,
+      applied: false
+    };
   }
 
   renderListings() {
@@ -133,8 +162,15 @@ export class JobApplicationTerminalUI {
     this.options.onApply?.(listing);
     this.updateProgress();
 
+    this.listings = this.listings.filter((item) => item.id !== listing.id);
+    if (this.appliedCount < this.requiredApplications) {
+      this.ensureListingCapacity();
+    }
+    this.renderListings();
+
     if (this.appliedCount >= this.requiredApplications) {
       this.options.onComplete?.();
+      this.close();
     }
   }
 
