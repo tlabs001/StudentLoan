@@ -1645,7 +1645,11 @@ const player = {
   inventory:{ weapons:[], effects:[], resources:[], misc:[] }
 };
 
-resetInventoryState();
+const noteEl = document.getElementById('note');
+const inventoryOverlay = document.getElementById('inventoryOverlay');
+const inventoryGridEl = document.getElementById('inventoryGrid');
+const inventoryCloseBtn = document.getElementById('inventoryClose');
+const infoLogEl = document.getElementById('infoLog');
 
 const HOSTAGE_SEQUENCE = ['Grandpa','Mom','Dad','Grandma','Brother','Sister',
   '1st Cousin','2nd Cousin','3rd Cousin','4th Cousin','5th Cousin','6th Cousin'];
@@ -2285,12 +2289,6 @@ const bullets=[];
 let smokeActive=false, smokeT=0;
 
 // HUD helpers
-const noteEl = document.getElementById('note');
-const inventoryOverlay = document.getElementById('inventoryOverlay');
-const inventoryGridEl = document.getElementById('inventoryGrid');
-const inventoryCloseBtn = document.getElementById('inventoryClose');
-const infoLogEl = document.getElementById('infoLog');
-
 const INFO_LOG_LIMIT = 200;
 const infoLogEntries = [];
 let infoLogOpen = false;
@@ -2322,6 +2320,8 @@ const WEAPON_DESCRIPTIONS = {
   saber:'Energy blade earned with files.',
   machineGun:'Sustained firepower for sieges.'
 };
+
+resetInventoryState();
 
 const LOG_TIME_FORMATTER = typeof Intl !== 'undefined'
   ? new Intl.DateTimeFormat(undefined, { minute:'2-digit', second:'2-digit' })
