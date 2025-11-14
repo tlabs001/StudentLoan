@@ -130,6 +130,156 @@
 
   .hidden { display:none !important; }
 
+  .inventory-overlay {
+    position:fixed;
+    inset:0;
+    background:rgba(5,8,12,0.82);
+    backdrop-filter:blur(6px);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:80;
+  }
+  .inventory-panel {
+    width:min(820px, 92vw);
+    max-height:90vh;
+    overflow-y:auto;
+    background:linear-gradient(160deg, rgba(14,20,34,0.96), rgba(10,14,22,0.92));
+    border:1px solid rgba(170,200,255,0.28);
+    border-radius:18px;
+    padding:24px 26px;
+    box-shadow:0 18px 48px rgba(0,0,0,0.55);
+    color:#f5f7ff;
+    font:13px/1.5 monospace;
+  }
+  .inventory-header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:18px;
+    margin-bottom:14px;
+  }
+  .inventory-header h2 {
+    margin:0;
+    font-size:20px;
+    letter-spacing:3px;
+    text-transform:uppercase;
+  }
+  .inventory-close {
+    padding:6px 14px;
+    border-radius:999px;
+    border:1px solid rgba(170,210,255,0.45);
+    background:rgba(70,110,170,0.25);
+    color:#f0f6ff;
+    font-size:11px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:background 0.2s ease, border-color 0.2s ease;
+  }
+  .inventory-close:hover,
+  .inventory-close:focus {
+    background:rgba(110,150,210,0.32);
+    border-color:rgba(200,230,255,0.55);
+    outline:none;
+  }
+  .inventory-hint {
+    margin:0 0 18px;
+    font-size:12px;
+    letter-spacing:1px;
+    opacity:0.78;
+  }
+  .inventory-grid {
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+  .inventory-section {
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .inventory-section h3 {
+    margin:0;
+    font-size:14px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:#d5e3ff;
+    opacity:0.85;
+  }
+  .inventory-section-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+    gap:12px;
+  }
+  .inventory-item {
+    border:1px solid rgba(160,190,255,0.25);
+    border-radius:12px;
+    background:rgba(12,16,26,0.85);
+    padding:10px 12px;
+    box-shadow:0 8px 18px rgba(0,0,0,0.35);
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    min-height:68px;
+  }
+  .inventory-item-title {
+    font-size:13px;
+    letter-spacing:1px;
+    color:#f6f9ff;
+  }
+  .inventory-item-meta {
+    font-size:11px;
+    color:rgba(220,235,255,0.85);
+  }
+  .inventory-item-detail {
+    font-size:11px;
+    color:rgba(190,210,255,0.75);
+  }
+  .inventory-empty {
+    font-size:12px;
+    color:rgba(210,220,240,0.6);
+    font-style:italic;
+  }
+
+  .info-log {
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    bottom:0;
+    width:min(760px, 94vw);
+    max-height:64px;
+    background:rgba(6,10,18,0.86);
+    border:1px solid rgba(160,190,255,0.35);
+    border-bottom:none;
+    border-radius:14px 14px 0 0;
+    padding:8px 14px;
+    color:#f1f5ff;
+    font:12px/1.45 monospace;
+    overflow-y:auto;
+    box-shadow:0 -6px 24px rgba(0,0,0,0.45);
+    display:none;
+    z-index:55;
+    scrollbar-width:thin;
+  }
+  .info-log.open {
+    display:block;
+  }
+  .info-log:focus {
+    outline:1px solid rgba(180,220,255,0.6);
+    outline-offset:2px;
+  }
+  .info-log-line {
+    display:flex;
+    gap:10px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .info-log-time {
+    color:rgba(140,170,220,0.9);
+  }
+
   .game-shell { position:relative; }
 
   .menu {
@@ -614,6 +764,19 @@
 </div>
 
 <div id="floorBanner" class="floor-banner hidden"><span id="floorBannerText">LEVEL —</span></div>
+
+<div id="inventoryOverlay" class="inventory-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
+  <div class="inventory-panel">
+    <div class="inventory-header">
+      <h2 id="inventoryTitle">Inventory</h2>
+      <button type="button" id="inventoryClose" class="inventory-close">Close</button>
+    </div>
+    <p class="inventory-hint">Press I to toggle the inventory. Scroll to review collected gear.</p>
+    <div id="inventoryGrid" class="inventory-grid" role="list"></div>
+  </div>
+</div>
+
+<div id="infoLog" class="info-log" role="log" aria-live="polite" aria-label="Message Log" tabindex="0"></div>
 
 <div id="rageModal" class="panel hidden" role="dialog" aria-modal="true" aria-labelledby="rageTitle">
   <h2 id="rageTitle">Midnight Rage</h2>

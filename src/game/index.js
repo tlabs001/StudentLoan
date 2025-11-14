@@ -1641,8 +1641,11 @@ const player = {
   hrGrenadeUnlocked:false,
   collectionsJammerActiveUntil:0,
   collectionsJamCooldownUntil:0,
-  shadesNextDodge:0
+  shadesNextDodge:0,
+  inventory:{ weapons:[], effects:[], resources:[], misc:[] }
 };
+
+resetInventoryState();
 
 const HOSTAGE_SEQUENCE = ['Grandpa','Mom','Dad','Grandma','Brother','Sister',
   '1st Cousin','2nd Cousin','3rd Cousin','4th Cousin','5th Cousin','6th Cousin'];
@@ -2052,6 +2055,9 @@ function grantDebtPoweredItem(id, options={}){
       notify(`${info.name || 'Reward'} acquired.`);
       break;
   }
+  if(info){
+    recordInventoryEntry('effects', id, info.name, { increment:1, description: info.description });
+  }
   updateHudCommon();
   return result;
 }
@@ -2280,6 +2286,292 @@ let smokeActive=false, smokeT=0;
 
 // HUD helpers
 const noteEl = document.getElementById('note');
+const inventoryOverlay = document.getElementById('inventoryOverlay');
+const inventoryGridEl = document.getElementById('inventoryGrid');
+const inventoryCloseBtn = document.getElementById('inventoryClose');
+const infoLogEl = document.getElementById('infoLog');
+
+const INFO_LOG_LIMIT = 200;
+const infoLogEntries = [];
+let infoLogOpen = false;
+let inventoryOpen = false;
+
+const INVENTORY_SECTIONS = [
+  { key:'weapons', title:'Weapons' },
+  { key:'effects', title:'Effects & Boosts' },
+  { key:'resources', title:'Resources & Pickups' },
+  { key:'misc', title:'Keepsakes & Notes' }
+];
+
+const WEAPON_LABELS = {
+  pistol:'Pistol',
+  silenced:'Silenced Pistol',
+  flame:'Flamethrower',
+  melee:'Melee Strikes',
+  grenade:'Grenade Launcher',
+  saber:'Saber',
+  machineGun:'Machine Gun'
+};
+
+const WEAPON_DESCRIPTIONS = {
+  pistol:'Reliable starter sidearm.',
+  silenced:'Quiet option for stealth engagements.',
+  flame:'Short-range crowd burner.',
+  melee:'Close-quarters punches and kicks.',
+  grenade:'Explosive launcher unlocked via intel.',
+  saber:'Energy blade earned with files.',
+  machineGun:'Sustained firepower for sieges.'
+};
+
+const LOG_TIME_FORMATTER = typeof Intl !== 'undefined'
+  ? new Intl.DateTimeFormat(undefined, { minute:'2-digit', second:'2-digit' })
+  : null;
+
+function ensureInventoryBuckets(){
+  if(typeof player === 'undefined' || !player) return null;
+  if(!player.inventory){
+    player.inventory = { weapons: [], effects: [], resources: [], misc: [] };
+  }
+  for(const section of INVENTORY_SECTIONS){
+    if(!Array.isArray(player.inventory[section.key])){
+      player.inventory[section.key] = [];
+    }
+  }
+  return player.inventory;
+}
+
+function recordInventoryEntry(category, id, name, options={}){
+  const buckets = ensureInventoryBuckets();
+  if(!buckets || !category) return null;
+  const list = buckets[category];
+  if(!Array.isArray(list)) return null;
+  let entry = list.find(it=>it && it.id === id);
+  const increment = Number.isFinite(options.increment) ? options.increment : 1;
+  const amount = Number.isFinite(options.amount) ? options.amount : null;
+  if(!entry){
+    entry = {
+      id,
+      name,
+      description: options.description || '',
+      count: 0,
+      totalAmount: 0,
+      unit: options.unit || null,
+      lastDetail: options.detail || '',
+      unique: Boolean(options.unique),
+      updatedAt: Date.now()
+    };
+    list.push(entry);
+  }
+  if(options.unique){
+    entry.unique = true;
+    if(entry.count === 0){
+      entry.count = Math.max(1, increment || 1);
+    }
+  } else if(increment){
+    entry.count = Math.max(0, entry.count + increment);
+  }
+  if(amount !== null){
+    entry.totalAmount = (entry.totalAmount || 0) + amount;
+  }
+  if(options.description){
+    if(!entry.description || options.replaceDescription){
+      entry.description = options.description;
+    }
+  }
+  if(options.unit && !entry.unit){
+    entry.unit = options.unit;
+  }
+  if(options.detail){
+    entry.lastDetail = options.detail;
+  }
+  entry.updatedAt = Date.now();
+  updateInventoryUI();
+  return entry;
+}
+
+function syncInventoryWeaponsFromState(){
+  if(typeof player === 'undefined' || !player) return;
+  if(!player.weaponsUnlocked) return;
+  for(const [weapon, unlocked] of Object.entries(player.weaponsUnlocked)){
+    if(!unlocked) continue;
+    const label = WEAPON_LABELS[weapon] || weapon.replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase());
+    const description = WEAPON_DESCRIPTIONS[weapon] || 'Unlocked weapon ready for deployment.';
+    recordInventoryEntry('weapons', weapon, label, { unique:true, description });
+  }
+}
+
+function resetInventoryState(){
+  if(typeof player === 'undefined' || !player) return;
+  player.inventory = { weapons:[], effects:[], resources:[], misc:[] };
+  updateInventoryUI();
+  syncInventoryWeaponsFromState();
+}
+
+function updateInventoryUI(){
+  if(!inventoryGridEl) return;
+  const buckets = ensureInventoryBuckets();
+  inventoryGridEl.innerHTML = '';
+  if(!buckets) return;
+  for(const section of INVENTORY_SECTIONS){
+    const wrapper = document.createElement('div');
+    wrapper.className = 'inventory-section';
+    const heading = document.createElement('h3');
+    heading.textContent = section.title;
+    wrapper.appendChild(heading);
+    const grid = document.createElement('div');
+    grid.className = 'inventory-section-grid';
+    const entries = (buckets[section.key] || []).filter(Boolean).slice().sort((a,b)=>{
+      if(a.name && b.name) return a.name.localeCompare(b.name);
+      return 0;
+    });
+    if(entries.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'inventory-empty';
+      empty.textContent = 'Nothing recorded yet.';
+      grid.appendChild(empty);
+    } else {
+      for(const entry of entries){
+        const itemEl = document.createElement('div');
+        itemEl.className = 'inventory-item';
+        const titleEl = document.createElement('div');
+        titleEl.className = 'inventory-item-title';
+        titleEl.textContent = entry.name || 'Unknown Item';
+        itemEl.appendChild(titleEl);
+        if(entry.description){
+          const metaEl = document.createElement('div');
+          metaEl.className = 'inventory-item-meta';
+          metaEl.textContent = entry.description;
+          itemEl.appendChild(metaEl);
+        }
+        const detailParts = [];
+        if(entry.unique){
+          detailParts.push('Status: Acquired');
+        } else if(entry.count > 0){
+          detailParts.push(`Count: ${entry.count}`);
+        }
+        if(Number.isFinite(entry.totalAmount) && entry.totalAmount > 0){
+          if(entry.unit === 'currency'){
+            detailParts.push(`Total: $${fmtCurrency(entry.totalAmount)}`);
+          } else if(entry.unit){
+            detailParts.push(`Total: ${entry.totalAmount} ${entry.unit}`);
+          } else {
+            detailParts.push(`Total: ${entry.totalAmount}`);
+          }
+        }
+        if(entry.lastDetail){
+          detailParts.push(entry.lastDetail);
+        }
+        if(detailParts.length){
+          const detailEl = document.createElement('div');
+          detailEl.className = 'inventory-item-detail';
+          detailEl.textContent = detailParts.join(' • ');
+          itemEl.appendChild(detailEl);
+        }
+        grid.appendChild(itemEl);
+      }
+    }
+    wrapper.appendChild(grid);
+    inventoryGridEl.appendChild(wrapper);
+  }
+}
+
+function formatLogTime(timestamp){
+  if(!Number.isFinite(timestamp)) return '--:--';
+  try {
+    return LOG_TIME_FORMATTER ? LOG_TIME_FORMATTER.format(timestamp) : new Date(timestamp).toLocaleTimeString();
+  } catch(err){
+    return '--:--';
+  }
+}
+
+function refreshInfoLog(){
+  if(!infoLogEl) return;
+  const isNearBottom = (infoLogEl.scrollTop + infoLogEl.clientHeight + 6) >= infoLogEl.scrollHeight;
+  infoLogEl.innerHTML = '';
+  for(const entry of infoLogEntries){
+    const line = document.createElement('div');
+    line.className = 'info-log-line';
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'info-log-time';
+    timeSpan.textContent = formatLogTime(entry.timestamp);
+    const messageSpan = document.createElement('span');
+    messageSpan.textContent = entry.message;
+    line.appendChild(timeSpan);
+    line.appendChild(messageSpan);
+    infoLogEl.appendChild(line);
+  }
+  if(isNearBottom){
+    infoLogEl.scrollTop = infoLogEl.scrollHeight;
+  }
+}
+
+function appendInfoLog(message){
+  if(!message) return;
+  infoLogEntries.push({ message, timestamp: Date.now() });
+  if(infoLogEntries.length > INFO_LOG_LIMIT){
+    infoLogEntries.splice(0, infoLogEntries.length - INFO_LOG_LIMIT);
+  }
+  refreshInfoLog();
+}
+
+function toggleInventory(force){
+  const target = typeof force === 'boolean' ? force : !inventoryOpen;
+  inventoryOpen = target;
+  if(!inventoryOverlay) return inventoryOpen;
+  if(target){
+    inventoryOverlay.classList.remove('hidden');
+    inventoryOverlay.setAttribute('aria-hidden', 'false');
+    updateInventoryUI();
+  } else {
+    inventoryOverlay.classList.add('hidden');
+    inventoryOverlay.setAttribute('aria-hidden', 'true');
+  }
+  return inventoryOpen;
+}
+
+function toggleInfoLog(force){
+  const target = typeof force === 'boolean' ? force : !infoLogOpen;
+  infoLogOpen = target;
+  if(!infoLogEl) return infoLogOpen;
+  if(target){
+    infoLogEl.classList.add('open');
+    refreshInfoLog();
+  } else {
+    infoLogEl.classList.remove('open');
+  }
+  return infoLogOpen;
+}
+
+function shouldIgnoreHotkeys(event){
+  if(!event) return false;
+  const target = event.target;
+  if(!target) return false;
+  const tag = target.tagName;
+  if(tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return true;
+  return false;
+}
+
+if(inventoryCloseBtn){
+  inventoryCloseBtn.addEventListener('click', ()=>toggleInventory(false));
+}
+if(inventoryOverlay){
+  inventoryOverlay.addEventListener('click', (event)=>{
+    if(event.target === inventoryOverlay){
+      toggleInventory(false);
+    }
+  });
+}
+if(infoLogEl){
+  infoLogEl.addEventListener('keydown', (event)=>{
+    if(event.key === 'Escape'){
+      toggleInfoLog(false);
+    }
+  });
+}
+
+if(noteEl && noteEl.textContent){
+  appendInfoLog(noteEl.textContent);
+}
 const timeEl = document.getElementById('time');
 const serversEl = document.getElementById('servers');
 const alarmsEl = document.getElementById('alarms');
@@ -2419,6 +2711,9 @@ function unlockWeapon(weapon, reason){
   player.weaponsUnlocked[weapon]=true;
   updateWeaponButtons();
   evaluateWeaponUnlocks();
+  const label = WEAPON_LABELS[weapon] || weapon.replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase());
+  const description = WEAPON_DESCRIPTIONS[weapon] || 'Unlocked weapon ready.';
+  recordInventoryEntry('weapons', weapon, label, { unique:true, description });
   if(reason){
     notify(`${reason} unlocked.`);
     centerNote(`${reason} ready!`, 1400);
@@ -2864,6 +3159,23 @@ document.addEventListener('keydown', (event)=>{
   }
 });
 
+document.addEventListener('keydown', (event)=>{
+  if(shouldIgnoreHotkeys(event)) return;
+  if(event.key === 'Tab'){
+    toggleInfoLog();
+    event.preventDefault();
+    return;
+  }
+  if(event.code === 'KeyI' || event.key === 'i' || event.key === 'I'){
+    toggleInventory();
+    event.preventDefault();
+    return;
+  }
+  if(event.key === 'Escape' && inventoryOpen){
+    toggleInventory(false);
+  }
+});
+
 // Helpers
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const now=()=>performance.now();
@@ -2878,7 +3190,10 @@ function shuffleArray(array, rng=Math.random){
   return array;
 }
 function centerNote(text,ms=1600){ const m=document.getElementById('msg'); m.textContent=text; m.style.display='block'; setTimeout(()=>m.style.display='none',ms); }
-function notify(text){ noteEl.textContent = text; }
+function notify(text){
+  noteEl.textContent = text || '';
+  appendInfoLog(text);
+}
 
 const ui = {
   confirm: (msg) => window.confirm(msg),
@@ -3172,6 +3487,7 @@ function handleVendingReward(item){
       addAmmo(10);
       centerNote('Ammo +10 (health spent)', 1500);
       notify('Vending machine dispensed ammo.');
+      recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:10, unit:'rounds', detail:'+10 from vending'});
       break;
     case 'maxhp50':
       player.checkingMax = (player.checkingMax || CHECKING_MAX) + 50;
@@ -3179,16 +3495,19 @@ function handleVendingReward(item){
       player.checking = Math.min(player.checking, player.checkingMax);
       centerNote('Max health +50.', 1600);
       notify('Corporate wellness plan expanded your health bar.');
+      recordInventoryEntry('effects','Wellness Bond','Wellness Bond',{increment:1, description:'Max health increased by vending upgrades.', detail:'+50 max health'});
       break;
     case 'damage25':
       player.damageMultiplier = Math.max(0.1, (player.damageMultiplier||1) * 1.25);
       centerNote('Damage +25%.', 1600);
       notify('Aggression policy approved.');
+      recordInventoryEntry('effects','Aggression Policy','Aggression Policy',{increment:1, description:'+25% damage multiplier.', detail:`Multiplier ${player.damageMultiplier.toFixed(2)}×`});
       break;
     case 'speed':
       applySpeedBoost(0.25, 45000);
       centerNote('Speed boost +25%', 1600);
       notify('Debt-fueled sprint engaged.');
+      recordInventoryEntry('effects','Debt Sprint','Debt Sprint',{increment:1, description:'25% speed boost from vending.', detail:'45s duration'});
       break;
     case 'maxhp':
       player.checkingMax = Math.max(player.checkingMax || CHECKING_MAX, 300);
@@ -3196,12 +3515,14 @@ function handleVendingReward(item){
       player.checking = Math.min(player.checking, player.checkingMax);
       centerNote('Health bar extended to 300.', 1700);
       notify('Corporate insurance upgraded your health.');
+      recordInventoryEntry('effects','Health Extension','Health Extension',{unique:true, description:'Raises health cap to 300.'});
       break;
     case 'doubleJump':
       player.maxAirJumps = Math.max(player.maxAirJumps, 1);
       player.remainingAirJumps = player.maxAirJumps;
       centerNote('Double jump unlocked!', 1600);
       notify('Sneakers installed for a second jump.');
+      recordInventoryEntry('effects','Double Jump Sneakers','Double Jump Sneakers',{unique:true, description:'Adds a mid-air jump.'});
       break;
     case 'tripleJump':
       player.maxAirJumps = Math.max(player.maxAirJumps, 2);
@@ -3209,6 +3530,7 @@ function handleVendingReward(item){
       player.loanInterestPercentPerMinute += 0.29;
       centerNote('Triple jump unlocked! Interest surges.', 1700);
       notify('Every minute adds +29% interest now.');
+      recordInventoryEntry('effects','Triple Jump Sneakers','Triple Jump Sneakers',{unique:true, description:'Adds a third jump at the cost of interest.', detail:'+29% interest per minute'});
       break;
     case 'launcher': {
       const wasUnlocked = player.weaponsUnlocked && player.weaponsUnlocked.grenade;
@@ -3222,28 +3544,33 @@ function handleVendingReward(item){
       addAmmo(50);
       centerNote('Purchased 50 bullets with checking.', 1500);
       notify('Checking account converted into ammo.');
+      recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:50, unit:'rounds', detail:'+50 checking ammo'});
       break;
     case 'armyAmmo':
       player.armyAmmoDebt = true;
       centerNote('Army ammo IOU activated.', 1600);
       notify('Each bullet now adds $1,000 debt.');
+      recordInventoryEntry('effects','Army Ammo IOU','Army Ammo IOU',{unique:true, description:'Bullets accrue $1,000 debt each when fired.'});
       break;
     case 'intel':
       player.intel += 1;
       evaluateWeaponUnlocks();
       centerNote('Intel +1', 1500);
       notify('Converted files into intel.');
+      recordInventoryEntry('resources','intel','Intel',{increment:1, detail:'+1 via vending'});
       break;
     case 'file':
       player.files += 1;
       centerNote('Files +1', 1500);
       notify('Converted intel into files.');
+      recordInventoryEntry('resources','files','Files',{increment:1, detail:'+1 via vending'});
       break;
     case 'secret':
       player.specialFiles = (player.specialFiles || 0) + 1;
       updateSpecialFileUI();
       centerNote('Secret file acquired!', 1600);
       notify('Shadow dossier secured.');
+      recordInventoryEntry('misc','specialFiles','Special Files',{increment:1, detail:`Total ${player.specialFiles}`});
       break;
     case 'lotteryIntel':
     case 'lotteryFile':
@@ -3264,13 +3591,13 @@ function handleVendingReward(item){
     }
     case 'mystery': {
       const rewards = [
-        ()=>{ addAmmo(18); centerNote('Mystery reward: ammo cache', 1500); notify('Mystery capsule spilled ammo.'); },
-        ()=>{ addChecking(40); centerNote('Mystery reward: health +40', 1500); notify('Mystery capsule restored health.'); },
-        ()=>{ applyLoanPayment(5000); centerNote('Mystery reward: debt -$5,000', 1500); notify('Mystery capsule eased your loan.'); },
-        ()=>{ player.intel += 2; evaluateWeaponUnlocks(); centerNote('Mystery reward: intel +2', 1500); notify('Mystery capsule delivered intel.'); },
-        ()=>{ player.files += 3; centerNote('Mystery reward: files +3', 1500); notify('Mystery capsule supplied files.'); },
-        ()=>{ applySpeedBoost(0.18, 35000); centerNote('Mystery reward: speed rush', 1500); notify('Mystery capsule juiced your sprint.'); },
-        ()=>{ player.specialFiles = (player.specialFiles || 0) + 1; updateSpecialFileUI(); centerNote('Mystery reward: secret file', 1600); notify('Mystery capsule hid a secret file.'); }
+        ()=>{ addAmmo(18); centerNote('Mystery reward: ammo cache', 1500); notify('Mystery capsule spilled ammo.'); recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:18, unit:'rounds', detail:'+18 mystery cache'}); },
+        ()=>{ addChecking(40); centerNote('Mystery reward: health +40', 1500); notify('Mystery capsule restored health.'); recordInventoryEntry('resources','medkit','Medkits',{increment:1, amount:40, unit:'HP', detail:'+40 mystery heal'}); },
+        ()=>{ applyLoanPayment(5000); centerNote('Mystery reward: debt -$5,000', 1500); notify('Mystery capsule eased your loan.'); recordInventoryEntry('effects','loanRelief','Loan Relief',{increment:1, description:'Mystery capsule reduced debt.', detail:'-$5,000'}); },
+        ()=>{ player.intel += 2; evaluateWeaponUnlocks(); centerNote('Mystery reward: intel +2', 1500); notify('Mystery capsule delivered intel.'); recordInventoryEntry('resources','intel','Intel',{increment:2, detail:'+2 mystery intel'}); },
+        ()=>{ player.files += 3; centerNote('Mystery reward: files +3', 1500); notify('Mystery capsule supplied files.'); recordInventoryEntry('resources','files','Files',{increment:3, detail:'+3 mystery files'}); },
+        ()=>{ applySpeedBoost(0.18, 35000); centerNote('Mystery reward: speed rush', 1500); notify('Mystery capsule juiced your sprint.'); recordInventoryEntry('effects','Debt Sprint','Debt Sprint',{increment:1, description:'Mystery speed rush.', detail:'18% for 35s'}); },
+        ()=>{ player.specialFiles = (player.specialFiles || 0) + 1; updateSpecialFileUI(); centerNote('Mystery reward: secret file', 1600); notify('Mystery capsule hid a secret file.'); recordInventoryEntry('misc','specialFiles','Special Files',{increment:1, detail:`Total ${player.specialFiles}`}); }
       ];
       const pick = rewards[Math.floor(Math.random()*rewards.length)];
       pick();
@@ -3283,12 +3610,14 @@ function handleVendingReward(item){
       player.collectionsJammerActiveUntil = now() + 7000;
       centerNote('Collections jammer deployed!', 1600);
       notify('Enemy AI disrupted for 7 seconds.');
+      recordInventoryEntry('effects','Collections Jammer','Collections Jammer',{increment:1, description:'Disrupts enemy AI for seven seconds.'});
       break;
     case 'hrFolderIntel':
       player.hrGrenadeUnlocked = true;
       player.grenade.reserve = Math.min((player.grenade.maxReserve||GRENADE_RESERVE_MAX), (player.grenade.reserve||0)+2);
       centerNote('HR stun grenades acquired.', 1600);
       notify('Paperwork explosions ready.');
+      recordInventoryEntry('effects','HR Folder Grenade','HR Folder Grenade',{increment:1, description:'Stun grenades stocked from vending.'});
       break;
     case 'extraLifePolicy':
       grantDebtPoweredItem('extraLifeInsurance', { source:'vending' });
@@ -3946,6 +4275,7 @@ function resetPlayerState(){
   featherRespawnPickup=null; featherRespawnLocation=null; featherRespawnAt=0;
   player.files=0; player.intel=0; player.specialFiles=0; player.codexUnlocked=false; player.weapon='pistol';
   player.weaponsUnlocked = { pistol:true, silenced:true, flame:true, melee:true, grenade:false, saber:false, machineGun:false };
+  resetInventoryState();
   player.pistol.mag=GAME_PARAMS.player.pistol.magazine;
   player.pistol.ammo=GAME_PARAMS.player.pistol.magazine;
   player.pistol.reserve=GAME_PARAMS.player.pistol.reserve;
@@ -4950,6 +5280,7 @@ function grantWeaponUpgrade(){
   player.melee.cooldown = Math.max(80, Math.round(player.melee.cooldown * 0.9));
   player.saber.cooldown = Math.max(100, Math.round(player.saber.cooldown * 0.9));
   player.machineGun.cooldown = Math.max(10, Math.round(player.machineGun.cooldown * 0.94));
+  recordInventoryEntry('effects','weaponUpgrade','Weapon Upgrades',{increment:1, description:'Permanent weapon cooldown improvements.', detail:`Upgrade count ${player.weaponUpgrades}`});
 }
 
 function rewardWorker(worker){
@@ -11445,9 +11776,9 @@ function interact(){
         it.y += (pyCenter - cy) * 0.08;
       }
       if(it.type && rect(p,it)){
-        if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); }
-        if(it.type==='ammo'){ const amount = Math.round(it.amount || 18); addAmmo(amount); it.type=null; centerNote(`Ammo +${amount}`); beep({freq:520}); notify("Ammo restocked."); }
-        if(it.type==='medkit'){ const amount = Math.round(it.amount || 40); addChecking(amount); it.type=null; centerNote(`Medkit +${amount} health`); chime(); notify('Medkit restored health.'); }
+        if(it.type==='screw'){ player.hasScrew=true; it.type=null; centerNote("Picked up screwdriver."); chime(); notify("Screwdriver acquired."); recordInventoryEntry('misc','screwdriver','Screwdriver',{unique:true, description:'Allows access to maintenance vents.'}); }
+        if(it.type==='ammo'){ const amount = Math.round(it.amount || 18); addAmmo(amount); it.type=null; centerNote(`Ammo +${amount}`); beep({freq:520}); notify("Ammo restocked."); recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:amount, unit:'rounds', detail:`Last +${amount} rounds`}); }
+        if(it.type==='medkit'){ const amount = Math.round(it.amount || 40); addChecking(amount); it.type=null; centerNote(`Medkit +${amount} health`); chime(); notify('Medkit restored health.'); recordInventoryEntry('resources','medkit','Medkits',{increment:1, amount:amount, unit:'HP', detail:`Last +${amount} HP`}); }
         if(it.type==='cash'){
           const amount = Math.round(it.amount || 15);
           addChecking(amount);
@@ -11461,10 +11792,11 @@ function interact(){
             notify('Found cash.');
           }
           beep({freq:600});
+          recordInventoryEntry('resources','cash','Cash Found',{increment:1, amount:amount, unit:'currency', detail:`+$${fmtCurrency(amount)}`});
         }
-        if(it.type==='file'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.files += gain; it.type=null; centerNote(`Files +${gain}`); beep({freq:700}); notify('File collected.'); evaluateWeaponUnlocks(); }
-        if(it.type==='intel'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.intel += gain; it.type=null; centerNote(`Intel +${gain}`); beep({freq:820}); notify('Intel collected.'); evaluateWeaponUnlocks(); }
-        if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; setFeatherRespawnSource(it); featherRespawnAt=0; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); }
+        if(it.type==='file'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.files += gain; it.type=null; centerNote(`Files +${gain}`); beep({freq:700}); notify('File collected.'); evaluateWeaponUnlocks(); recordInventoryEntry('resources','files','Files',{increment:gain, detail:`+${gain} from pickup`}); }
+        if(it.type==='intel'){ const gain = Math.max(1, Math.round(it.amount || 1)); player.intel += gain; it.type=null; centerNote(`Intel +${gain}`); beep({freq:820}); notify('Intel collected.'); evaluateWeaponUnlocks(); recordInventoryEntry('resources','intel','Intel',{increment:gain, detail:`+${gain} from pickup`}); }
+        if(it.type==='feather'){ player.hasFeather=true; player.featherEnergy=player.featherMax; it.type=null; setFeatherRespawnSource(it); featherRespawnAt=0; centerNote("Feather acquired — air flaps!"); chime(); notify("Feather lets you flap midair."); recordInventoryEntry('effects','feather','Feather Harness',{unique:true, description:'Enables limited mid-air flaps.'}); }
         if(it.type==='snack'){
           if(hellscapeState){ hellscapeState.snackFound = true; }
           addChecking(20);
@@ -11472,6 +11804,7 @@ function interact(){
           centerNote('Snack recovered — hunger subdued.', 1600);
           notify('Optional snack secured from the break room.');
           beep({freq:680});
+          recordInventoryEntry('resources','snack','Break Room Snacks',{increment:1, amount:20, unit:'HP', detail:'+20 HP snack'});
         }
         if(it.type==='zombieAnecdote'){
           const expire = now() + 25000;
@@ -11480,6 +11813,7 @@ function interact(){
           centerNote('Zombie Anecdote active — zombie bites negated for 25s.', 2000);
           notify('Zombie Anecdote coursing through your veins.');
           chime();
+          recordInventoryEntry('effects','zombieAnecdote','Zombie Anecdote',{increment:1, description:'Temporarily negates zombie bites.', detail:'25s infection immunity'});
         }
         if(it.type==='special'){
           player.specialFiles = (player.specialFiles||0) + 1;
@@ -11488,6 +11822,7 @@ function interact(){
           chime();
           notify('Violet dossier recovered.');
           updateSpecialFileUI();
+          recordInventoryEntry('misc','specialFiles','Special Files',{increment:1, detail:`Total ${player.specialFiles}`});
         }
         if(it.type==='unlockAll'){
           const unlocked = unlockAllWeapons();
@@ -11500,6 +11835,7 @@ function interact(){
             notify('All weapons already unlocked, dossier secured.');
           }
           chime();
+          recordInventoryEntry('effects','arsenalDossier','Arsenal Dossier',{unique:true, description:'Unlocks the full weapon arsenal.'});
         }
         if(it.type==='cache'){
           const intelGain = Math.max(1, Math.round(it.intel || it.amount || 1));
@@ -11511,6 +11847,7 @@ function interact(){
           notify('Combined intel cache recovered.');
           evaluateWeaponUnlocks();
           chime();
+          recordInventoryEntry('resources','intelFileCache','Intel/File Cache',{increment:1, detail:`+${intelGain} intel / +${fileGain} files`});
         }
         if(it.type==='weapon'){
           const label = it.label || `Unlocked ${it.weapon}`;
@@ -11525,6 +11862,7 @@ function interact(){
           centerNote('Secret file uncovered!', 1600);
           notify(it.photo ? `Embarrassing photo recovered: ${it.photo} (Dr. Jeffstein’s Island).` : 'Secret file recovered.');
           chime();
+          recordInventoryEntry('misc','secretFiles','Secret Finds',{increment:1, detail: it.photo ? it.photo : 'Tower secret archived.'});
         }
       }
     }
@@ -11536,6 +11874,7 @@ function interact(){
         centerNote('Energy Boost +10% speed', 1600);
         notify('Coffee buzz active.');
         beep({freq:740});
+        recordInventoryEntry('effects','coffeeBoost','Coffee Boost',{increment:1, description:'Temporary +10% speed from coffee.', detail:'Boost active for 20s'});
       }
     }
     // Vending machines
@@ -11544,33 +11883,36 @@ function interact(){
       const bounds = { x: vend.x-12, y: vend.y-12, w: vend.w+24, h: vend.h+24 };
       if(!rect(p, bounds)) continue;
       if(vend.menu){
-        if(vend.depleted){
-          lockedBuzz();
-          centerNote('This vending machine is sold out.', 1400);
-        } else {
-          openVendingMenu(vend);
-        }
-      } else if(!vend.broken){
-        vend.broken = true;
-        const roll = Math.random();
-        if(roll < 0.45){
-          addAmmo(24);
-          centerNote('Ammo drop +24', 1200);
-          notify('Vending machine spilled ammo.');
-        } else if(roll < 0.9){
-          const base = 50 + Math.floor(Math.random()*151);
-          const amt = Math.round(base * (player.cashMultiplier||1));
-          addChecking(amt);
-          centerNote(`Found $${amt}`, 1200);
-          notify('Cash payout from vending machine.');
-        } else {
-          const loss = 50 + Math.floor(Math.random()*151);
-          loseChecking(loss);
-          centerNote(`Vending trap! -$${loss}`, 1200);
-          notify('Faulty vending machine drained funds.');
-        }
-        boom();
-        updateHudCommon();
+      if(vend.depleted){
+        lockedBuzz();
+        centerNote('This vending machine is sold out.', 1400);
+      } else {
+        openVendingMenu(vend);
+      }
+    } else if(!vend.broken){
+      vend.broken = true;
+      const roll = Math.random();
+      if(roll < 0.45){
+        addAmmo(24);
+        centerNote('Ammo drop +24', 1200);
+        notify('Vending machine spilled ammo.');
+        recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:24, unit:'rounds', detail:'+24 from vending'});
+      } else if(roll < 0.9){
+        const base = 50 + Math.floor(Math.random()*151);
+        const amt = Math.round(base * (player.cashMultiplier||1));
+        addChecking(amt);
+        centerNote(`Found $${amt}`, 1200);
+        notify('Cash payout from vending machine.');
+        recordInventoryEntry('resources','cash','Cash Found',{increment:1, amount:amt, unit:'currency', detail:`+$${fmtCurrency(amt)} vending`});
+      } else {
+        const loss = 50 + Math.floor(Math.random()*151);
+        loseChecking(loss);
+        centerNote(`Vending trap! -$${loss}`, 1200);
+        notify('Faulty vending machine drained funds.');
+        recordInventoryEntry('misc','vendingTrap','Vending Trap',{increment:1, detail:`-${fmtCurrency(loss)} loss`});
+      }
+      boom();
+      updateHudCommon();
       } else {
         lockedBuzz();
         notify('Empty vending machine.');
@@ -11585,6 +11927,7 @@ function interact(){
         centerNote('Collected Printer Jam', 1400);
         notify('Printer jam secured for achievements.');
         beep({freq:900});
+        recordInventoryEntry('misc','printerJams','Printer Jams',{increment:1, detail:`Total ${player.printerJams}`});
       }
     }
     // Server terminals
@@ -11601,10 +11944,12 @@ function interact(){
         if(roll < 0.001){
           centerNote('Found a $100,000,000 bonus check!', 2000);
           notify('Big check discovered. Cashing in 10 seconds.');
+          recordInventoryEntry('misc','bigCheck','Big Check',{increment:1, detail:'$100,000,000 pending deposit'});
           setTimeout(()=>{
             addChecking(100000000);
             notify('Big check cashed for $100,000,000.');
             updateHudCommon();
+            recordInventoryEntry('resources','cash','Cash Found',{increment:1, amount:100000000, unit:'currency', detail:'+100,000,000 big check'});
           }, 10000);
           chime();
         } else if(roll < 0.006){
@@ -11612,12 +11957,14 @@ function interact(){
           centerNote('Sticky note: CEO secret acquired.', 1800);
           notify('CEO will start battle with 25% less health.');
           chime();
+          recordInventoryEntry('effects','ceoSecretNote','CEO Secret Note',{unique:true, description:'Reduces CEO health by 25% for the next battle.'});
         } else if(roll < 0.016){
           player.loanBalance = 0;
           centerNote('Fake ID erases your debt!', 2000);
           notify('Security drawer held a fake student ID. Debt reset.');
           ui.toast('All debt forgiven.');
           chime();
+          recordInventoryEntry('effects','fakeId','Fake Student ID',{increment:1, description:'One-time debt reset from a forged ID.', detail:'Debt cleared'});
           updateHudCommon();
         } else if(roll < 0.116){
           const reward=['intel','feather','upgrade'][Math.floor(Math.random()*3)];
@@ -11627,6 +11974,7 @@ function interact(){
             notify('Hidden intel recovered.');
             beep({freq:780});
             evaluateWeaponUnlocks();
+            recordInventoryEntry('resources','intel','Intel',{increment:1, detail:'+1 from drawer'});
           } else if(reward==='feather'){
             player.hasFeather=true;
             player.featherEnergy=player.featherMax;
@@ -11635,6 +11983,7 @@ function interact(){
             centerNote('Feather stashed in drawer!', 1400);
             notify('Feather recovered — air mobility boosted.');
             chime();
+            recordInventoryEntry('effects','feather','Feather Harness',{unique:true, description:'Enables limited mid-air flaps.'});
           } else {
             grantWeaponUpgrade();
             centerNote('Weapon upgrade installed', 1500);
@@ -11645,6 +11994,7 @@ function interact(){
           centerNote('Drawer empty.', 900);
           notify('Just paperwork inside.');
           beep({freq:520,dur:0.04});
+          recordInventoryEntry('misc','paperwork','Paperwork Scraps',{increment:1, detail:'Empty drawer discovery'});
         }
       }
     }
@@ -11664,12 +12014,14 @@ function interact(){
               addAmmo(36);
               centerNote('Ammo cache purchased.', 1400);
               notify('Black market ammo obtained.');
+              recordInventoryEntry('resources','ammo','Ammo Pickups',{amount:36, unit:'rounds', detail:'Black market cache'});
             } else if(offer.type==='upgrade'){
               grantWeaponUpgrade();
               centerNote('Weapon mod installed.', 1500);
               notify('Black market upgrade acquired.');
             } else {
               addChecking(20);
+              recordInventoryEntry('resources','cash','Cash Found',{increment:1, amount:20, unit:'currency', detail:'+20 from trade'});
             }
             merchant.opened=true; blackMarketOffer=null;
             chime();
@@ -11684,11 +12036,13 @@ function interact(){
               addFuel(40);
               centerNote('Fuel upgrade acquired.', 1400);
               notify('Intel traded for upgrades.');
+              recordInventoryEntry('effects','fuelUpgrade','Fuel Upgrades',{increment:1, description:'Improves flamethrower fuel efficiency.', detail:'+40 fuel capacity'});
             } else if(offer.type==='weapon'){
               addFuel(60);
               setWeapon('flame');
               centerNote('Weapon shortcut unlocked!', 1500);
               notify('Black market unlocked your flamethrower.');
+              recordInventoryEntry('effects','flamethrowerUnlock','Flamethrower Access',{unique:true, description:'Black market granted flamethrower access.'});
             }
             merchant.opened=true; blackMarketOffer=null;
             chime();
