@@ -278,6 +278,7 @@
   .vending-panel h3 { margin:0 0 8px; letter-spacing:2px; text-transform:uppercase; font-size:16px; }
   .vending-panel p { margin:0 0 12px; font-size:12px; color:#c8e4ff; }
   .vending-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin-bottom:12px; }
+  .vending-grid.framed { min-height: 324px; }
   .vending-item {
     border:1px solid rgba(160,220,255,0.35);
     border-radius:10px;
@@ -299,7 +300,119 @@
   .vending-item.sold small { color:#d8bba2; }
   .vending-item.disabled:not(.sold) { opacity:0.6; }
   .vending-item.disabled:not(.sold):hover { transform:none; }
+  .vending-spacer {
+    visibility:hidden;
+    pointer-events:none;
+  }
+  .vending-nav {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:12px;
+    font-size:11px;
+    color:#9fbbe6;
+  }
+  .vending-nav button {
+    background:rgba(20,32,52,0.88);
+    border:1px solid rgba(150,210,255,0.35);
+    border-radius:8px;
+    color:#e9f3ff;
+    padding:6px 12px;
+    cursor:pointer;
+    font-family:inherit;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    transition:background 0.2s ease, transform 0.2s ease;
+  }
+  .vending-nav button:hover:not(:disabled) {
+    background:rgba(48,72,110,0.85);
+    transform:translateY(-1px);
+  }
+  .vending-nav button:disabled {
+    opacity:0.4;
+    cursor:not-allowed;
+    transform:none;
+  }
+  .vending-close {
+    display:block;
+    width:100%;
+    padding:10px;
+    margin-top:4px;
+    border-radius:10px;
+    border:1px solid rgba(160,220,255,0.35);
+    background:rgba(18,28,40,0.85);
+    color:#f5faff;
+    cursor:pointer;
+    font-family:inherit;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    transition:background 0.2s ease, transform 0.2s ease;
+  }
+  .vending-close:hover {
+    background:rgba(48,72,110,0.85);
+    transform:translateY(-1px);
+  }
   .vending-hint { font-size:11px; letter-spacing:1px; color:#9fbbe6; }
+  .lottery-popup {
+    position:fixed;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(4,8,16,0.78);
+    z-index:80;
+  }
+  .lottery-card {
+    background:rgba(16,24,38,0.95);
+    border:2px solid rgba(160,220,255,0.45);
+    border-radius:18px;
+    padding:22px;
+    width:min(360px, 92vw);
+    color:#ecf4ff;
+    font-family:monospace;
+    text-align:center;
+    box-shadow:0 18px 44px rgba(0,0,0,0.6);
+  }
+  .lottery-card h4 {
+    margin:0 0 12px;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    font-size:15px;
+  }
+  .lottery-card p {
+    margin:0 0 10px;
+    font-size:12px;
+    color:#c8e4ff;
+  }
+  .lottery-detail {
+    display:none;
+    margin:0 0 16px;
+    font-size:11px;
+    color:#9fbbe6;
+  }
+  .lottery-close {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:8px 18px;
+    border-radius:10px;
+    border:1px solid rgba(160,220,255,0.45);
+    background:rgba(30,44,68,0.85);
+    color:#f5faff;
+    cursor:pointer;
+    font-family:inherit;
+    font-size:12px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    transition:background 0.2s ease, transform 0.2s ease;
+  }
+  .lottery-close:hover {
+    background:rgba(60,90,130,0.85);
+    transform:translateY(-1px);
+  }
   .minimap-cell.active { background:rgba(120,255,200,0.35); color:#0b1120; font-weight:bold; }
   .minimap-missions {
     margin-top:16px;
@@ -527,8 +640,22 @@
   <div class="vending-panel">
     <h3 id="vendingTitle">Executive Vending Machine</h3>
     <p id="vendingSubtitle">Select an upgrade. Purchases are final.</p>
-    <div id="vendingGrid" class="vending-grid"></div>
+    <div id="vendingNav" class="vending-nav hidden" aria-live="polite">
+      <button id="vendingPrev" type="button" aria-label="Previous items">◀</button>
+      <span id="vendingPageIndicator">Page 1 / 1</span>
+      <button id="vendingNext" type="button" aria-label="Next items">▶</button>
+    </div>
+    <div id="vendingGrid" class="vending-grid framed"></div>
+    <button id="vendingClose" class="vending-close" type="button">Step Away</button>
     <p id="vendingHint" class="vending-hint">Press ESC to cancel</p>
+  </div>
+</div>
+<div id="lotteryPopup" class="lottery-popup hidden" role="alertdialog" aria-modal="true" aria-labelledby="lotteryPopupTitle">
+  <div class="lottery-card" role="document">
+    <h4 id="lotteryPopupTitle">Lottery Result</h4>
+    <p id="lotteryPopupMessage">A prize appears...</p>
+    <p id="lotteryPopupDetail" class="lottery-detail"></p>
+    <button id="lotteryPopupClose" type="button" class="lottery-close">OK</button>
   </div>
 </div>
 

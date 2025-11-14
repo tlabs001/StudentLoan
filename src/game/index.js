@@ -107,7 +107,7 @@ const RUN_LOAN_START = GAME_PARAMS.economy.startingLoanBalance;
 const GUARD_BASE_DAMAGE = GAME_PARAMS.enemies.guardBaseDamage;
 const CHECKING_MAX = Math.max(1, GAME_PARAMS.player.checkingMax || GAME_PARAMS.player.checkingHudMax);
 const SAVINGS_MAX = Math.max(1, GAME_PARAMS.player.savingsMax || GAME_PARAMS.player.savingsHudMax);
-const LOAN_CAP = 999999999;
+const LOAN_CAP = 999999999999999;
 const GUARD_CONTACT_DELAY_MS = 500;
 const OUTSIDE_FLOOR = 0;
 const OUTSIDE_KILL_TARGET = 20;
@@ -2173,6 +2173,7 @@ let deckVisible=false;
 let vendingMenuVisible=false;
 let activeVendingMachine=null;
 let vendingMenuWasPaused=false;
+let activeVendingPage=0;
 const unlockedDeckFloors = new Set();
 let floorBannerTimeout=null;
 const FEATHER_RESPAWN_DELAY_MS = 1500;
@@ -2319,7 +2320,18 @@ const vendingPanel = vendingOverlay ? vendingOverlay.querySelector('.vending-pan
 const vendingTitle = document.getElementById('vendingTitle');
 const vendingSubtitle = document.getElementById('vendingSubtitle');
 const vendingGrid = document.getElementById('vendingGrid');
+const vendingNav = document.getElementById('vendingNav');
+const vendingPrevBtn = document.getElementById('vendingPrev');
+const vendingNextBtn = document.getElementById('vendingNext');
+const vendingPageIndicator = document.getElementById('vendingPageIndicator');
+const vendingCloseBtn = document.getElementById('vendingClose');
 const vendingHint = document.getElementById('vendingHint');
+const VENDING_PAGE_SIZE = 9;
+const lotteryPopup = document.getElementById('lotteryPopup');
+const lotteryPopupTitle = document.getElementById('lotteryPopupTitle');
+const lotteryPopupMessage = document.getElementById('lotteryPopupMessage');
+const lotteryPopupDetail = document.getElementById('lotteryPopupDetail');
+const lotteryPopupClose = document.getElementById('lotteryPopupClose');
 const floorBannerEl = document.getElementById('floorBanner');
 const floorBannerText = document.getElementById('floorBannerText');
 const minimapPanel = minimapOverlay ? minimapOverlay.querySelector('.minimap') : null;
@@ -2757,6 +2769,23 @@ if(vendingOverlay){
 if(vendingPanel){
   vendingPanel.addEventListener('click', (event)=>event.stopPropagation());
 }
+if(vendingPrevBtn){
+  vendingPrevBtn.addEventListener('click', ()=>changeVendingPage(-1));
+}
+if(vendingNextBtn){
+  vendingNextBtn.addEventListener('click', ()=>changeVendingPage(1));
+}
+if(vendingCloseBtn){
+  vendingCloseBtn.addEventListener('click', ()=>closeVendingMenu());
+}
+if(lotteryPopup){
+  lotteryPopup.addEventListener('click', (event)=>{
+    if(event.target === lotteryPopup){ hideLotteryPopup(); }
+  });
+}
+if(lotteryPopupClose){
+  lotteryPopupClose.addEventListener('click', ()=>hideLotteryPopup());
+}
 
 if(minimapTower){
   minimapTower.addEventListener('click', (event)=>{
@@ -2807,6 +2836,13 @@ if(codexCloseBtn){
   codexCloseBtn.addEventListener('click', ()=>toggleCodex(false));
 }
 document.addEventListener('keydown', (event)=>{
+  if(lotteryPopupVisible()){
+    if(event.key === 'Escape' || event.key === 'Enter' || event.key === ' '){
+      hideLotteryPopup();
+      event.preventDefault();
+      return;
+    }
+  }
   if(event.key === '9'){
     if(!player.codexUnlocked){
       notify('Collect 10 Special Files to unlock the codex.');
@@ -2816,6 +2852,15 @@ document.addEventListener('keydown', (event)=>{
   }
   if(event.key === 'Escape' && codexState.open){
     toggleCodex(false);
+  }
+  if(vendingMenuVisible && !lotteryPopupVisible()){
+    if(event.key === 'ArrowRight'){
+      changeVendingPage(1);
+      event.preventDefault();
+    } else if(event.key === 'ArrowLeft'){
+      changeVendingPage(-1);
+      event.preventDefault();
+    }
   }
 });
 
@@ -3205,9 +3250,15 @@ function handleVendingReward(item){
     case 'lotteryDebt': {
       const rewardId = rollDebtPoweredItem();
       if(rewardId){
-        grantDebtPoweredItem(rewardId, { source:'vendingLottery' });
+        const reward = grantDebtPoweredItem(rewardId, { source:'vendingLottery' });
+        const info = reward && reward.info;
+        const title = 'Lottery Result';
+        const message = info && info.name ? info.name : 'Mystery reward received';
+        const detail = info && info.description ? info.description : 'Effects applied immediately.';
+        showLotteryPopup({ title, message, detail });
       } else {
         notify('Lottery machine malfunctioned.');
+        showLotteryPopup({ title:'Lottery Result', message:'Machine malfunctioned', detail:'No reward dispensed.' });
       }
       break;
     }
@@ -3252,8 +3303,10 @@ function openVendingMenu(machine){
   activeVendingMachine = machine;
   vendingMenuVisible = true;
   vendingMenuWasPaused = pause;
+  activeVendingPage = 0;
   pause = true;
   vendingOverlay.classList.remove('hidden');
+  hideLotteryPopup();
   renderVendingMenu();
 }
 
@@ -3262,6 +3315,8 @@ function closeVendingMenu(options={}){
   vendingOverlay && vendingOverlay.classList.add('hidden');
   vendingMenuVisible = false;
   activeVendingMachine = null;
+  activeVendingPage = 0;
+  hideLotteryPopup();
   if(!options.keepPaused){
     pause = vendingMenuWasPaused;
     if(!pause && runActive){ canvas.focus(); }
@@ -3277,8 +3332,17 @@ function renderVendingMenu(){
   if(vendingSubtitle){
     vendingSubtitle.textContent = soldOut ? 'Sold out — corporate greed wins again.' : 'Select an upgrade. Purchases are final.';
   }
+  const allItems = (machine.menu && Array.isArray(machine.menu.items)) ? machine.menu.items : [];
+  const closeItem = allItems.find(item => item && item.type === 'close');
+  const purchasable = allItems.filter(item => item && item.type !== 'close');
+  const totalPages = Math.max(1, Math.ceil(purchasable.length / VENDING_PAGE_SIZE));
+  if(!Number.isFinite(activeVendingPage)){ activeVendingPage = 0; }
+  if(activeVendingPage >= totalPages){ activeVendingPage = totalPages - 1; }
+  if(activeVendingPage < 0){ activeVendingPage = 0; }
+  const startIndex = activeVendingPage * VENDING_PAGE_SIZE;
+  const pageItems = purchasable.slice(startIndex, startIndex + VENDING_PAGE_SIZE);
   vendingGrid.textContent = '';
-  for(const item of machine.menu.items){
+  for(const item of pageItems){
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'vending-item';
@@ -3303,8 +3367,86 @@ function renderVendingMenu(){
     button.addEventListener('click', ()=>attemptVendingPurchase(machine, item));
     vendingGrid.appendChild(button);
   }
+  const fillerCount = Math.max(0, VENDING_PAGE_SIZE - pageItems.length);
+  for(let i=0;i<fillerCount;i++){
+    const spacer = document.createElement('div');
+    spacer.className = 'vending-spacer';
+    vendingGrid.appendChild(spacer);
+  }
+  if(vendingNav){
+    if(totalPages > 1){ vendingNav.classList.remove('hidden'); }
+    else { vendingNav.classList.add('hidden'); }
+  }
+  if(vendingPrevBtn){
+    vendingPrevBtn.disabled = totalPages <= 1 || activeVendingPage === 0;
+  }
+  if(vendingNextBtn){
+    vendingNextBtn.disabled = totalPages <= 1 || activeVendingPage >= totalPages - 1;
+  }
+  if(vendingPageIndicator){
+    vendingPageIndicator.textContent = `Page ${Math.min(totalPages, activeVendingPage + 1)} / ${totalPages}`;
+  }
+  if(vendingCloseBtn){
+    if(closeItem){
+      vendingCloseBtn.textContent = closeItem.name || 'Step Away';
+      vendingCloseBtn.title = closeItem.description || '';
+      vendingCloseBtn.disabled = false;
+      vendingCloseBtn.classList.remove('hidden');
+    } else {
+      vendingCloseBtn.textContent = 'Close';
+      vendingCloseBtn.title = '';
+      vendingCloseBtn.disabled = false;
+      vendingCloseBtn.classList.remove('hidden');
+    }
+  }
   if(vendingHint){
-    vendingHint.textContent = 'Press ESC to cancel';
+    const navHint = (totalPages > 1) ? ' · Use ◀/▶ to browse' : '';
+    vendingHint.textContent = `Press ESC to cancel${navHint}`;
+  }
+}
+
+function changeVendingPage(delta){
+  if(!delta || !vendingMenuVisible || !activeVendingMachine) return;
+  const machine = activeVendingMachine;
+  const items = (machine.menu && Array.isArray(machine.menu.items))
+    ? machine.menu.items.filter(item => item && item.type !== 'close')
+    : [];
+  const totalPages = Math.max(1, Math.ceil(items.length / VENDING_PAGE_SIZE));
+  const target = Math.max(0, Math.min(totalPages - 1, activeVendingPage + delta));
+  if(target !== activeVendingPage){
+    activeVendingPage = target;
+    renderVendingMenu();
+  }
+}
+
+function lotteryPopupVisible(){
+  return !!(lotteryPopup && !lotteryPopup.classList.contains('hidden'));
+}
+
+function hideLotteryPopup(){
+  if(!lotteryPopup) return;
+  lotteryPopup.classList.add('hidden');
+  if(lotteryPopupDetail){
+    lotteryPopupDetail.style.display = 'none';
+  }
+}
+
+function showLotteryPopup({ title='Lottery Result', message='', detail='' }={}){
+  if(!lotteryPopup) return;
+  if(lotteryPopupTitle){ lotteryPopupTitle.textContent = title || 'Lottery Result'; }
+  if(lotteryPopupMessage){ lotteryPopupMessage.textContent = message || ''; }
+  if(lotteryPopupDetail){
+    if(detail){
+      lotteryPopupDetail.textContent = detail;
+      lotteryPopupDetail.style.display = 'block';
+    } else {
+      lotteryPopupDetail.textContent = '';
+      lotteryPopupDetail.style.display = 'none';
+    }
+  }
+  lotteryPopup.classList.remove('hidden');
+  if(lotteryPopupClose){
+    try { lotteryPopupClose.focus(); } catch(_) { /* noop */ }
   }
 }
 
@@ -4585,10 +4727,12 @@ function handleFloorStart(floor){
     notify('Golden paycheck deposited $1,000,000.');
   }
   if(player.loanSharkDebtCollectorPending){
-    spawnDebtCollectorCommando();
-    player.loanSharkDebtCollectorPending = false;
-    centerNote('Debt collector mini-boss approaches!', 1800);
-    notify('Loan shark sends a collector to the next room.');
+    if(!boardRoomActive){
+      spawnDebtCollectorCommando();
+      player.loanSharkDebtCollectorPending = false;
+      centerNote('Debt collector mini-boss approaches!', 1800);
+      notify('Loan shark sends a collector to the next room.');
+    }
   }
   if(floor === ECO_BOSS_FLOOR && getActiveHostages().length){
     ui.toast('Hostages detected ahead. Free them to reduce the loan!');
@@ -4875,6 +5019,16 @@ window.addEventListener('keydown', e=>{
   if(rooftopMissionState && handleRooftopKeyDown(k, e)) return;
   if(warzoneMissionState && handleWarzoneKeyDown(k, e)) return;
   if(vendingMenuVisible){
+    if(e.defaultPrevented){
+      return;
+    }
+    if(lotteryPopupVisible()){
+      if(k==='escape' || k===' ' || k==='enter'){
+        e.preventDefault();
+        hideLotteryPopup();
+      }
+      return;
+    }
     if(k==='escape' || k===' '){
       e.preventDefault();
       closeVendingMenu();
@@ -12513,7 +12667,7 @@ function update(dt){
     const jammerActive = player.collectionsJammerActiveUntil && frameNow < player.collectionsJammerActiveUntil;
     const loanBalance = player.loanBalance || 0;
     const debtPressure = Math.min(1, Math.max(0, (loanBalance - 400000000) / 600000000));
-    if(debtPressure > 0){
+    if(debtPressure > 0 && !boardRoomActive){
       const activeCollectors = guards.filter(g=>g && g.hp>0 && g.type==='commando' && g.debtCollector).length;
       const maxCollectors = Math.max(1, Math.ceil(debtPressure * 3));
       if(activeCollectors < maxCollectors){
