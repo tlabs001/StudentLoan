@@ -1,4 +1,7 @@
 import { Agent } from './agent.js';
+import { generateCorporateLabyrinth, createLabyrinthRng } from '../maps/level21_corporate_labyrinth.js';
+import { createJobTerminal, resetTerminalCounter } from '../entities/jobTerminal.js';
+import { JobApplicationTerminalUI } from '../ui/jobApplicationTerminalUI.js';
 
 // === Editable Parameter Sections ==========================================
 // -- Canvas & Display --
@@ -178,6 +181,9 @@ const HELL_PRESET_WAVE_TARGETS = [25, 50, 75, 100, 200, 400, 600, 800, 1000];
 const HELL_SPAWN_INTERVAL_BASE = 30 / 45;
 const ZOMBIE_SPAWN_RATE_MULTIPLIER = 0.55; // 45% faster spawn cadence
 const VENT_DUNGEON_FLOORS = new Set([9, 34]);
+const CORPORATE_LABYRINTH_FLOOR = 21;
+const LABYRINTH_APPLICATION_TARGET = 35;
+const LABYRINTH_TERMINAL_COUNT = 5;
 const VENT_DUNGEON_CONFIG = {
   9: {
     name: 'Ventilation Maze',
@@ -2130,6 +2136,13 @@ const ceoArenaState = {
 };
 
 let topDownState = null;
+
+function resetTopDownState(){
+  if(topDownState && topDownState.mode === 'labyrinth' && topDownState.ui && typeof topDownState.ui.destroy === 'function'){
+    topDownState.ui.destroy();
+  }
+  topDownState = null;
+}
 let ventDungeonState = null;
 let droneMissionState = null;
 let rooftopMissionState = null;
@@ -3948,7 +3961,7 @@ function warpToBadDealMission(){
   if(!runActive) return false;
   rooftopMissionState = null;
   warzoneMissionState = null;
-  topDownState = null;
+  resetTopDownState();
   ventDungeonState = null;
   outsideMode = false;
   currentFloor = OUTSIDE_FLOOR;
@@ -3967,7 +3980,7 @@ function warpToBadDealMission(){
 function warpToItsOnlyMoneyMission(){
   if(!runActive) return false;
   outsideMode = false;
-  topDownState = null;
+  resetTopDownState();
   ventDungeonState = null;
   rooftopMissionState = null;
   warzoneMissionState = null;
@@ -3990,7 +4003,7 @@ function warpToDroneBombingPractice(floor){
   const config = DRONE_MISSION_CONFIG[floor];
   if(!config) return false;
   outsideMode = false;
-  topDownState = null;
+  resetTopDownState();
   ventDungeonState = null;
   rooftopMissionState = null;
   warzoneMissionState = null;
@@ -5478,7 +5491,7 @@ function guardArchetypeForFloor(i){
       weighted.push(pref);
     }
   }
-  if(ninjaRound && i>=21 && i<=24){ return 'ninja'; }
+  if(ninjaRound){ return 'ninja'; }
   return weighted[Math.floor(Math.random()*weighted.length)];
 }
 function makeGuard(x,y,i){
@@ -5521,7 +5534,7 @@ function makeGuard(x,y,i){
     speed: Math.abs(speed),
     direction
   });
-  if(type==='ninja'){ guard.shoot = false; guard.doubleJump = (ninjaRound && i===21); }
+  if(type==='ninja'){ guard.shoot = false; guard.doubleJump = (ninjaRound && i===22); }
   if(type==='shield'){ guard.damageReduction = 0.35; }
   if(type==='heavy'){ guard.damageReduction = 0.25; }
   if(type==='experimental'){ guard.explosiveShots = true; }
@@ -6662,7 +6675,7 @@ function makeLevel(i){
   finalHostages=[];
   hellscapeState=null;
   plants=[]; waterCoolers=[]; spotlights=[]; movingPlatforms=[]; pickups=[]; arcadeStations=[];
-  topDownState = null;
+  resetTopDownState();
   ventDungeonState = null;
   droneMissionState = null;
   player.screenFlashUntil = Math.min(player.screenFlashUntil, now());
@@ -6695,6 +6708,13 @@ function makeLevel(i){
     return;
   }
 
+  if(i === CORPORATE_LABYRINTH_FLOOR){
+    makeCorporateLabyrinthLevel(i);
+    camX = 0;
+    camY = 0;
+    return;
+  }
+
   if(VENT_DUNGEON_FLOORS.has(i)){
     makeVentDungeonLevel(i);
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
@@ -6712,7 +6732,7 @@ function makeLevel(i){
   floorTheme = getFloorTheme(i);
   const levelSpan = levelWidth();
   boardRoomActive = isBoardFloor(i);
-  ninjaRound = (i===21);
+  ninjaRound = (i===22);
   if(i === ECO_BOSS_FLOOR){
     spawnEcoBossRoom(i);
     camX = clamp(player.x - W*0.45, 0, levelWidth() - W);
@@ -7558,6 +7578,222 @@ function activateVentHellscapeCombatants(){
   centerNote('Hellscape foes engaged!', 1500);
 }
 
+function makeCorporateLabyrinthLevel(floor){
+  floorTheme = getFloorTheme(floor);
+  activePalette = computePaletteForFloor(floor);
+  lightingCondition = 'neon';
+  backgroundFX.length = 0;
+  floorSlab = { x:0, y:H-20, w:W, h:20 };
+
+  const seed = `corp-${Math.floor(now())}`;
+  const map = generateCorporateLabyrinth({ seed, width: 1600, height: 1200 });
+  const rawScale = Math.min((W - 180) / map.width, (H - 180) / map.height);
+  const tileSize = Math.max(18, Math.floor(map.gridSize * Math.max(rawScale, 0.55)));
+  const scale = tileSize / map.gridSize;
+  const scaledWidth = map.width * scale;
+  const scaledHeight = map.height * scale;
+  const offsetX = Math.floor((W - scaledWidth) / 2);
+  const offsetY = Math.floor((H - scaledHeight) / 2);
+
+  const cols = Math.ceil(map.width / map.gridSize);
+  const rows = Math.ceil(map.height / map.gridSize);
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(1));
+
+  const roomLookup = new Map();
+
+  const carveRoom = (room) => {
+    const minX = room.center.x - room.width / 2;
+    const maxX = room.center.x + room.width / 2;
+    const minY = room.center.y - room.height / 2;
+    const maxY = room.center.y + room.height / 2;
+    const startCol = Math.floor(minX / map.gridSize);
+    const endCol = Math.floor(maxX / map.gridSize);
+    const startRow = Math.floor(minY / map.gridSize);
+    const endRow = Math.floor(maxY / map.gridSize);
+    for (let row = startRow; row <= endRow; row += 1) {
+      if (row < 0 || row >= rows) continue;
+      for (let col = startCol; col <= endCol; col += 1) {
+        if (col < 0 || col >= cols) continue;
+        grid[row][col] = 0;
+      }
+    }
+  };
+
+  const carveCircle = (cx, cy, radius) => {
+    const startCol = Math.floor((cx - radius) / map.gridSize);
+    const endCol = Math.floor((cx + radius) / map.gridSize);
+    const startRow = Math.floor((cy - radius) / map.gridSize);
+    const endRow = Math.floor((cy + radius) / map.gridSize);
+    const r2 = radius * radius;
+    for (let row = startRow; row <= endRow; row += 1) {
+      if (row < 0 || row >= rows) continue;
+      for (let col = startCol; col <= endCol; col += 1) {
+        if (col < 0 || col >= cols) continue;
+        const cellCx = (col + 0.5) * map.gridSize;
+        const cellCy = (row + 0.5) * map.gridSize;
+        const dx = cellCx - cx;
+        const dy = cellCy - cy;
+        if ((dx * dx) + (dy * dy) <= r2) {
+          grid[row][col] = 0;
+        }
+      }
+    }
+  };
+
+  const carveSegment = (a, b) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.ceil(dist / map.gridSize));
+    for (let step = 0; step <= steps; step += 1) {
+      const t = step / steps;
+      const x = a.x + dx * t;
+      const y = a.y + dy * t;
+      carveCircle(x, y, map.gridSize * 1.1);
+    }
+  };
+
+  map.rooms.forEach((room) => {
+    roomLookup.set(room.id, room);
+    carveRoom(room);
+  });
+
+  map.corridors.forEach((corridor) => {
+    const from = roomLookup.get(corridor.from);
+    const to = roomLookup.get(corridor.to);
+    if (!from || !to) return;
+    const points = [from.center, ...corridor.waypoints, to.center];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      carveSegment(points[i], points[i + 1]);
+    }
+  });
+
+  const worldToScreen = (x, y) => ({
+    x: offsetX + x * scale,
+    y: offsetY + y * scale
+  });
+
+  const reception = map.rooms.find((room) => room.type === 'reception') ?? map.rooms[0];
+  carveCircle(reception.center.x, reception.center.y, Math.max(reception.width, reception.height) * 0.5);
+
+  const startCenter = worldToScreen(reception.center.x, reception.center.y);
+
+  const originalSize = { w: player.w, h: player.h };
+
+  player.w = Math.max(22, Math.floor(tileSize * 0.6));
+  player.h = player.w;
+  player.x = startCenter.x - player.w / 2;
+  player.y = startCenter.y - player.h / 2;
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.onGround = true;
+  player.climbing = false;
+  player.crouch = false;
+  player.sprint = false;
+  player.facing = 1;
+
+  resetTerminalCounter();
+  const rng = createLabyrinthRng(`${seed}-terminals`);
+  const candidateRooms = map.rooms.filter((room) => room.id !== reception.id);
+  const shuffledRooms = [...candidateRooms].sort(() => rng() - 0.5);
+  const terminals = [];
+  for (let i = 0; i < Math.min(LABYRINTH_TERMINAL_COUNT, shuffledRooms.length); i += 1) {
+    const room = shuffledRooms[i];
+    const offset = {
+      x: (rng() - 0.5) * (room.width * 0.3),
+      y: (rng() - 0.5) * (room.height * 0.3)
+    };
+    const terminal = createJobTerminal({ room, offset });
+    carveCircle(terminal.position.x, terminal.position.y, map.gridSize * 0.8);
+    const screen = worldToScreen(terminal.position.x, terminal.position.y);
+    terminals.push({ ...terminal, x: screen.x, y: screen.y, glowUntil: 0 });
+  }
+
+  const labyrinth = {
+    mode: 'labyrinth',
+    floor,
+    seed,
+    map,
+    roomLookup,
+    grid,
+    rows,
+    cols,
+    tileSize,
+    offsetX,
+    offsetY,
+    scale,
+    requiredBoxes: LABYRINTH_APPLICATION_TARGET,
+    requiredApplications: LABYRINTH_APPLICATION_TARGET,
+    hotwiredCount: 0,
+    appliedJobs: 0,
+    missionComplete: false,
+    missionAnnounced: false,
+    door: { x: startCenter.x, y: startCenter.y, radius: Math.max(tileSize * 0.65, 36), glowUntil: 0, unlocked: false, open: false },
+    terminals,
+    ui: null,
+    interactionCooldown: 0,
+    speed: 220,
+    boxes: [],
+    loot: [],
+    gaps: [],
+    ladders: [],
+    interns: [],
+    internsKilled: 0,
+    prevWeaponsDisabled: state.playerWeaponsDisabled,
+    originalSize
+  };
+
+  const announceCompletion = () => {
+    if (labyrinth.missionComplete) return;
+    labyrinth.missionComplete = true;
+    labyrinth.missionAnnounced = true;
+    if (labyrinth.door) {
+      labyrinth.door.unlocked = true;
+      labyrinth.door.glowUntil = now() + 2200;
+    }
+    notify('All applications submitted! Return to the elevator.');
+    centerNote('Applications complete!', 1600);
+    chime();
+  };
+
+  const ui = new JobApplicationTerminalUI({
+    requiredApplications: LABYRINTH_APPLICATION_TARGET,
+    onApply: () => {
+      labyrinth.appliedJobs = Math.min(labyrinth.requiredApplications, labyrinth.appliedJobs + 1);
+      labyrinth.hotwiredCount = labyrinth.appliedJobs;
+      if (labyrinth.appliedJobs >= labyrinth.requiredApplications) {
+        announceCompletion();
+      } else {
+        notify('Application submitted.');
+      }
+      updateHudCommon();
+    },
+    onClose: () => {
+      labyrinth.interactionCooldown = 300;
+    },
+    onComplete: () => {
+      announceCompletion();
+    }
+  });
+
+  labyrinth.ui = ui;
+
+  door = null;
+  totalServersOnFloor = 0;
+  sprinklersActiveUntil = 0;
+
+  topDownState = labyrinth;
+  state.playerWeaponsDisabled = true;
+  camX = 0;
+  camY = 0;
+  notify('Corporate labyrinth infiltration — submit contract applications to unlock the elevator.');
+  centerNote(`Level ${floor} – Corporate Labyrinth`, 2000);
+  updateMusicForState();
+  updateHudCommon();
+}
+
 function makeTopDownMazeLevel(floor){
   floorTheme = getFloorTheme(floor);
   activePalette = computePaletteForFloor(floor);
@@ -7601,6 +7837,7 @@ function makeTopDownMazeLevel(floor){
   };
 
   const topDown = {
+    mode: 'vent',
     floor,
     config,
     cols: baseCols,
@@ -7856,8 +8093,67 @@ function movePlayerTopDown(state, moveX, moveY){
   }
 }
 
+function updateCorporateLabyrinth(dt){
+  if(!topDownState || topDownState.mode !== 'labyrinth') return;
+  const td = topDownState;
+  td.hotwiredCount = td.appliedJobs;
+  const speed = td.speed || 210;
+  let inputX = 0;
+  let inputY = 0;
+  if(keys['a'] || keys['arrowleft']) inputX -= 1;
+  if(keys['d'] || keys['arrowright']) inputX += 1;
+  if(keys['w'] || keys['arrowup']) inputY -= 1;
+  if(keys['s'] || keys['arrowdown']) inputY += 1;
+  const sprinting = keys['shift'];
+  if(!td.ui || !td.ui.isOpen()){
+    if(inputX || inputY){
+      const length = Math.hypot(inputX, inputY) || 1;
+      const moveSpeed = speed * (sprinting ? 1.25 : 1);
+      const moveX = (inputX / length) * moveSpeed * dt;
+      const moveY = (inputY / length) * moveSpeed * dt;
+      movePlayerTopDown(td, moveX, moveY);
+      if(inputX > 0) player.facing = 1;
+      else if(inputX < 0) player.facing = -1;
+    }
+  }
+  player.prevBottom = player.y + player.h;
+  player.prevVy = 0;
+  player.onGround = true;
+  player.vx = 0;
+  player.vy = 0;
+  player.crouch = false;
+  player.climbing = false;
+  player.sprint = sprinting;
+
+  const centerX = player.x + player.w/2;
+  const centerY = player.y + player.h/2;
+  const range = Math.max(td.tileSize * 0.75, 42);
+  if(Array.isArray(td.terminals)){
+    for(const terminal of td.terminals){
+      const dist = Math.hypot(centerX - terminal.x, centerY - terminal.y);
+      if(dist <= range){
+        terminal.glowUntil = now() + 220;
+      }
+    }
+  }
+  if(td.door){
+    const doorRange = Math.max(range, td.door.radius || range);
+    if(Math.hypot(centerX - td.door.x, centerY - td.door.y) <= doorRange){
+      td.door.glowUntil = now() + 220;
+    }
+  }
+  if(td.interactionCooldown > 0){
+    td.interactionCooldown = Math.max(0, td.interactionCooldown - dt * 1000);
+  }
+  updateHudCommon();
+}
+
 function updateTopDown(dt){
   if(!topDownState) return;
+  if(topDownState.mode === 'labyrinth'){
+    updateCorporateLabyrinth(dt);
+    return;
+  }
   const td = topDownState;
   const speed = td.speed || 180;
   let inputX = 0;
@@ -7909,8 +8205,49 @@ function updateTopDown(dt){
   updateHudCommon();
 }
 
+function interactCorporateLabyrinth(){
+  if(!topDownState || topDownState.mode !== 'labyrinth') return false;
+  const td = topDownState;
+  if(td.ui && td.ui.isOpen()){
+    td.ui.close();
+    return true;
+  }
+  const px = player.x + player.w/2;
+  const py = player.y + player.h/2;
+  const range = Math.max(td.tileSize * 0.75, 42);
+  if(Array.isArray(td.terminals)){
+    const terminal = td.terminals.find((item) => Math.hypot(px - item.x, py - item.y) <= range);
+    if(terminal){
+      if(td.interactionCooldown > 0) return true;
+      td.ui?.setAppliedCount(td.appliedJobs);
+      td.ui?.open();
+      terminal.interacted = true;
+      td.interactionCooldown = 400;
+      notify('Accessing contract terminal…');
+      return true;
+    }
+  }
+  if(td.door && td.missionComplete){
+    const doorRange = Math.max(range, td.door.radius || range);
+    if(Math.hypot(px - td.door.x, py - td.door.y) <= doorRange){
+      td.door.open = true;
+      notify('Elevator engaged. Corporate labyrinth cleared.');
+      centerNote('Elevator unlocked', 1500);
+      chime();
+      completeTopDownLevel();
+      return true;
+    }
+  }
+  notify('No terminals nearby.');
+  return false;
+}
+
 function interactTopDown(){
   if(!topDownState) return;
+  if(topDownState.mode === 'labyrinth'){
+    interactCorporateLabyrinth();
+    return;
+  }
   const td = topDownState;
   const px = player.x + player.w/2;
   const py = player.y + player.h/2;
@@ -8046,6 +8383,10 @@ function interactVentDungeon(){
 function handleTopDownAttack(){
   if(!topDownState) return;
   const td = topDownState;
+  if(td.mode === 'labyrinth'){
+    notify('No targets here — focus on submitting applications.');
+    return;
+  }
   const px = player.x + player.w/2;
   const py = player.y + player.h/2;
   const range = td.tileSize * 0.75;
@@ -8085,6 +8426,13 @@ function completeTopDownLevel(){
   if(!topDownState || topDownState.exiting) return;
   const td = topDownState;
   td.exiting = true;
+  if(td.mode === 'labyrinth'){
+    const nextFloor = Math.min(FLOORS, currentFloor + 1);
+    restorePlayerFromTopDown(td);
+    resetTopDownState();
+    setTimeout(()=>enterFloor(nextFloor, {}), 600);
+    return;
+  }
   const totalInterns = td.interns.length;
   const killed = td.internsKilled;
   const floor = td.floor;
@@ -8097,7 +8445,7 @@ function completeTopDownLevel(){
   }
   const nextFloor = Math.min(FLOORS, currentFloor + 1);
   restorePlayerFromTopDown(td);
-  topDownState = null;
+  resetTopDownState();
   setTimeout(()=>enterFloor(nextFloor, {}), 600);
 }
 
@@ -10645,6 +10993,10 @@ function drawTopDown(){
   ctx.fillRect(0,0,W,H);
   if(!topDownState) return;
   const td = topDownState;
+  if(td.mode === 'labyrinth'){
+    drawCorporateLabyrinth(td);
+    return;
+  }
   const tile = td.tileSize;
   for(let row=0; row<td.rows; row++){
     for(let col=0; col<td.cols; col++){
@@ -10788,6 +11140,108 @@ function drawTopDown(){
     ctx.fillStyle = 'rgba(120,255,180,0.85)';
     ctx.fillText('Return to the elevator!', 24, 80);
   }
+}
+
+function drawCorporateLabyrinth(td){
+  const map = td.map;
+  if(!map) return;
+  const scale = td.scale || (td.tileSize / (map.gridSize || 32));
+  const offsetX = td.offsetX || 0;
+  const offsetY = td.offsetY || 0;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(20,28,42,0.9)';
+  ctx.fillRect(offsetX, offsetY, map.width * scale, map.height * scale);
+
+  ctx.lineWidth = Math.max(4, td.tileSize * 0.25);
+  ctx.strokeStyle = 'rgba(120,160,210,0.28)';
+  ctx.lineCap = 'round';
+  const roomIndex = td.roomLookup || new Map(map.rooms.map((room) => [room.id, room]));
+  if(!td.roomLookup){
+    td.roomLookup = roomIndex;
+  }
+  map.corridors.forEach((corridor) => {
+    const roomA = corridor.from && roomIndex.get(corridor.from);
+    const roomB = corridor.to && roomIndex.get(corridor.to);
+    if(!roomA || !roomB) return;
+    const points = [roomA.center, ...corridor.waypoints, roomB.center];
+    ctx.beginPath();
+    points.forEach((pt, index) => {
+      const sx = offsetX + pt.x * scale;
+      const sy = offsetY + pt.y * scale;
+      if(index === 0){
+        ctx.moveTo(sx, sy);
+      } else {
+        ctx.lineTo(sx, sy);
+      }
+    });
+    ctx.stroke();
+  });
+
+  map.rooms.forEach((room) => {
+    const width = room.width * scale;
+    const height = room.height * scale;
+    const x = offsetX + (room.center.x - room.width/2) * scale;
+    const y = offsetY + (room.center.y - room.height/2) * scale;
+    const base = room.type === 'reception'
+      ? 'rgba(120,180,240,0.28)'
+      : 'rgba(50,72,104,0.82)';
+    ctx.fillStyle = base;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = 'rgba(140,180,220,0.35)';
+    ctx.strokeRect(x, y, width, height);
+  });
+
+  if(td.door){
+    const glow = td.door.glowUntil && td.door.glowUntil > now();
+    const radius = Math.max(16, td.door.radius || td.tileSize * 0.6);
+    ctx.fillStyle = glow || td.missionComplete ? 'rgba(120,255,200,0.85)' : 'rgba(80,110,150,0.65)';
+    ctx.beginPath();
+    ctx.arc(td.door.x, td.door.y, radius, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(20,30,45,0.7)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  if(Array.isArray(td.terminals)){
+    const nodeRadius = Math.max(10, td.tileSize * 0.32);
+    td.terminals.forEach((terminal) => {
+      const glow = terminal.glowUntil && terminal.glowUntil > now();
+      ctx.fillStyle = glow ? 'rgba(140,255,210,0.92)' : 'rgba(180,220,255,0.8)';
+      ctx.beginPath();
+      ctx.arc(terminal.x, terminal.y, nodeRadius, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#0a1320';
+      ctx.font = `${Math.max(10, Math.floor(td.tileSize * 0.3))}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('PC', terminal.x, terminal.y + 1);
+    });
+  }
+
+  ctx.fillStyle = '#88f6ff';
+  ctx.beginPath();
+  const playerRadius = Math.max(player.w, player.h) / 2;
+  ctx.arc(player.x + player.w/2, player.y + player.h/2, playerRadius, 0, Math.PI*2);
+  ctx.fill();
+  ctx.strokeStyle = '#0a1f2c';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '16px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(`Applications: ${td.appliedJobs}/${td.requiredApplications}`, 24, 20);
+  if(td.missionComplete){
+    ctx.fillStyle = 'rgba(120,255,200,0.9)';
+    ctx.fillText('Return to the elevator!', 24, 44);
+  } else {
+    ctx.fillStyle = 'rgba(200,220,255,0.75)';
+    ctx.fillText('Find terminals to submit contract applications.', 24, 44);
+  }
+  ctx.restore();
 }
 
 function makeArcadeBeatdownLevel(floor, yBase){
@@ -12208,8 +12662,8 @@ function attack(){
     fireArcadeRampage();
     return;
   }
-  if(ninjaRound && !['melee','saber'].includes(player.weapon)){
-    centerNote('Melee only during ninja round!', 1200);
+  if(ninjaRound && player.weapon !== 'melee'){
+    centerNote('Investor ninjas demand melee only.', 1200);
     notify('Switch to melee.');
     beep({freq:360});
     return;
@@ -13545,7 +13999,13 @@ function updateHudCommon(){
   if(timeEl) timeEl.textContent = `${fmtClock(timeLeftMs())} ➜ ${fmtClock(0)}`;
   if(serversEl){
     if(topDownState){
-      serversEl.textContent = `Electrical Boxes: ${topDownState.hotwiredCount}/${topDownState.requiredBoxes}`;
+      if(topDownState.mode === 'labyrinth'){
+        const applied = topDownState.appliedJobs || topDownState.hotwiredCount || 0;
+        const required = topDownState.requiredApplications || topDownState.requiredBoxes || LABYRINTH_APPLICATION_TARGET;
+        serversEl.textContent = `Applications: ${applied}/${required}`;
+      } else {
+        serversEl.textContent = `Electrical Boxes: ${topDownState.hotwiredCount}/${topDownState.requiredBoxes}`;
+      }
     } else if(ventDungeonState){
       serversEl.textContent = `Electrical Boxes: ${ventDungeonState.hotwiredCount}/${ventDungeonState.requiredBoxes}`;
     } else if(droneMissionState){

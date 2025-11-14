@@ -1,20 +1,4 @@
-interface JobListing {
-  id: string;
-  title: string;
-  requirement: string;
-  pay: string;
-  applied: boolean;
-}
-
-export interface TerminalUIOptions {
-  parent?: HTMLElement;
-  requiredApplications?: number;
-  onApply?: (listing: JobListing) => void;
-  onClose?: () => void;
-  onComplete?: () => void;
-}
-
-const JOB_LISTING_POOL: Array<Omit<JobListing, 'id' | 'applied'>> = [
+const JOB_LISTING_POOL = [
   { title: 'Mid-level Manager', requirement: "Master's degree required", pay: '$10/hour' },
   { title: 'Assistant Data Analyst', requirement: "Bachelor's degree required", pay: '$11/hour' },
   { title: 'Adjunct Instructor', requirement: 'MFA required', pay: '$3,000/course, no benefits' },
@@ -32,7 +16,7 @@ const JOB_LISTING_POOL: Array<Omit<JobListing, 'id' | 'applied'>> = [
   { title: 'Office Plant Watering Consultant', requirement: 'Must love succulents', pay: '$7/hour' }
 ];
 
-function createElement<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) {
+function createElement(tag, className, text) {
   const el = document.createElement(tag);
   if (className) el.className = className;
   if (text) el.textContent = text;
@@ -44,18 +28,7 @@ function randomId() {
 }
 
 export class JobApplicationTerminalUI {
-  private readonly options: TerminalUIOptions;
-  private readonly root: HTMLElement;
-  private readonly titleEl: HTMLElement;
-  private readonly countEl: HTMLElement;
-  private readonly listEl: HTMLElement;
-  private readonly closeButton: HTMLButtonElement;
-  private listings: JobListing[] = [];
-  private appliedCount = 0;
-  private requiredApplications: number;
-  private isOpenFlag = false;
-
-  constructor(options: TerminalUIOptions = {}) {
+  constructor(options = {}) {
     this.options = options;
     this.requiredApplications = options.requiredApplications ?? 35;
 
@@ -63,7 +36,7 @@ export class JobApplicationTerminalUI {
     this.titleEl = createElement('h2', 'job-terminal-ui__title', 'Contract Board');
     this.countEl = createElement('div', 'job-terminal-ui__count');
     this.listEl = createElement('div', 'job-terminal-ui__list');
-    this.closeButton = createElement('button', 'job-terminal-ui__close', 'Close') as HTMLButtonElement;
+    this.closeButton = createElement('button', 'job-terminal-ui__close', 'Close');
     this.closeButton.addEventListener('click', () => this.close());
 
     const container = createElement('div', 'job-terminal-ui__container');
@@ -73,6 +46,10 @@ export class JobApplicationTerminalUI {
     (options.parent ?? document.body).appendChild(this.root);
     this.root.style.display = 'none';
 
+    this.listings = [];
+    this.appliedCount = 0;
+    this.isOpenFlag = false;
+
     this.refreshListings();
     this.updateProgress();
   }
@@ -81,12 +58,12 @@ export class JobApplicationTerminalUI {
     return this.appliedCount;
   }
 
-  setAppliedCount(value: number) {
+  setAppliedCount(value) {
     this.appliedCount = value;
     this.updateProgress();
   }
 
-  open(existingListings?: JobListing[]) {
+  open(existingListings) {
     this.isOpenFlag = true;
     this.root.style.display = 'block';
     document.body.classList.add('job-terminal-ui--open');
@@ -113,7 +90,7 @@ export class JobApplicationTerminalUI {
     return this.listings;
   }
 
-  private refreshListings() {
+  refreshListings() {
     const total = 12;
     const shuffled = [...JOB_LISTING_POOL];
     for (let i = shuffled.length - 1; i > 0; i -= 1) {
@@ -132,14 +109,14 @@ export class JobApplicationTerminalUI {
     this.renderListings();
   }
 
-  private renderListings() {
+  renderListings() {
     this.listEl.innerHTML = '';
     this.listings.forEach((listing) => {
       const card = createElement('div', 'job-terminal-ui__listing');
       const title = createElement('h3', 'job-terminal-ui__listing-title', `Apply here: ${listing.title}`);
       const req = createElement('p', 'job-terminal-ui__listing-req', listing.requirement);
       const pay = createElement('p', 'job-terminal-ui__listing-pay', listing.pay);
-      const button = createElement('button', 'job-terminal-ui__apply-button', listing.applied ? 'Applied' : 'Apply') as HTMLButtonElement;
+      const button = createElement('button', 'job-terminal-ui__apply-button', listing.applied ? 'Applied' : 'Apply');
       button.disabled = listing.applied;
       button.addEventListener('click', () => this.applyToListing(listing, button));
       card.append(title, req, pay, button);
@@ -147,7 +124,7 @@ export class JobApplicationTerminalUI {
     });
   }
 
-  private applyToListing(listing: JobListing, button: HTMLButtonElement) {
+  applyToListing(listing, button) {
     if (listing.applied) return;
     listing.applied = true;
     button.disabled = true;
@@ -161,7 +138,14 @@ export class JobApplicationTerminalUI {
     }
   }
 
-  private updateProgress() {
+  updateProgress() {
     this.countEl.textContent = `Applications submitted: ${this.appliedCount} / ${this.requiredApplications}`;
+  }
+
+  destroy() {
+    this.close();
+    if (this.root.parentElement) {
+      this.root.parentElement.removeChild(this.root);
+    }
   }
 }
