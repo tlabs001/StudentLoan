@@ -235,7 +235,8 @@ export class Level21TopDown {
 
   openTerminal(terminal) {
     this.ui.setAppliedCount(this.appliedJobs);
-    this.ui.open();
+    const listings = this.ui.getListings();
+    this.ui.open(listings);
     terminal.interacted = true;
   }
 
