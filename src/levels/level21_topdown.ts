@@ -1,22 +1,65 @@
-import { generateCorporateLabyrinth, createLabyrinthRng } from '../maps/level21_corporate_labyrinth.js';
-import { createJobTerminal, resetTerminalCounter } from '../entities/jobTerminal.js';
-import { JobApplicationTerminalUI } from '../ui/jobApplicationTerminalUI.js';
+import { generateCorporateLabyrinth } from '../maps/level21_corporate_labyrinth.ts';
+import { createJobTerminal, JobTerminalState, resetTerminalCounter } from '../entities/jobTerminal.ts';
+import { JobApplicationTerminalUI } from '../ui/jobApplicationTerminalUI.ts';
+import { TopdownMovementSystem, MovementEntity } from '../systems/topdownMovementSystem.ts';
+import { TopdownShootingSystem } from '../systems/topdownShootingSystem.ts';
+
+export interface Level21Options {
+  seed?: string;
+  onLevelComplete?: (levelId: string, context?: Record<string, unknown>) => void;
+  requiredApplications?: number;
+}
+
+interface PlayerState extends MovementEntity {
+  facing: { x: number; y: number };
+  fireCooldown: number;
+}
+
+interface InputState {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+  sprint: boolean;
+  fire: boolean;
+  interact: boolean;
+  aimAngle?: number;
+}
+
+interface EnemyState {
+  id: string;
+  position: { x: number; y: number };
+  patrolRoute: { x: number; y: number }[];
+  patrolIndex: number;
+}
 
 const REQUIRED_APPLICATIONS = 35;
 const ENEMY_COUNT = 18;
 const TERMINAL_COUNT = 5;
 
 export class Level21TopDown {
-  constructor(options = {}) {
+  readonly id = 'level21_corporate_labyrinth';
+  private readonly onComplete: Level21Options['onLevelComplete'];
+  private readonly movement: TopdownMovementSystem;
+  private readonly shooting: TopdownShootingSystem;
+  private readonly ui: JobApplicationTerminalUI;
+  private readonly requiredApplications: number;
+  private map = generateCorporateLabyrinth();
+  private player: PlayerState;
+  private enemies: EnemyState[] = [];
+  private terminals: JobTerminalState[] = [];
+  private appliedJobs = 0;
+  private interactionCooldown = 0;
+
+  constructor(options: Level21Options = {}) {
     const seed = options.seed ?? 'level21';
     this.map = generateCorporateLabyrinth({ seed });
     this.onComplete = options.onLevelComplete ?? (() => {});
     this.requiredApplications = options.requiredApplications ?? REQUIRED_APPLICATIONS;
 
     resetTerminalCounter();
-    this.movement = { speed: 230, sprintMultiplier: 1.35 };
-    this.projectileSpeed = 600;
-    this.cooldownMs = 160;
+    this.movement = new TopdownMovementSystem({ speed: 230 });
+    this.shooting = new TopdownShootingSystem({ projectileSpeed: 600 });
     this.ui = new JobApplicationTerminalUI({
       requiredApplications: this.requiredApplications,
       onApply: () => this.incrementApplications(),
@@ -32,21 +75,16 @@ export class Level21TopDown {
       fireCooldown: 0
     };
 
-    this.enemies = [];
-    this.terminals = [];
-    this.appliedJobs = 0;
-    this.interactionCooldown = 0;
-
     this.spawnEnemies(seed);
     this.spawnTerminals(seed);
   }
 
-  spawnEnemies(seed) {
-    const rng = createLabyrinthRng(`${seed}-enemies`);
+  private spawnEnemies(seed: string) {
+    const rng = this.createRng(seed + '-enemies');
     this.enemies = [];
     for (let i = 0; i < ENEMY_COUNT; i += 1) {
       const room = this.map.rooms[Math.floor(rng() * this.map.rooms.length)];
-      const route = [
+      const route: EnemyState['patrolRoute'] = [
         { x: room.center.x + (rng() - 0.5) * (room.width * 0.6), y: room.center.y + (rng() - 0.5) * (room.height * 0.6) },
         { x: room.center.x + (rng() - 0.5) * (room.width * 0.6), y: room.center.y + (rng() - 0.5) * (room.height * 0.6) }
       ];
@@ -59,8 +97,8 @@ export class Level21TopDown {
     }
   }
 
-  spawnTerminals(seed) {
-    const rng = createLabyrinthRng(`${seed}-terminals`);
+  private spawnTerminals(seed: string) {
+    const rng = this.createRng(seed + '-terminals');
     const shuffledRooms = [...this.map.rooms].sort(() => rng() - 0.5);
     this.terminals = [];
 
@@ -74,12 +112,43 @@ export class Level21TopDown {
     }
   }
 
-  update(dt, input) {
+  private createRng(seed: string) {
+    let h = 0;
+    for (let i = 0; i < seed.length; i += 1) {
+      h = Math.imul(31, h) + seed.charCodeAt(i) | 0;
+    }
+    return function rng() {
+      h |= 0;
+      h = (h + 0x6D2B79F5) | 0;
+      let t = Math.imul(h ^ (h >>> 15), h | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  update(dt: number, input: InputState) {
     if (this.ui.isOpen()) {
       return;
     }
 
-    this.updateMovement(dt, input);
+    this.movement.update(this.player, input, dt, {
+      minX: 0,
+      maxX: this.map.width,
+      minY: 0,
+      maxY: this.map.height
+    });
+
+    this.shooting.update(
+      this.player,
+      { fire: input.fire, angle: input.aimAngle },
+      dt,
+      {
+        spawnProjectile: ({ x, y, direction, speed }) => {
+          void (x + y + direction.x + direction.y + speed);
+        }
+      }
+    );
+
     this.updateEnemies(dt);
 
     if (this.interactionCooldown > 0) {
@@ -95,47 +164,7 @@ export class Level21TopDown {
     }
   }
 
-  updateMovement(dt, input) {
-    const direction = this.sampleDirection(input);
-    const magnitude = direction.x !== 0 || direction.y !== 0 ? 1 : 0;
-
-    if (!this.player.velocity) {
-      this.player.velocity = { x: 0, y: 0 };
-    }
-
-    if (magnitude === 0) {
-      this.player.velocity.x = 0;
-      this.player.velocity.y = 0;
-      return;
-    }
-
-    const sprint = input.sprint ? (this.movement.sprintMultiplier ?? 1.35) : 1;
-    const speed = (this.movement.speed ?? 220) * sprint;
-
-    this.player.velocity.x = direction.x * speed;
-    this.player.velocity.y = direction.y * speed;
-
-    this.player.position.x = Math.max(0, Math.min(this.map.width, this.player.position.x + this.player.velocity.x * dt));
-    this.player.position.y = Math.max(0, Math.min(this.map.height, this.player.position.y + this.player.velocity.y * dt));
-  }
-
-  sampleDirection(input) {
-    let dx = 0;
-    let dy = 0;
-    if (input.left) dx -= 1;
-    if (input.right) dx += 1;
-    if (input.up) dy -= 1;
-    if (input.down) dy += 1;
-
-    if (dx === 0 && dy === 0) {
-      return { x: 0, y: 0 };
-    }
-
-    const length = Math.hypot(dx, dy) || 1;
-    return { x: dx / length, y: dy / length };
-  }
-
-  updateEnemies(dt) {
+  private updateEnemies(dt: number) {
     const speed = 120;
     this.enemies.forEach((enemy) => {
       const target = enemy.patrolRoute[enemy.patrolIndex];
@@ -153,7 +182,7 @@ export class Level21TopDown {
     });
   }
 
-  findNearbyTerminal() {
+  private findNearbyTerminal() {
     const range = 48;
     return this.terminals.find((terminal) => {
       const dx = terminal.position.x - this.player.position.x;
@@ -162,25 +191,25 @@ export class Level21TopDown {
     });
   }
 
-  openTerminal(terminal) {
+  private openTerminal(terminal: JobTerminalState) {
     this.ui.setAppliedCount(this.appliedJobs);
     const listings = this.ui.getListings();
     this.ui.open(listings);
     terminal.interacted = true;
   }
 
-  resumePlayerControl() {
+  private resumePlayerControl() {
     // placeholder for hooking control resume logic
   }
 
-  incrementApplications() {
+  private incrementApplications() {
     this.appliedJobs += 1;
     if (this.appliedJobs >= this.requiredApplications) {
       this.completeLevel();
     }
   }
 
-  completeLevel() {
+  private completeLevel() {
     this.ui.close();
     this.onComplete?.(this.id, {
       appliedJobs: this.appliedJobs,
@@ -190,8 +219,6 @@ export class Level21TopDown {
   }
 }
 
-Level21TopDown.prototype.id = 'level21_corporate_labyrinth';
-
-export function createLevel21TopDown(options = {}) {
+export function createLevel21TopDown(options: Level21Options = {}) {
   return new Level21TopDown(options);
 }

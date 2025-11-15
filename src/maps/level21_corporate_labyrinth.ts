@@ -1,6 +1,41 @@
-const ROOM_TYPES = ['office', 'board-room', 'bathroom', 'lounge', 'storage'];
+export type RoomType = 'office' | 'board-room' | 'bathroom' | 'lounge' | 'storage' | 'reception';
 
-function mulberry32(seed) {
+export interface LabyrinthRoom {
+  id: string;
+  type: RoomType;
+  center: { x: number; y: number };
+  width: number;
+  height: number;
+  doors: string[];
+}
+
+export interface LabyrinthCorridor {
+  id: string;
+  from: string;
+  to: string;
+  waypoints: { x: number; y: number }[];
+}
+
+export interface CorporateLabyrinthMap {
+  seed: string;
+  rooms: LabyrinthRoom[];
+  corridors: LabyrinthCorridor[];
+  gridSize: number;
+  width: number;
+  height: number;
+}
+
+export interface LabyrinthOptions {
+  seed?: string;
+  gridSize?: number;
+  roomCount?: number;
+  width?: number;
+  height?: number;
+}
+
+const ROOM_TYPES: RoomType[] = ['office', 'board-room', 'bathroom', 'lounge', 'storage'];
+
+function mulberry32(seed: number) {
   return function rng() {
     seed |= 0;
     seed = (seed + 0x6D2B79F5) | 0;
@@ -10,11 +45,11 @@ function mulberry32(seed) {
   };
 }
 
-function pick(rng, list) {
+function pick<T>(rng: () => number, list: T[]): T {
   return list[Math.floor(rng() * list.length)];
 }
 
-function hashSeed(seed) {
+function hashSeed(seed: string) {
   let h = 0;
   for (let i = 0; i < seed.length; i += 1) {
     h = Math.imul(31, h) + seed.charCodeAt(i) | 0;
@@ -22,7 +57,7 @@ function hashSeed(seed) {
   return h;
 }
 
-export function generateCorporateLabyrinth(options = {}) {
+export function generateCorporateLabyrinth(options: LabyrinthOptions = {}): CorporateLabyrinthMap {
   const seed = options.seed ?? 'level21-labyrinth';
   const gridSize = options.gridSize ?? 32;
   const roomCount = options.roomCount ?? 28;
@@ -31,8 +66,8 @@ export function generateCorporateLabyrinth(options = {}) {
 
   const rng = mulberry32(hashSeed(seed));
 
-  const rooms = [];
-  const corridors = [];
+  const rooms: LabyrinthRoom[] = [];
+  const corridors: LabyrinthCorridor[] = [];
 
   for (let i = 0; i < roomCount; i += 1) {
     const w = (6 + Math.floor(rng() * 6)) * gridSize;
@@ -74,6 +109,7 @@ export function generateCorporateLabyrinth(options = {}) {
     });
   }
 
+  // add extra cross connections to create loops
   for (let i = 0; i < rooms.length; i += 1) {
     const source = rooms[i];
     if (source.type === 'reception') continue;
@@ -105,8 +141,4 @@ export function generateCorporateLabyrinth(options = {}) {
     width,
     height
   };
-}
-
-export function createLabyrinthRng(seed) {
-  return mulberry32(hashSeed(seed));
 }
