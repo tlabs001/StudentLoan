@@ -31,7 +31,6 @@ export class JobApplicationTerminalUI {
   constructor(options = {}) {
     this.options = options;
     this.requiredApplications = options.requiredApplications ?? 35;
-    this.visibleListingCount = options.visibleListingCount ?? 12;
 
     this.root = createElement('div', 'job-terminal-ui');
     this.titleEl = createElement('h2', 'job-terminal-ui__title', 'Contract Board');
@@ -71,11 +70,8 @@ export class JobApplicationTerminalUI {
 
     if (existingListings && existingListings.length > 0) {
       this.listings = existingListings;
+      this.renderListings();
     }
-
-    this.listings = this.listings.filter((item) => !item.applied);
-    this.topUpListings();
-    this.renderListings();
   }
 
   close() {
@@ -95,27 +91,22 @@ export class JobApplicationTerminalUI {
   }
 
   refreshListings() {
-    this.listings = [];
-    this.topUpListings();
-    this.renderListings();
-  }
-
-  topUpListings() {
-    const target = Math.min(
-      this.visibleListingCount,
-      Math.max(0, this.requiredApplications - this.appliedCount)
-    );
-
-    while (this.listings.length < target) {
-      const item = JOB_LISTING_POOL[Math.floor(Math.random() * JOB_LISTING_POOL.length)];
-      this.listings.push({
-        id: randomId(),
-        title: item.title,
-        requirement: item.requirement,
-        pay: item.pay,
-        applied: false
-      });
+    const total = 12;
+    const shuffled = [...JOB_LISTING_POOL];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
+
+    this.listings = shuffled.slice(0, total).map((item) => ({
+      id: randomId(),
+      title: item.title,
+      requirement: item.requirement,
+      pay: item.pay,
+      applied: false
+    }));
+
+    this.renderListings();
   }
 
   renderListings() {
@@ -144,14 +135,7 @@ export class JobApplicationTerminalUI {
 
     if (this.appliedCount >= this.requiredApplications) {
       this.options.onComplete?.();
-      this.listings = [];
-      this.renderListings();
-      return;
     }
-
-    this.listings = this.listings.filter((item) => !item.applied);
-    this.topUpListings();
-    this.renderListings();
   }
 
   updateProgress() {
