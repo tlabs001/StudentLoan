@@ -11148,33 +11148,10 @@ function drawCorporateLabyrinth(td){
   const scale = td.scale || (td.tileSize / (map.gridSize || 32));
   const offsetX = td.offsetX || 0;
   const offsetY = td.offsetY || 0;
-  const areaWidth = map.width * scale;
-  const areaHeight = map.height * scale;
 
   ctx.save();
-  const gradient = ctx.createLinearGradient(offsetX, offsetY, offsetX, offsetY + areaHeight);
-  gradient.addColorStop(0, 'rgba(18, 30, 48, 0.95)');
-  gradient.addColorStop(1, 'rgba(10, 16, 26, 0.9)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(offsetX, offsetY, areaWidth, areaHeight);
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(offsetX, offsetY, areaWidth, areaHeight);
-  ctx.clip();
-  const vignette = ctx.createRadialGradient(
-    offsetX + areaWidth / 2,
-    offsetY + areaHeight / 2,
-    Math.max(td.tileSize * 2, Math.min(areaWidth, areaHeight) * 0.18),
-    offsetX + areaWidth / 2,
-    offsetY + areaHeight / 2,
-    Math.max(areaWidth, areaHeight)
-  );
-  vignette.addColorStop(0, 'rgba(50, 70, 110, 0.18)');
-  vignette.addColorStop(1, 'rgba(5, 8, 12, 0)');
-  ctx.fillStyle = vignette;
-  ctx.fillRect(offsetX, offsetY, areaWidth, areaHeight);
-  ctx.restore();
+  ctx.fillStyle = 'rgba(20,28,42,0.9)';
+  ctx.fillRect(offsetX, offsetY, map.width * scale, map.height * scale);
 
   ctx.lineWidth = Math.max(4, td.tileSize * 0.25);
   ctx.strokeStyle = 'rgba(120,160,210,0.28)';
@@ -11215,26 +11192,6 @@ function drawCorporateLabyrinth(td){
     ctx.strokeRect(x, y, width, height);
   });
 
-  ctx.save();
-  ctx.globalAlpha = 0.12;
-  ctx.strokeStyle = 'rgba(170, 200, 250, 0.6)';
-  ctx.lineWidth = 1;
-  for(let gx = 0; gx <= map.width; gx += map.gridSize){
-    const sx = offsetX + gx * scale;
-    ctx.beginPath();
-    ctx.moveTo(sx, offsetY);
-    ctx.lineTo(sx, offsetY + areaHeight);
-    ctx.stroke();
-  }
-  for(let gy = 0; gy <= map.height; gy += map.gridSize){
-    const sy = offsetY + gy * scale;
-    ctx.beginPath();
-    ctx.moveTo(offsetX, sy);
-    ctx.lineTo(offsetX + areaWidth, sy);
-    ctx.stroke();
-  }
-  ctx.restore();
-
   if(td.door){
     const glow = td.door.glowUntil && td.door.glowUntil > now();
     const radius = Math.max(16, td.door.radius || td.tileSize * 0.6);
@@ -11245,16 +11202,6 @@ function drawCorporateLabyrinth(td){
     ctx.strokeStyle = 'rgba(20,30,45,0.7)';
     ctx.lineWidth = 3;
     ctx.stroke();
-    if(glow || td.missionComplete){
-      ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.strokeStyle = 'rgba(140,255,210,0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(td.door.x, td.door.y, radius * 1.25, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.restore();
-    }
   }
 
   if(Array.isArray(td.terminals)){
@@ -11270,42 +11217,8 @@ function drawCorporateLabyrinth(td){
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('PC', terminal.x, terminal.y + 1);
-      if(glow){
-        ctx.save();
-        ctx.globalAlpha = 0.3;
-        ctx.strokeStyle = 'rgba(160,255,220,0.6)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(terminal.x, terminal.y, nodeRadius * 1.5, 0, Math.PI*2);
-        ctx.stroke();
-        ctx.restore();
-      }
     });
   }
-
-  const playerCenterX = player.x + player.w/2;
-  const playerCenterY = player.y + player.h/2;
-  const playerGlowRadius = Math.max(td.tileSize * 4.5, 160);
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  const glowField = ctx.createRadialGradient(
-    playerCenterX,
-    playerCenterY,
-    Math.max(player.w, player.h) * 0.4,
-    playerCenterX,
-    playerCenterY,
-    playerGlowRadius
-  );
-  glowField.addColorStop(0, 'rgba(130,255,220,0.25)');
-  glowField.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = glowField;
-  ctx.fillRect(
-    playerCenterX - playerGlowRadius,
-    playerCenterY - playerGlowRadius,
-    playerGlowRadius * 2,
-    playerGlowRadius * 2
-  );
-  ctx.restore();
 
   ctx.fillStyle = '#88f6ff';
   ctx.beginPath();
