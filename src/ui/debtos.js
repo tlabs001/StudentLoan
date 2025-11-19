@@ -7,7 +7,7 @@ const TEMPLATE = `
         <label class="debtos-field">Username<input id="debtosUser" type="text" placeholder="User" /></label>
         <label class="debtos-field">Password<input id="debtosPass" type="password" placeholder="********" /></label>
         <button id="debtosLoginBtn" class="debtos-btn">Log In</button>
-        <p class="debtos-foot">Any credentials will work. Logging in accepts the terms of simulated suffering.</p>
+        <p class="debtos-foot">Any credentials will work. Logging in accepts the terms of the system.</p>
       </div>
     </div>
     <div class="debtos-screen debtos-loading hidden" data-screen="loading">
@@ -19,12 +19,11 @@ const TEMPLATE = `
     </div>
     <div class="debtos-screen debtos-os hidden" data-screen="os">
       <div class="debtos-top">
-        <div class="debtos-row"><span id="debtosAvatar" class="debtos-avatar">🙂</span><div>
+          <div class="debtos-row"><span id="debtosAvatar" class="debtos-avatar">🙂</span><div>
           <div class="debtos-title">DebtOS v6 — "You Cannot Log Out"</div>
           <div class="debtos-sub">Level 27 mission terminal</div>
         </div></div>
         <div class="debtos-row debtos-gap">
-          <span class="debtos-pill">Clicks <span id="debtosClicks">0</span>/10</span>
           <span class="debtos-pill">Clock <span id="debtosClock">08:00</span></span>
           <button id="debtosLogout" class="debtos-btn muted">Log out</button>
         </div>
@@ -46,12 +45,12 @@ const TEMPLATE = `
         <main class="debtos-main">
           <div class="debtos-panel">
             <div class="debtos-label">Prompt</div>
-            <p id="debtosPrompt" class="debtos-sub">Pay down whatever you can. Ten decisive clicks will drain the battery.</p>
+            <p id="debtosPrompt" class="debtos-sub">Pay down whatever you can before the battery dies.</p>
             <div class="debtos-actions">
               <button class="debtos-btn primary" data-action="pay" data-amount="500">Pay $500</button>
               <button class="debtos-btn" data-action="pay" data-amount="250">Pay $250</button>
               <button class="debtos-btn" data-action="message">Send hardship message</button>
-              <button class="debtos-btn" data-action="refi">Request refinance sim</button>
+              <button class="debtos-btn" data-action="refi">Request refinance</button>
             </div>
           </div>
           <div class="debtos-grid" id="debtosGrid">
@@ -140,12 +139,12 @@ const defaultSession = () => ({
   loggedIn: false,
   batteryLow: false,
   shutdown: false,
+  batteryClocksLeft: 4,
   log: []
 });
 
 let savedSession = null;
 let overlay, barFill, loadingMsg, screens, logEl, clicksEl, clockEl, debtEl, syncStatusEl, anxietyEl, depressionEl, socialEl, promptEl;
-let lowBatteryTimer = null;
 let mode = 'prologue';
 let onComplete = () => {};
 let getLoanBalance = () => 120000;
@@ -193,7 +192,7 @@ function ensureOverlay(){
       logLine('You send a hardship message. A bot replies with empathy macros.', 'good');
       registerClick();
     } else if(action === 'refi'){
-      logLine('Refinance simulator cycles through options. None change the math.', 'bad');
+      logLine('Refinance desk cycles through options. None change the math.', 'bad');
       registerClick();
     } else if(action === 'clickable'){
       logLine('You click through yet another prompt.', 'system');
@@ -215,7 +214,7 @@ function fmtMoney(v){
 }
 
 function updateStats(){
-  clicksEl.textContent = `${session.clicks}`;
+  if(clicksEl){ clicksEl.textContent = `${session.clicks}`; }
   const hour = String(session.clock).padStart(2,'0');
   clockEl.textContent = `${hour}:00`;
   debtEl.textContent = fmtMoney(session.debt);
@@ -223,6 +222,21 @@ function updateStats(){
   anxietyEl.style.width = `${Math.max(0, Math.min(100, session.anxiety))}%`;
   depressionEl.style.width = `${Math.max(0, Math.min(100, session.depression))}%`;
   socialEl.style.width = `${Math.max(0, Math.min(100, session.social))}%`;
+}
+
+function updateBatteryPopup(){
+  const popup = document.getElementById('debtosLowBattery');
+  const msg = document.getElementById('debtosBatteryMsg');
+  if(!popup || !msg) return;
+  if(!session.batteryLow){
+    popup.classList.add('hidden');
+    return;
+  }
+  const ticks = session.batteryClocksLeft;
+  msg.textContent = ticks > 0
+    ? `Battery at 5%. ${ticks} clock${ticks===1?'':'s'} until power off.`
+    : 'Battery at 5%. Powering down now.';
+  popup.classList.remove('hidden');
 }
 
 function logLine(msg, type='system'){
@@ -288,9 +302,10 @@ function launchOS(){
   setScreen('os');
   syncDebtFromGame();
   replayLog();
-  promptEl.textContent = 'Pay down whatever you can. Ten decisive clicks will drain the battery.';
+  promptEl.textContent = 'Pay down whatever you can before the battery dies.';
   logLine('DebtOS session active. Loan feed connected to Loan Tower.', 'system');
   updateStats();
+  updateBatteryPopup();
 }
 
 function handlePayment(amount){
@@ -309,30 +324,33 @@ function registerClick(){
   session.clock = Math.min(23, session.clock + 1);
   updateStats();
   savedSession = { ...session };
-  if(!session.batteryLow && mode === 'prologue' && session.clicks >= 10){
+  const triggeredNow = (!session.batteryLow && mode === 'prologue' && session.clicks >= 10);
+  if(triggeredNow){
     triggerLowBattery();
+    return;
+  }
+  if(session.batteryLow && !session.shutdown){
+    stepLowBatteryClock();
   }
 }
 
 function triggerLowBattery(){
   session.batteryLow = true;
-  const popup = document.getElementById('debtosLowBattery');
-  const msg = document.getElementById('debtosBatteryMsg');
-  if(msg) msg.textContent = 'Battery at 5%. Device will shut down after four more clocks.';
-  popup?.classList.remove('hidden');
-  let ticks = 4;
-  lowBatteryTimer && clearInterval(lowBatteryTimer);
-  lowBatteryTimer = setInterval(() => {
-    ticks -= 1;
-    if(msg) msg.textContent = `Battery at 5%. ${ticks} clock${ticks===1?'':'s'} until power off.`;
-    if(ticks <= 0){
-      clearInterval(lowBatteryTimer);
-      lowBatteryTimer = null;
-      popup?.classList.add('hidden');
-      triggerPowerdown();
-    }
-  }, 1000);
+  session.batteryClocksLeft = 4;
+  updateBatteryPopup();
+  savedSession = { ...session };
   logLine('Low battery warning. Device will power down soon.', 'bad');
+}
+
+function stepLowBatteryClock(){
+  if(session.batteryClocksLeft > 0){
+    session.batteryClocksLeft -= 1;
+    updateBatteryPopup();
+    savedSession = { ...session };
+  }
+  if(session.batteryClocksLeft <= 0){
+    triggerPowerdown();
+  }
 }
 
 function triggerPowerdown(){
@@ -352,7 +370,6 @@ function handleLogout(){
 }
 
 function finishMission(reason){
-  if(lowBatteryTimer){ clearInterval(lowBatteryTimer); lowBatteryTimer = null; }
   document.getElementById('debtosLowBattery')?.classList.add('hidden');
   document.getElementById('debtosPowerdown')?.classList.add('hidden');
   overlay.classList.add('hidden');
@@ -374,6 +391,7 @@ export function startDebtOSMission(options={}){
   restoreSession();
   syncDebtFromGame();
   updateStats();
+  updateBatteryPopup();
   overlay.classList.remove('hidden');
   setScreen('login');
   logEl.textContent = '';
@@ -382,6 +400,7 @@ export function startDebtOSMission(options={}){
     logLine('System recovered from earlier shutdown. Battery replaced.', 'system');
     session.batteryLow = false;
     session.shutdown = false;
+    session.batteryClocksLeft = 4;
     savedSession = { ...session };
   }
 }
