@@ -1,4 +1,5 @@
 import { Agent } from './agent.js';
+import { startDebtOSMission } from '../ui/debtos.js';
 
 // === Editable Parameter Sections ==========================================
 // -- Canvas & Display --
@@ -4907,7 +4908,7 @@ function startNewRun(name){
   hellscapeState = null;
   updateCollectionsPressure();
   runActive = true;
-  pause = false;
+  pause = true;
   startClock = performance.now();
   last = performance.now();
   attackHeld = false;
@@ -4925,7 +4926,17 @@ function startNewRun(name){
   minimapVisible=false;
   updateMapButtonState();
   toggleMinimap(false);
-  initOutsideRound();
+  startDebtOSMission({
+    mode: 'prologue',
+    getLoanBalance: () => player.loanBalance,
+    setLoanBalance: syncLoanFromTerminal,
+    onComplete: () => {
+      notify('DebtOS powered down. Counter-sniper mission starting.');
+      centerNote('Battery drained — counter-sniper mission starts.', 1800);
+      initOutsideRound();
+      pause = false;
+    }
+  });
   if(timeEl) timeEl.textContent= `${fmtClock(TOTAL_TIME_MS)} ➜ ${fmtClock(0)}`;
   ensureLoop();
   canvas.focus();
@@ -5052,6 +5063,20 @@ function handleFloorStart(floor){
   clearFeather();
   state.ceoPassive = false;
   state.playerWeaponsDisabled = false;
+  if(floor === 27){
+    pause = true;
+    startDebtOSMission({
+      mode: 'level27',
+      getLoanBalance: () => player.loanBalance,
+      setLoanBalance: syncLoanFromTerminal,
+      onComplete: () => {
+        notify('Terminal session complete. Elevator moves to Level 28.');
+        enterFloor(28, { showBanner:true });
+        pause = false;
+      }
+    });
+    return;
+  }
   if(player.goldenPaycheckActive && floor > 1){
     addChecking(1000000);
     notify('Golden paycheck deposited $1,000,000.');
@@ -5195,6 +5220,12 @@ function updateCollectionsPressure(){
   const debtFactor = Math.min(1, Math.max(0, (debt - 200000000) / 800000000));
   const goldenFactor = player && player.goldenPaycheckActive ? 0.25 : 0;
   collectionsPressure = base * (1 + debtFactor * 1.5 + goldenFactor);
+}
+
+function syncLoanFromTerminal(nextDebt){
+  player.loanBalance = clampLoanBalance(nextDebt);
+  updateCollectionsPressure();
+  updateHudCommon();
 }
 function loseChecking(amount){
   if(amount<=0) return 0;
