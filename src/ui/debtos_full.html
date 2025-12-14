@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DebtOS v6 – Dark</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+    }
+    .center-screen {
+      display: none;
+      height: 100vh;
+      width: 100vw;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      background: radial-gradient(circle at top, #020617 0, #020617 40%, #020617 65%, #000 100%);
+    }
+    #loginScreen { display: flex; }
+    h1, h2, h3, h4 { margin: 0; }
+
+    #loginBox {
+      background: #020617;
+      border-radius: 8px;
+      padding: 20px 24px;
+      border: 1px solid #1f2937;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.7);
+      max-width: 360px;
+      width: 100%;
+    }
+    #loginBox h2 {
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    .field {
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .field label {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+    .field input {
+      padding: 7px 8px;
+      border-radius: 4px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 13px;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: #f9fafb;
+    }
+    .btn {
+      padding: 8px 14px;
+      border-radius: 4px;
+      border: 1px solid #4b5563;
+      background: #0b1120;
+      color: #f9fafb;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn:hover {
+      background: #111827;
+      border-color: #e5e7eb;
+    }
+    #loginBox button {
+      width: 100%;
+      margin-top: 8px;
+    }
+    #loginFoot {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    #loadingScreen h2 {
+      margin-bottom: 10px;
+    }
+    #loadingMsg {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 10px;
+    }
+    #loadingBar {
+      width: 280px;
+      height: 14px;
+      border-radius: 999px;
+      border: 1px solid #4b5563;
+      overflow: hidden;
+      background: #020617;
+    }
+    #loadingFill {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, #22c55e, #3b82f6, #a855f7);
+      transition: width 0.1s linear;
+    }
+
+    #osScreen {
+      display: none;
+      height: 100vh;
+      width: 100vw;
+      background: #020617;
+      color: #e5e7eb;
+      display: flex;
+      flex-direction: column;
+    }
+    #topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      background: #020617;
+      border-bottom: 1px solid #1f2937;
+      font-size: 12px;
+    }
+    #topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #avatarDot {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: #1d4ed8;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+    #topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+    }
+    .top-icon {
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+    }
+    .top-icon:hover {
+      border-color: #4b5563;
+      background: #020617;
+    }
+
+    #settingsMenu {
+      position: absolute;
+      right: 0;
+      top: 150%;
+      background: #020617;
+      border-radius: 6px;
+      border: 1px solid #374151;
+      min-width: 220px;
+      box-shadow: 0 12px 24px rgba(0,0,0,0.7);
+      display: none;
+      z-index: 50;
+    }
+    .settings-item {
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #111827;
+    }
+    .settings-item:last-child { border-bottom: none; }
+    .settings-item:hover {
+      background: #0b1120;
+    }
+
+    #mainLayout {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: calc(100vh - 28px);
+    }
+    #tabs {
+      display: flex;
+      gap: 2px;
+      padding: 4px 6px;
+      border-bottom: 1px solid #1f2937;
+      background: #020617;
+    }
+    .tab-btn {
+      position: relative;
+      padding: 4px 10px;
+      font-size: 12px;
+      border-radius: 4px 4px 0 0;
+      border: 1px solid #374151;
+      border-bottom-color: #020617;
+      background: #020617;
+      cursor: pointer;
+      color: #e5e7eb;
+    }
+    .tab-btn.active {
+      background: #111827;
+      border-color: #9ca3af;
+      border-bottom-color: #111827;
+      font-weight: 600;
+    }
+    .tab-badge {
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      min-width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #f9fafb;
+      font-size: 9px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 0 3px;
+      border: 1px solid #020617;
+    }
+
+    #bodyArea {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      overflow: hidden;
+    }
+    #sidebar {
+      border-right: 1px solid #1f2937;
+      padding: 8px;
+      background: #020617;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: all 0.15s ease;
+    }
+    #sidebar.compact {
+      font-size: 11px;
+      padding: 6px;
+    }
+    #statsBlock h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #9ca3af;
+      margin: 0 0 4px;
+    }
+    .stat-line {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin: 1px 0;
+    }
+    .stat-label { color: #9ca3af; }
+    .stat-value {
+      font-variant-numeric: tabular-nums;
+      color: #e5e7eb;
+    }
+    .bar {
+      position: relative;
+      height: 10px;
+      background: #020617;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid #111827;
+      margin: 2px 0 4px;
+    }
+    .bar-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 0%;
+      background: linear-gradient(90deg, #22c55e, #f97316, #ef4444);
+    }
+    .bar-label {
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      color: #9ca3af;
+    }
+
+    #clockBox {
+      font-size: 11px;
+      border-radius: 4px;
+      border: 1px solid #1f2937;
+      background: #020617;
+      padding: 4px 6px;
+    }
+
+    #lifeActions {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .side-btn {
+      font-size: 11px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+      cursor: pointer;
+      text-align: left;
+    }
+    .side-btn:hover {
+      border-color: #9ca3af;
+      background: #0b1120;
+    }
+
+    #mainContent {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+    }
+    #viewTitle {
+      padding: 6px 8px;
+      border-bottom: 1px solid #111827;
+      font-size: 13px;
+    }
+    #panel {
+      padding: 8px;
+      overflow-y: auto;
+      font-size: 12px;
+      border-bottom: 1px solid #111827;
+    }
+    #log {
+      padding: 6px 8px;
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: #e5e7eb;
+      overflow-y: auto;
+      max-height: 120px;
+    }
+    .log-entry {
+      margin-bottom: 2px;
+    }
+    .log-entry.system { color: #9ca3af; }
+    .log-entry.bad { color: #fecaca; }
+    .log-entry.good { color: #bbf7d0; }
+
+    .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 6px;
+    }
+    .card {
+      border-radius: 4px;
+      border: 1px solid #1f2937;
+      padding: 6px;
+      background: #020617;
+    }
+    .card.clickable { cursor: pointer; }
+    .card.clickable:hover {
+      background: #030712;
+      border-color: #4b5563;
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .card-meta {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-bottom: 2px;
+    }
+    .card-text {
+      font-size: 11px;
+      color: #e5e7eb;
+    }
+    .panel-actions {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .panel-btn {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #4b5563;
+      background: #0b1120;
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    .panel-btn:hover {
+      background: #111827;
+      border-color: #e5e7eb;
+    }
+
+    .form-row { margin: 4px 0; display: flex; flex-direction: column; gap: 2px; }
+    .form-label { font-size: 11px; color: #9ca3af; }
+    .form-input, .form-textarea, .form-select {
+      background: #020617;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 11px;
+      color: #e5e7eb;
+      font-family: inherit;
+    }
+    .form-textarea { min-height: 60px; resize: vertical; }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      outline: none;
+      border-color: #f9fafb;
+    }
+    .field-error {
+      border-color: #ef4444 !important;
+      box-shadow: 0 0 0 1px rgba(239,68,68,0.5);
+    }
+    .error-text {
+      font-size: 11px;
+      color: #fca5a5;
+      margin-top: 4px;
+    }
+
+    .mail-list-item {
+      padding: 4px 6px;
+      border-bottom: 1px solid #111827;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      gap: 4px;
+    }
+    .mail-list-item.unread .mail-subject {
+      font-weight: 600;
+    }
+    .mail-subject {
+      font-size: 12px;
+    }
+    .mail-meta {
+      font-size: 10px;
+      color: #9ca3af;
+      white-space: nowrap;
+    }
+
+    #footerBar {
+      padding: 4px 8px;
+      font-size: 10px;
+      color: #6b7280;
+      border-top: 1px solid #111827;
+      background: #020617;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    /* Journal overlay */
+    #journalOverlay, #profileOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #journalWindow, #profileWindow {
+      background: #020617;
+      border-radius: 8px;
+      border: 1px solid #374151;
+      max-width: calc(100vw - 40px);
+      max-height: calc(100vh - 40px);
+      overflow: hidden;
+    }
+    #journalWindow {
+      width: 720px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+    }
+    #journalList {
+      border-right: 1px solid #1f2937;
+      padding: 6px;
+      font-size: 12px;
+    }
+    #journalEditor {
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .journal-item {
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-bottom: 2px;
+    }
+    .journal-item.active {
+      background: #0b1120;
+      border: 1px solid #4b5563;
+    }
+
+    /* Profile overlay */
+    #profileWindow {
+      width: 640px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+    }
+    #profileLeft {
+      border-right: 1px solid #1f2937;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    #profileAvatarPreview {
+      width: 110px;
+      height: 110px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 40px;
+      background: #1d4ed8;
+    }
+    #profileRight {
+      padding: 10px;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    @media (max-width: 900px) {
+      #bodyArea {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+      }
+      #sidebar {
+        border-right: none;
+        border-bottom: 1px solid #1f2937;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="loginScreen" class="center-screen">
+    <div id="loginBox">
+      <h2>DebtOS Login</h2>
+      <div class="field">
+        <label>Username</label>
+        <input id="loginUser" type="text" placeholder="User" />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="loginPass" type="password" placeholder="********" />
+      </div>
+      <button class="btn" id="loginBtn">Log In</button>
+      <div id="loginFoot">Any credentials will work. <br>Logging in means accepting the terms of simulated suffering.</div>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div id="loadingScreen" class="center-screen">
+    <h2>Loading DebtOS…</h2>
+    <div id="loadingMsg">Retrieving financial data…</div>
+    <div id="loadingBar"><div id="loadingFill"></div></div>
+  </div>
+
+  <!-- OS -->
+  <div id="osScreen">
+    <div id="topbar">
+      <div id="topbar-left">
+        <span id="avatarDot">🙂</span>
+        <span><strong>DebtOS v6</strong> – "You Cannot Log Out"</span>
+      </div>
+      <div id="topbar-right">
+        <span id="soundToggle" class="top-icon">🔊 Sound: ON</span>
+        <span id="settingsBtn" class="top-icon">⚙️</span>
+        <span id="logoutBtn" class="top-icon">⏻ Log out</span>
+        <div id="settingsMenu">
+          <div class="settings-item" data-settings="profile">Profile & Avatar</div>
+          <div class="settings-item" data-settings="interface">Interface settings</div>
+          <div class="settings-item" data-settings="journal">Open Journal</div>
+          <div class="settings-item" data-settings="sound">Toggle Sound</div>
+          <div class="settings-item" data-settings="about">About DebtOS</div>
+          <div class="settings-item" data-settings="ragequit" style="color:#fecaca;">Rage Quit (end game)</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="mainLayout">
+      <div id="tabs">
+        <button class="tab-btn active" data-tab="home">Home</button>
+        <button class="tab-btn" data-tab="jobs">Jobs</button>
+        <button class="tab-btn" data-tab="refi">Refinance</button>
+        <button class="tab-btn" data-tab="bills">Bills</button>
+        <button class="tab-btn" data-tab="health">Health</button>
+        <button class="tab-btn" data-tab="realty">Realty</button>
+        <button class="tab-btn" data-tab="news">News</button>
+        <button class="tab-btn" data-tab="mail">
+          Mail
+          <span class="tab-badge" data-badge-for="mail"></span>
+        </button>
+      </div>
+
+      <div id="bodyArea">
+        <div id="sidebar">
+          <div id="statsBlock">
+            <h3>Accounts</h3>
+            <div class="stat-line">
+              <span class="stat-label">Debt</span>
+              <span class="stat-value" id="statDebt">$0</span>
+            </div>
+            <div class="stat-line">
+              <span class="stat-label">Checking</span>
+              <span class="stat-value" id="statChecking">$0</span>
+            </div>
+            <div class="stat-line">
+              <span class="stat-label">Savings</span>
+              <span class="stat-value" id="statSavings">$0</span>
+            </div>
+            <div class="stat-line">
+              <span class="stat-label">Interest</span>
+              <span class="stat-value" id="statInterest">0%</span>
+            </div>
+          </div>
+
+          <div id="moodBlock">
+            <h3>Mental load</h3>
+            <div class="bar-label">
+              <span>Money anxiety</span>
+              <span id="statAnxiety">0%</span>
+            </div>
+            <div class="bar"><div class="bar-fill" id="barAnxiety"></div></div>
+
+            <div class="bar-label">
+              <span>Depression</span>
+              <span id="statDepression">0%</span>
+            </div>
+            <div class="bar"><div class="bar-fill" id="barDepression"></div></div>
+
+            <div class="bar-label">
+              <span>Family / social strain</span>
+              <span id="statSocial">0%</span>
+            </div>
+            <div class="bar"><div class="bar-fill" id="barSocial"></div></div>
+          </div>
+
+          <div>
+            <h3>Time</h3>
+            <div id="clockBox">
+              <div>Day: <span id="statDay">1</span></div>
+              <div>Clock: <span id="statTime">08:00</span></div>
+              <div>Awake hours left: <span id="statHours">16</span></div>
+              <div>Sleep: 8h (forced)</div>
+            </div>
+          </div>
+
+          <div>
+            <h3>Life choices</h3>
+            <div id="lifeActions">
+              <button class="side-btn" data-action="family">Spend time with family / friends</button>
+              <button class="side-btn" data-action="hobby">Do a hobby</button>
+              <button class="side-btn" data-action="doomscroll">Doomscroll financial forums</button>
+              <button class="side-btn" data-action="journalQuick">Journal (quick note)</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="mainContent">
+          <div id="viewTitle">Welcome to DebtOS.</div>
+          <div id="panel"></div>
+          <div id="log"></div>
+        </div>
+      </div>
+
+      <div id="footerBar">
+        <span>Goal: try to manage debt, moods, and time in an OS that only ends when you quit.</span>
+        <span>Interest: 10% daily on loans + 30% APR on total balance (simulated brutality).</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- JOURNAL OVERLAY -->
+  <div id="journalOverlay">
+    <div id="journalWindow">
+      <div id="journalList">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:12px;font-weight:600;">Journal entries</span>
+          <button class="panel-btn" id="journalNewBtn" style="font-size:10px;padding:2px 6px;">New</button>
+        </div>
+        <div id="journalItems"></div>
+        <button class="panel-btn" id="journalCloseBtn" style="margin-top:6px;width:100%;font-size:11px;">Close</button>
+      </div>
+      <div id="journalEditor">
+        <input class="form-input" id="journalTitle" placeholder="Entry title" />
+        <textarea class="form-textarea" id="journalBody" placeholder="Type here…"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+          <div>
+            <button class="panel-btn" id="journalSaveBtn" style="font-size:11px;">Save</button>
+            <button class="panel-btn" id="journalDeleteBtn" style="font-size:11px;margin-left:4px;">Delete</button>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;" id="journalMeta"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROFILE OVERLAY -->
+  <div id="profileOverlay">
+    <div id="profileWindow">
+      <div id="profileLeft">
+        <div id="profileAvatarPreview">🙂</div>
+        <div id="profilePreviewName" style="margin-top:6px;font-weight:600;">User</div>
+        <div id="profilePreviewPronouns" style="font-size:11px;color:#9ca3af;">they/them</div>
+        <div id="profilePreviewStatus" style="margin-top:4px;font-size:11px;color:#e5e7eb;text-align:center;">
+          Trying to make the numbers smaller.
+        </div>
+        <button class="panel-btn" id="profileCloseBtn" style="margin-top:8px;font-size:11px;width:100%;">Close</button>
+      </div>
+      <div id="profileRight">
+        <div class="form-row">
+          <label class="form-label">Display name</label>
+          <input class="form-input" id="profileNameInput" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Pronouns</label>
+          <input class="form-input" id="profilePronounsInput" placeholder="they/them, she/her, he/him, etc." />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Status line</label>
+          <input class="form-input" id="profileStatusInput" placeholder="Short line under your name" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Avatar emoji</label>
+          <select class="form-select" id="profileEmojiSelect">
+            <option value="🙂">🙂 Neutral</option>
+            <option value="😐">😐 Tired</option>
+            <option value="😵‍💫">😵‍💫 Overwhelmed</option>
+            <option value="💀">💀 Done</option>
+            <option value="🔥">🔥 On fire (maybe not in a good way)</option>
+            <option value="📉">📉 Graph going down</option>
+            <option value="🧠">🧠 Thinking about interest</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">Avatar color</label>
+          <select class="form-select" id="profileColorSelect">
+            <option value="#1d4ed8">Blue</option>
+            <option value="#7c3aed">Purple</option>
+            <option value="#16a34a">Green</option>
+            <option value="#ea580c">Orange</option>
+            <option value="#dc2626">Red</option>
+            <option value="#0f172a">Almost black</option>
+          </select>
+        </div>
+        <div class="panel-actions" style="margin-top:8px;">
+          <button class="panel-btn" id="profileSaveBtn">Save changes</button>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;">
+          Your avatar only exists inside DebtOS. No data leaves this page.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ----------- STATE -------------
+    const state = {
+      day: 1,
+      hour: 8,
+      awake: 16,
+      debt: 75000,
+      checking: 1200,
+      savings: 500,
+      dailyLoanRate: 0.10,
+      apr: 0.30,
+      livingBase: 90,
+      housingRent: 900, // default
+      anxiety: 40,
+      depression: 30,
+      social: 35,
+      soundOn: true,
+      mailBadgeOn: true,
+      profile: {
+        name: "User",
+        pronouns: "they/them",
+        status: "Trying to make the numbers smaller.",
+        emoji: "🙂",
+        color: "#1d4ed8"
+      },
+      interface: {
+        reducedMotion: false,
+        compactSidebar: false
+      },
+      mailSettings: {
+        displayName: "User",
+        email: "user@debtos",
+        playSoundOnMail: true
+      }
+    };
+
+    const ui = {
+      currentTab: "home",
+      unlockedNews: 3,
+      settingsOpen: false,
+      selectedJobIndex: null,
+      selectedMailIndex: null,
+      selectedJournalId: null
+    };
+
+    const mailItems = [];
+    const journalEntries = [];
+
+    const jobs = [
+      { title:"Night Warehouse Associate", meta:"$14/hr · 10pm–6am · no benefits", text:"Pick, pack, scan, repeat in fluorescent light.", id:"job1" },
+      { title:"Remote Support Contractor", meta:"$16/hr · chat-based", text:"Resolve problems you did not cause with scripts you didn’t write.", id:"job2" },
+      { title:"Content Moderator", meta:"$18/hr · 'graphic content'", text:"Scroll through the worst of the internet so others don't have to.", id:"job3" },
+      { title:"Adjunct Instructor", meta:"$2400/course · no benefits", text:"Teach three sections while qualifying for public assistance.", id:"job4" },
+      { title:"Gig Delivery Driver", meta:"per-order pay · car required", text:"Your car depreciates faster than your balance falls.", id:"job5" },
+      { title:"Call Center Specialist", meta:"$15/hr · monitored", text:"Average handle time becomes a second language.", id:"job6" }
+    ];
+
+    const refiPlans = [
+      { title:"Calm Horizon 30", meta:"6.0% · 30 years", rate:0.06 },
+      { title:"Stretched Stability 30", meta:"8.5% · 30 years", rate:0.085 },
+      { title:"ForeverFlex 40", meta:"9.2% · 40 years", rate:0.092 },
+      { title:"Legacy Chain 40", meta:"9.9% · 40 years", rate:0.099 },
+      { title:"Generational Link 40", meta:"10.0% · 40 years", rate:0.10 }
+    ];
+
+    const healthPlans = [
+      { title:"Gold-ish Plan", meta:"$780/mo · $8000 deductible", text:"Premium marketing, mid-tier coverage, maximum confusion." },
+      { title:"Bronze Catastrophic", meta:"$520/mo · $10,000 deductible", text:"Best used for scenarios you hope never happen and cannot afford." },
+      { title:"GigFlex Health", meta:"Variable cost · high deductible", text:"Designed for gig workers whose hours and injuries fluctuate." },
+      { title:"Bare Bones Basic", meta:"$390/mo · $12,500 deductible", text:"Covers catastrophic events and annual optimism." }
+    ];
+
+    const homes = [
+      {
+        id:"tarp",
+        title:"Tarp in Dollar Oak parking lot",
+        meta:"$450/mo · 'open floor plan'",
+        rent:450,
+        text:"A blue tarp held up with sticks. Wind, rain, and parking lot floodlights included."
+      },
+      {
+        id:"basement",
+        title:"Basement apartment with missing wall",
+        meta:"$800/mo · 'garden level'",
+        rent:800,
+        text:"Concrete floor, one wall missing, mysterious smell. Marketed as 'loft-style'."
+      },
+      {
+        id:"flimsy",
+        title:"Flimsy new-build studio",
+        meta:"$1300/mo · 'modern finishes'",
+        rent:1300,
+        text:"Paper-thin walls, surprise fees, and a fire alarm that chirps at 3am."
+      },
+      {
+        id:"micro",
+        title:"Luxury micro-unit (175 sq ft)",
+        meta:"$2600/mo · 'European living'",
+        rent:2600,
+        text:"Was once a closet. Now, it's a 'boutique lifestyle pod'."
+      },
+      {
+        id:"skyscraper",
+        title:"High-rise condo in questionable tower",
+        meta:"$4800/mo · HOA variable",
+        rent:4800,
+        text:"Amenities include a rooftop pool and occasional structural news headlines."
+      }
+    ];
+
+    const newsItems = [
+      { title:"Senator proposes 'motivation surcharge' on late payments", meta:"Politics · 5 min read",
+        body:"A new bill would add a 'motivation surcharge' to balances for borrowers who fall behind, framed as 'encouragement to engage with repayment options'." },
+      { title:"Servicer slide deck leaks: 'Monetizing confusion'", meta:"Investigations · 7 min read",
+        body:"A leaked deck describes confusion as 'a key engagement driver', outlining strategies to make options 'abundant but unclear'." },
+      { title:"Op-ed: Young people should simply 'want less'", meta:"Opinion · 4 min read",
+        body:"The author suggests that homeownership and stability are 'outdated fantasies' and that 'wanting less' is the path to contentment." },
+      { title:"Loan CEO buys third vacation island, cites 'hard work'", meta:"Markets · 6 min read",
+        body:"The CEO credits 'disciplined decision-making' while unveiling an island shaped like a thumbs-up icon." },
+      { title:"Report: Average debtor owes more than a luxury car", meta:"Economy · 6 min read",
+        body:"The report concludes that, for many, balance sheets resemble high-end car loans—minus the car." },
+      { title:"App gamifies paying interest, adds loot boxes", meta:"Tech · 5 min read",
+        body:"Users can unlock cosmetic confetti by making minimum payments. Missing a payment triggers a 'Try Harder' animation." },
+      { title:"Think tank: 'Debt builds character, and credit scores'", meta:"Policy · 4 min read",
+        body:"A white paper argues that compounding interest is 'a teacher, a coach, and a motivator'." }
+    ];
+
+    let audioCtx = null;
+    function playBeep(freq=600, dur=0.06) {
+      if (!state.soundOn) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = freq;
+        osc.type = "square";
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const now = audioCtx.currentTime;
+        gain.gain.setValueAtTime(0.16, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        osc.start(now);
+        osc.stop(now + dur);
+      } catch(e) {}
+    }
+
+    // ---------- DOM refs ----------
+    const loginScreen = document.getElementById("loginScreen");
+    const loadingScreen = document.getElementById("loadingScreen");
+    const osScreen = document.getElementById("osScreen");
+    const loadingFill = document.getElementById("loadingFill");
+    const loadingMsg = document.getElementById("loadingMsg");
+    const viewTitleEl = document.getElementById("viewTitle");
+    const panelEl = document.getElementById("panel");
+    const logEl = document.getElementById("log");
+    const tabButtons = document.querySelectorAll(".tab-btn");
+    const soundToggleEl = document.getElementById("soundToggle");
+    const settingsBtn = document.getElementById("settingsBtn");
+    const settingsMenu = document.getElementById("settingsMenu");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const sidebarEl = document.getElementById("sidebar");
+    const avatarDotEl = document.getElementById("avatarDot");
+
+    const journalOverlay = document.getElementById("journalOverlay");
+    const journalItemsEl = document.getElementById("journalItems");
+    const journalTitleEl = document.getElementById("journalTitle");
+    const journalBodyEl = document.getElementById("journalBody");
+    const journalMetaEl = document.getElementById("journalMeta");
+
+    const profileOverlay = document.getElementById("profileOverlay");
+    const profileAvatarPreview = document.getElementById("profileAvatarPreview");
+    const profilePreviewName = document.getElementById("profilePreviewName");
+    const profilePreviewPronouns = document.getElementById("profilePreviewPronouns");
+    const profilePreviewStatus = document.getElementById("profilePreviewStatus");
+    const profileNameInput = document.getElementById("profileNameInput");
+    const profilePronounsInput = document.getElementById("profilePronounsInput");
+    const profileStatusInput = document.getElementById("profileStatusInput");
+    const profileEmojiSelect = document.getElementById("profileEmojiSelect");
+    const profileColorSelect = document.getElementById("profileColorSelect");
+
+    // ----------- UI helpers ----------
+    function setScreen(which) {
+      loginScreen.style.display = which === "login" ? "flex" : "none";
+      loadingScreen.style.display = which === "loading" ? "flex" : "none";
+      osScreen.style.display = which === "os" ? "block" : "none";
+    }
+    function clamp(v) { return Math.max(0, Math.min(100, v)); }
+
+    function logLine(msg, type="system") {
+      const div = document.createElement("div");
+      div.className = "log-entry " + type;
+      div.textContent = msg;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateAvatarUI() {
+      avatarDotEl.textContent = state.profile.emoji;
+      avatarDotEl.style.background = state.profile.color;
+      profileAvatarPreview.textContent = state.profile.emoji;
+      profileAvatarPreview.style.background = state.profile.color;
+      profilePreviewName.textContent = state.profile.name;
+      profilePreviewPronouns.textContent = state.profile.pronouns;
+      profilePreviewStatus.textContent = state.profile.status;
+    }
+
+    function updateStats() {
+      document.getElementById("statDebt").textContent = "$" + Math.round(state.debt).toLocaleString();
+      document.getElementById("statChecking").textContent = "$" + Math.round(state.checking).toLocaleString();
+      document.getElementById("statSavings").textContent = "$" + Math.round(state.savings).toLocaleString();
+      document.getElementById("statInterest").textContent =
+        (state.dailyLoanRate*100).toFixed(1) + "% daily + " + (state.apr*100).toFixed(0) + "% APR";
+      document.getElementById("statDay").textContent = state.day;
+      document.getElementById("statTime").textContent = (state.hour<10?"0":"") + state.hour + ":00";
+      document.getElementById("statHours").textContent = state.awake;
+
+      state.anxiety = clamp(state.anxiety);
+      state.depression = clamp(state.depression);
+      state.social = clamp(state.social);
+      document.getElementById("statAnxiety").textContent = state.anxiety + "%";
+      document.getElementById("statDepression").textContent = state.depression + "%";
+      document.getElementById("statSocial").textContent = state.social + "%";
+      document.getElementById("barAnxiety").style.width = state.anxiety + "%";
+      document.getElementById("barDepression").style.width = state.depression + "%";
+      document.getElementById("barSocial").style.width = state.social + "%";
+
+      sidebarEl.classList.toggle("compact", state.interface.compactSidebar);
+    }
+
+    function updateMailBadge() {
+      const badge = document.querySelector('.tab-badge[data-badge-for="mail"]');
+      const unread = mailItems.filter(m => !m.read).length;
+      if (!state.mailBadgeOn || unread <= 0) {
+        badge.style.display = "none";
+      } else {
+        badge.style.display = "inline-flex";
+        badge.textContent = unread > 9 ? "9+" : String(unread);
+      }
+    }
+
+    function spendHour(hours=1) {
+      if (hours <= 0) return;
+      for (let i=0; i<hours; i++) {
+        if (state.awake <= 0) {
+          logLine("You are out of awake hours. You fall asleep at your desk.", "system");
+          endDay();
+          break;
+        }
+        state.awake -= 1;
+        state.hour += 1;
+        if (state.hour >= 24) {
+          endDay();
+        }
+        unlockNews();
+      }
+      updateStats();
+    }
+
+    function endDay() {
+      if (state.hour >= 24) state.hour = 0;
+      const rentDaily = state.housingRent / 30;
+      const cost = state.livingBase + rentDaily;
+      state.checking -= cost;
+      const dailyAprRate = state.apr / 365;
+      const interest = state.debt * state.dailyLoanRate + state.debt * dailyAprRate;
+      state.debt += interest;
+      logLine(`Day ${state.day}: living costs -$${cost.toFixed(0)}, interest +$${interest.toFixed(2)}.`, "system");
+      state.day += 1;
+      state.hour = 8;
+      state.awake = 16;
+      state.anxiety += 2;
+      state.depression += 1;
+      updateStats();
+    }
+
+    function unlockNews() {
+      if (ui.unlockedNews < newsItems.length) {
+        ui.unlockedNews += 1;
+      }
+    }
+
+    function changeMood({anx=0, dep=0, soc=0}) {
+      state.anxiety += anx;
+      state.depression += dep;
+      state.social += soc;
+      updateStats();
+    }
+
+    function changeMoney({debt=0, checking=0, savings=0}) {
+      state.debt += debt;
+      state.checking += checking;
+      state.savings += savings;
+      updateStats();
+    }
+
+    function renderTab() {
+      const tab = ui.currentTab;
+      tabButtons.forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === tab);
+      });
+
+      if (tab === "home") renderHome();
+      else if (tab === "jobs") renderJobs();
+      else if (tab === "refi") renderRefi();
+      else if (tab === "bills") renderBills();
+      else if (tab === "health") renderHealth();
+      else if (tab === "realty") renderRealty();
+      else if (tab === "news") renderNews();
+      else if (tab === "mail") renderMail();
+    }
+
+    function renderHome() {
+      viewTitleEl.textContent = "Home – Choose how to spend your limited hours.";
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Welcome to DebtOS.</div>
+          <div class="card-text">
+            This operating system simulates debt, work, housing, news, and mood.
+            Every significant click takes an hour. Interest compounds whether you act or not.
+            The only ways out are Rage Quit or Log Out.
+          </div>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#9ca3af;">
+          • Use sidebar actions to burn an hour on family, hobbies, doomscrolling, or quick journaling.<br>
+          • Use tabs for jobs, refinancing, bills, health insurance, housing, news, and mail.<br>
+          • Applications optionally collect a fake email; responses appear in the Mail tab.
+        </div>
+      `;
+    }
+
+    // ---- Jobs ----
+    function renderJobs() {
+      viewTitleEl.textContent = "Jobs – Work more to chase numbers.";
+      let jobCards = jobs.map((job, idx) => `
+        <div class="card clickable job-card" data-index="${idx}">
+          <div class="card-title">${job.title}</div>
+          <div class="card-meta">${job.meta}</div>
+          <div class="card-text">${job.text}</div>
+        </div>
+      `).join("");
+
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Work shifts</div>
+          <div class="card-text">
+            Take a full-time or part-time shift. This uses blocks of your day, pays some cash,
+            and shifts your mood bars.
+          </div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-job-action="full">Work full-time shift (9h)</button>
+            <button class="panel-btn" data-job-action="part">Work part-time shift (5h)</button>
+          </div>
+        </div>
+        <h4 style="margin:6px 0;">Job listings</h4>
+        <div class="panel-grid">${jobCards}</div>
+      `;
+    }
+
+    function renderJobDetail(idx) {
+      const job = jobs[idx];
+      ui.selectedJobIndex = idx;
+      viewTitleEl.textContent = "Job – " + job.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">${job.title}</div>
+          <div class="card-meta">${job.meta}</div>
+          <div class="card-text">${job.text}</div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-job-form="open">Apply to this job</button>
+            <button class="panel-btn" data-job-form="back">Back to listings</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderJobForm(idx) {
+      const job = jobs[idx];
+      viewTitleEl.textContent = "Apply – " + job.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Application – ${job.title}</div>
+          <div class="card-text">Fill in the fields with anything. The system only checks that they're filled.</div>
+          <div class="form-row">
+            <label class="form-label">Name (required)</label>
+            <input class="form-input required" id="jobName" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Email (required)</label>
+            <input class="form-input required" id="jobEmail" placeholder="you@example.com" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">CV / Résumé</label>
+            <textarea class="form-textarea" id="jobCV"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Cover letter</label>
+            <textarea class="form-textarea" id="jobCover"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">Reference 1</label>
+            <input class="form-input" id="ref1" placeholder="Name" />
+            <input class="form-input" id="ref1e" placeholder="Email" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Reference 2</label>
+            <input class="form-input" id="ref2" placeholder="Name" />
+            <input class="form-input" id="ref2e" placeholder="Email" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Reference 3</label>
+            <input class="form-input" id="ref3" placeholder="Name" />
+            <input class="form-input" id="ref3e" placeholder="Email" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="jobOpt" /> I agree to receive emails from this system.
+            </label>
+          </div>
+          <div id="jobError" class="error-text" style="display:none;"></div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-job-form="submit">Submit application (1h)</button>
+            <button class="panel-btn" data-job-form="back">Back</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- Refi ----
+    function renderRefi() {
+      viewTitleEl.textContent = "Refinance – Adjust the terms, not the imbalance.";
+      const cards = refiPlans.map((p, i) => `
+        <div class="card clickable refi-card" data-index="${i}">
+          <div class="card-title">${p.title}</div>
+          <div class="card-meta">${p.meta}</div>
+          <div class="card-text">
+            A branded attempt to convert unpredictable suffering into a scheduled one.
+          </div>
+        </div>
+      `).join("");
+      panelEl.innerHTML = `<div class="panel-grid">${cards}</div>`;
+    }
+
+    function renderRefiForm(idx) {
+      const p = refiPlans[idx];
+      viewTitleEl.textContent = "Refinance – " + p.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">${p.title}</div>
+          <div class="card-meta">${p.meta}</div>
+          <div class="card-text">
+            Enter your numbers. This system checks only one thing: whether you make enough.
+            If not, you may get a polite refusal.
+          </div>
+          <div class="form-row">
+            <label class="form-label">Total loan balance (required)</label>
+            <input class="form-input required" id="refBalance" placeholder="$75,000" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Employer (required)</label>
+            <input class="form-input required" id="refEmployer" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Annual income (required)</label>
+            <input class="form-input required" id="refIncome" placeholder="$40,000" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="refOpt" /> Send me follow-up emails about this application.
+            </label>
+          </div>
+          <div id="refError" class="error-text" style="display:none;"></div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-refi-form="submit" data-refi-index="${idx}">Submit (1h)</button>
+            <button class="panel-btn" data-refi-form="back">Back</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- Bills ----
+    function renderBills() {
+      viewTitleEl.textContent = "Bills – Where money goes quietly.";
+      panelEl.innerHTML = `
+        <div class="panel-grid">
+          <div class="card">
+            <div class="card-title">Student Loan 1</div>
+            <div class="card-meta">Minimum $1,100</div>
+            <div class="card-text">
+              The big one. Payment barely nibbles the principal.
+            </div>
+            <div class="panel-actions">
+              <button class="panel-btn" data-bill="loan1">Pay minimum (1h)</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Student Loan 2</div>
+            <div class="card-meta">Minimum $300</div>
+            <div class="card-text">
+              Smaller, but still tracking you everywhere you go.
+            </div>
+            <div class="panel-actions">
+              <button class="panel-btn" data-bill="loan2">Pay minimum (1h)</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Rent / Housing</div>
+            <div class="card-meta">Current simulated rent: $${state.housingRent}/mo</div>
+            <div class="card-text">
+              The price to stay under a roof (or tarp).
+            </div>
+            <div class="panel-actions">
+              <button class="panel-btn" data-bill="rent">Pay one month (1h)</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- Health ----
+    function renderHealth() {
+      viewTitleEl.textContent = "Health Insurance – Pay for a future you hope not to need.";
+      const cards = healthPlans.map((p, i) => `
+        <div class="card clickable health-card" data-index="${i}">
+          <div class="card-title">${p.title}</div>
+          <div class="card-meta">${p.meta}</div>
+          <div class="card-text">${p.text}</div>
+        </div>
+      `).join("");
+      panelEl.innerHTML = `<div class="panel-grid">${cards}</div>`;
+    }
+
+    function renderHealthForm(idx) {
+      const p = healthPlans[idx];
+      viewTitleEl.textContent = "Health Plan – " + p.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">${p.title}</div>
+          <div class="card-meta">${p.meta}</div>
+          <div class="card-text">
+            A familiar trade: money now, maybe less chaos later.
+          </div>
+          <div class="form-row">
+            <label class="form-label">Name (required)</label>
+            <input class="form-input required" id="healthName" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Zip code (required)</label>
+            <input class="form-input required" id="healthZip" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="healthOpt" /> Email me about coverage updates.
+            </label>
+          </div>
+          <div id="healthError" class="error-text" style="display:none;"></div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-health-form="submit">Submit (1h)</button>
+            <button class="panel-btn" data-health-form="back">Back</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- Realty ----
+    function renderRealty() {
+      viewTitleEl.textContent = "Realty – Homes, or at least spaces to stand in.";
+      const cards = homes.map((h, i) => `
+        <div class="card clickable home-card" data-index="${i}">
+          <div class="card-title">${h.title}</div>
+          <div class="card-meta">${h.meta}</div>
+          <div class="card-text">${h.text}</div>
+        </div>
+      `).join("");
+      panelEl.innerHTML = `<div class="panel-grid">${cards}</div>`;
+    }
+
+    function renderHomeDetail(idx) {
+      const h = homes[idx];
+      viewTitleEl.textContent = "Housing – " + h.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">${h.title}</div>
+          <div class="card-meta">${h.meta}</div>
+          <div class="card-text">
+            ${h.text}
+          </div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-housing="apply" data-index="${idx}">Apply to rent (1h)</button>
+            <button class="panel-btn" data-housing="detail-back">Back</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHousingForm(idx) {
+      const h = homes[idx];
+      viewTitleEl.textContent = "Housing application – " + h.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Apply to rent: ${h.title}</div>
+          <div class="card-meta">${h.meta}</div>
+          <div class="card-text">
+            This is a simulated rental application. Nothing leaves this page, but the form behaves like a real one.
+          </div>
+          <div class="form-row">
+            <label class="form-label">Full name (required)</label>
+            <input class="form-input required" id="homeName" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Email (required)</label>
+            <input class="form-input required" id="homeEmail" placeholder="you@example.com" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Monthly income (required)</label>
+            <input class="form-input required" id="homeIncome" placeholder="$2,500" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Household size</label>
+            <input class="form-input" id="homeHousehold" placeholder="Number of people" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Pets</label>
+            <input class="form-input" id="homePets" placeholder="Cats, dogs, plants, etc." />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Why you'd be a good tenant</label>
+            <textarea class="form-textarea" id="homeWhy"></textarea>
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="homeOpt" /> Email me application status updates.
+            </label>
+          </div>
+          <div id="homeError" class="error-text" style="display:none;"></div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-housing="submit" data-index="${idx}">Submit application (1h)</button>
+            <button class="panel-btn" data-housing="form-back" data-index="${idx}">Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- News ----
+    function renderNews() {
+      viewTitleEl.textContent = "News – Today in absurd policy and markets.";
+      const count = ui.unlockedNews;
+      const cards = newsItems.slice(0, count).map((n, i) => `
+        <div class="card clickable news-card" data-index="${i}">
+          <div class="card-title">${n.title}</div>
+          <div class="card-meta">${n.meta}</div>
+          <div class="card-text">${n.body}</div>
+        </div>
+      `).join("");
+      panelEl.innerHTML = `<div class="panel-grid">${cards}</div>`;
+    }
+
+    function renderNewsDetail(idx) {
+      const n = newsItems[idx];
+      viewTitleEl.textContent = "News – " + n.title;
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">${n.title}</div>
+          <div class="card-meta">${n.meta}</div>
+          <div class="card-text">${n.body}</div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-news="back">Back to headlines</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ---- Mail ----
+    function renderMail() {
+      viewTitleEl.textContent = "Mail – System messages, updates, and non-answers.";
+
+      const listHtml = mailItems.map((m, i) => `
+        <div class="mail-list-item ${m.read ? "" : "unread"}" data-mail-index="${i}">
+          <div class="mail-subject">${m.subject}</div>
+          <div class="mail-meta">${m.from}</div>
+        </div>
+      `).join("") || `<div style="font-size:12px;color:#9ca3af;">No messages yet. Apply for something and opt into email.</div>`;
+
+      let bodyHtml = `<div style="font-size:12px;color:#9ca3af;">Select a message to read.</div>`;
+      if (ui.selectedMailIndex != null && mailItems[ui.selectedMailIndex]) {
+        const m = mailItems[ui.selectedMailIndex];
+        bodyHtml = `
+          <div class="card">
+            <div class="card-title">${m.subject}</div>
+            <div class="card-meta">From: ${m.from}</div>
+            <div class="card-text" style="white-space:pre-wrap;margin-top:6px;">${m.body}</div>
+          </div>
+        `;
+      }
+
+      const settingsHtml = `
+        <div class="card" style="margin-bottom:6px;">
+          <div class="card-title">Mail settings</div>
+          <div class="card-text">
+            Configure how this inbox behaves. Nothing here is connected to real email.
+          </div>
+          <div class="form-row">
+            <label class="form-label">Display name</label>
+            <input class="form-input" id="mailDisplayName" value="${state.mailSettings.displayName}" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Email address (purely cosmetic)</label>
+            <input class="form-input" id="mailAddress" value="${state.mailSettings.email}" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="mailPlaySound" ${state.mailSettings.playSoundOnMail ? "checked" : ""} />
+              Play a sound when new mail arrives
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="mailShowBadge" ${state.mailBadgeOn ? "checked" : ""} />
+              Show unread badge on Mail tab
+            </label>
+          </div>
+          <div class="panel-actions">
+            <button class="panel-btn" data-mail-settings="save">Save mail settings</button>
+          </div>
+        </div>
+      `;
+
+      panelEl.innerHTML = `
+        ${settingsHtml}
+        <div style="display:grid;grid-template-columns:260px 1fr;gap:6px;min-height:0;">
+          <div style="border-right:1px solid #111827;overflow-y:auto;max-height:260px;">
+            ${listHtml}
+          </div>
+          <div>${bodyHtml}</div>
+        </div>
+      `;
+    }
+
+    // ---- Journal ----
+    function openJournal() {
+      journalOverlay.style.display = "flex";
+      renderJournalList();
+      if (journalEntries.length > 0) {
+        ui.selectedJournalId = journalEntries[0].id;
+        loadJournalIntoEditor(journalEntries[0]);
+      } else {
+        ui.selectedJournalId = null;
+        journalTitleEl.value = "";
+        journalBodyEl.value = "";
+        journalMetaEl.textContent = "New entry";
+      }
+    }
+    function closeJournal() {
+      journalOverlay.style.display = "none";
+    }
+    function renderJournalList() {
+      journalItemsEl.innerHTML = "";
+      journalEntries.forEach(entry => {
+        const div = document.createElement("div");
+        div.className = "journal-item" + (ui.selectedJournalId === entry.id ? " active" : "");
+        div.textContent = entry.title || "(untitled)";
+        div.dataset.journalId = entry.id;
+        journalItemsEl.appendChild(div);
+      });
+    }
+    function loadJournalIntoEditor(entry) {
+      journalTitleEl.value = entry.title;
+      journalBodyEl.value = entry.body;
+      journalMetaEl.textContent = "Saved entry";
+    }
+    function saveJournal() {
+      const title = journalTitleEl.value.trim() || "(untitled)";
+      const body = journalBodyEl.value;
+      if (!ui.selectedJournalId) {
+        const id = "j" + Date.now();
+        const entry = { id, title, body };
+        journalEntries.unshift(entry);
+        ui.selectedJournalId = id;
+      } else {
+        const idx = journalEntries.findIndex(e => e.id === ui.selectedJournalId);
+        if (idx >= 0) {
+          journalEntries[idx].title = title;
+          journalEntries[idx].body = body;
+        }
+      }
+      renderJournalList();
+      journalMetaEl.textContent = "Saved.";
+      changeMood({anx:-2, dep:+2, soc:+3});
+    }
+    function deleteJournal() {
+      if (!ui.selectedJournalId) return;
+      const idx = journalEntries.findIndex(e => e.id === ui.selectedJournalId);
+      if (idx >= 0) {
+        journalEntries.splice(idx,1);
+      }
+      ui.selectedJournalId = null;
+      renderJournalList();
+      journalTitleEl.value = "";
+      journalBodyEl.value = "";
+      journalMetaEl.textContent = "Deleted.";
+    }
+
+    // ---- Profile ----
+    function openProfile() {
+      profileNameInput.value = state.profile.name;
+      profilePronounsInput.value = state.profile.pronouns;
+      profileStatusInput.value = state.profile.status;
+      profileEmojiSelect.value = state.profile.emoji;
+      profileColorSelect.value = state.profile.color;
+      updateAvatarUI();
+      profileOverlay.style.display = "flex";
+    }
+    function closeProfile() {
+      profileOverlay.style.display = "none";
+    }
+    function saveProfile() {
+      state.profile.name = profileNameInput.value.trim() || "User";
+      state.profile.pronouns = profilePronounsInput.value.trim() || "they/them";
+      state.profile.status = profileStatusInput.value.trim() || "Trying to make the numbers smaller.";
+      state.profile.emoji = profileEmojiSelect.value;
+      state.profile.color = profileColorSelect.value;
+      state.mailSettings.displayName = state.profile.name;
+      updateAvatarUI();
+      renderMail(); // refresh mail settings name
+    }
+
+    // ---- Interface settings quick render (just a card on Home tab) ----
+    function renderInterfaceSettings() {
+      ui.currentTab = "home";
+      tabButtons.forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === "home");
+      });
+      viewTitleEl.textContent = "Interface settings – How the OS presents itself.";
+      const reduced = state.interface.reducedMotion ? "checked" : "";
+      const compact = state.interface.compactSidebar ? "checked" : "";
+      panelEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Interface settings</div>
+          <div class="card-text">
+            Tweak how DebtOS looks and feels. These changes affect only this session.
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="ifaceReduced" ${reduced} />
+              Reduced motion (fewer visual flourishes)
+            </label>
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <input type="checkbox" id="ifaceCompact" ${compact} />
+              Compact sidebar (smaller text, tighter spacing)
+            </label>
+          </div>
+          <div class="panel-actions">
+            <button class="panel-btn" id="ifaceSaveBtn">Save interface settings</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ------------ EVENTS ------------
+
+    document.getElementById("loginBtn").addEventListener("click", () => {
+      playBeep(700,0.08);
+      setScreen("loading");
+      let progress = 0;
+      const msgs = [
+        "Retrieving financial data…",
+        "Checking credit markets…",
+        "Syncing with loan servicer API…",
+        "Rendering dashboards…",
+        "Optimizing anxiety curves…"
+      ];
+      let msgIndex = 0;
+      loadingMsg.textContent = msgs[0];
+      const interval = setInterval(() => {
+        progress += 2;
+        if (progress >= 100) progress = 100;
+        loadingFill.style.width = progress + "%";
+        if (progress % 20 === 0 && msgIndex < msgs.length-1) {
+          msgIndex++;
+          loadingMsg.textContent = msgs[msgIndex];
+        }
+        if (progress >= 100) {
+          clearInterval(interval);
+          setScreen("os");
+          updateStats();
+          updateAvatarUI();
+          renderTab();
+          logLine("Welcome to DebtOS. All values are simulated, the feelings may not be.", "system");
+        }
+      }, 100);
+    });
+
+    tabButtons.forEach(btn => {
+      btn.addEventListener("click", () => {
+        ui.currentTab = btn.dataset.tab;
+        ui.selectedMailIndex = null;
+        playBeep(500,0.05);
+        if (ui.currentTab === "mail") {
+          mailItems.forEach(m => m.read = true);
+          updateMailBadge();
+        }
+        renderTab();
+      });
+    });
+
+    soundToggleEl.addEventListener("click", () => {
+      state.soundOn = !state.soundOn;
+      soundToggleEl.textContent = state.soundOn ? "🔊 Sound: ON" : "🔇 Sound: OFF";
+      playBeep(400,0.1);
+    });
+
+    settingsBtn.addEventListener("click", () => {
+      ui.settingsOpen = !ui.settingsOpen;
+      settingsMenu.style.display = ui.settingsOpen ? "block" : "none";
+      playBeep(600,0.05);
+    });
+
+    settingsMenu.addEventListener("click", (e) => {
+      const item = e.target.closest(".settings-item");
+      if (!item) return;
+      const action = item.dataset.settings;
+      playBeep(650,0.06);
+      settingsMenu.style.display = "none";
+      ui.settingsOpen = false;
+      if (action === "journal") {
+        openJournal();
+      } else if (action === "sound") {
+        state.soundOn = !state.soundOn;
+        soundToggleEl.textContent = state.soundOn ? "🔊 Sound: ON" : "🔇 Sound: OFF";
+      } else if (action === "about") {
+        alert("DebtOS v6 is a fictional interface about debt, work, housing, and news. The numbers are fake; the structures may feel familiar.");
+      } else if (action === "ragequit") {
+        playBeep(200,0.2);
+        if (window.parent) {
+          window.parent.postMessage({ type: "debtosComplete", reason: "ragequit" }, "*");
+        }
+        document.body.innerHTML = `
+          <div style="height:100vh;display:flex;align-items:center;justify-content:center;background:#000;color:#f9fafb;font-family:system-ui;">
+            <div style="text-align:center;max-width:480px;">
+              <h1>Rage Quit</h1>
+              <p>You slam the laptop shut. DebtOS vanishes. The balances continue existing somewhere else.</p>
+            </div>
+          </div>
+        `;
+      } else if (action === "profile") {
+        openProfile();
+      } else if (action === "interface") {
+        renderInterfaceSettings();
+      }
+    });
+
+    logoutBtn.addEventListener("click", () => {
+      playBeep(250,0.15);
+      if (window.parent) {
+        window.parent.postMessage({ type: "debtosComplete", reason: "logout" }, "*");
+      }
+      document.body.innerHTML = `
+        <div style="height:100vh;display:flex;align-items:center;justify-content:center;background:#020617;color:#f9fafb;font-family:system-ui;">
+          <div style="text-align:center;max-width:480px;">
+            <h1>You logged out of DebtOS.</h1>
+            <p>The simulation ends here. The real systems are still running off-screen.</p>
+          </div>
+        </div>
+      `;
+    });
+
+    document.getElementById("lifeActions").addEventListener("click", (e) => {
+      const btn = e.target.closest(".side-btn");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      playBeep(480,0.05);
+      spendHour(1);
+      if (action === "family") {
+        logLine("You spend an hour with family/friends. Conversation or just presence, it counts.", "good");
+        changeMood({anx:+5, dep:-3, soc:-10});
+      } else if (action === "hobby") {
+        logLine("You retreat into a hobby for an hour. The numbers blur at the edges.", "good");
+        changeMood({anx:-4, dep:-6, soc:+2});
+        changeMoney({checking:-10});
+      } else if (action === "doomscroll") {
+        logLine("You doomscroll financial advice threads. Everyone seems both richer and poorer than you.", "bad");
+        changeMood({anx:+10, dep:+5, soc:+3});
+      } else if (action === "journalQuick") {
+        logLine("You type a few frantic notes into a text window and close it without rereading.", "system");
+        changeMood({anx:-2, dep:+2, soc:+3});
+      }
+    });
+
+    // Panel click delegation
+    panelEl.addEventListener("click", (e) => {
+      const tab = ui.currentTab;
+
+      if (tab === "jobs") {
+        const jobCard = e.target.closest(".job-card");
+        if (jobCard) {
+          const idx = parseInt(jobCard.dataset.index,10);
+          renderJobDetail(idx);
+          return;
+        }
+        const shiftBtn = e.target.closest("[data-job-action]");
+        if (shiftBtn) {
+          const type = shiftBtn.dataset.jobAction;
+          if (type === "full") {
+            spendHour(9);
+            const pay = 18*9;
+            changeMoney({checking:+pay});
+            logLine(`You work a full-time shift for $${pay.toFixed(0)}. Your body moves; your mind drifts.`, "system");
+            changeMood({anx:-5, dep:+10, soc:+6});
+          } else {
+            spendHour(5);
+            const pay = 15*5;
+            changeMoney({checking:+pay});
+            logLine(`You work a part-time shift for $${pay.toFixed(0)}. The day now orbits this block of time.`, "system");
+            changeMood({anx:-3, dep:+6, soc:+4});
+          }
+          return;
+        }
+        const jobFormBtn = e.target.closest("[data-job-form]");
+        if (jobFormBtn) {
+          const action = jobFormBtn.dataset.jobForm;
+          if (action === "open") {
+            renderJobForm(ui.selectedJobIndex);
+          } else if (action === "back") {
+            renderJobs();
+          } else if (action === "submit") {
+            const req = panelEl.querySelectorAll(".required");
+            let ok = true;
+            req.forEach(el => {
+              if (!el.value.trim()) {
+                el.classList.add("field-error");
+                ok = false;
+              } else {
+                el.classList.remove("field-error");
+              }
+            });
+            const errEl = document.getElementById("jobError");
+            if (!ok) {
+              errEl.style.display = "block";
+              errEl.textContent = "Fill in the required fields with something before submitting.";
+              playBeep(200,0.12);
+              return;
+            }
+            errEl.style.display = "none";
+            spendHour(1);
+            const opt = document.getElementById("jobOpt").checked;
+            if (opt) {
+              const subj = "Application received: " + jobs[ui.selectedJobIndex].title;
+              const body = `Thank you for applying.\n\nThis automated message confirms your application was received.\nRecipient: ${state.mailSettings.displayName} <${state.mailSettings.email}>.\nA human may or may not ever see it.`;
+              mailItems.push({ subject:subj, body, from:"jobs@debtos", read:false });
+              if (state.mailSettings.playSoundOnMail) playBeep(800,0.1);
+              updateMailBadge();
+              logLine("You tick the email box. The system adds you to a mailing list you will never fully escape.", "bad");
+            } else {
+              logLine("You submit the application without email opt-in. Silence feels honest, if not kind.", "system");
+            }
+            changeMood({anx:+6, dep:+8, soc:+3});
+            renderJobs();
+          }
+          return;
+        }
+      }
+
+      if (tab === "refi") {
+        const card = e.target.closest(".refi-card");
+        if (card) {
+          const idx = parseInt(card.dataset.index,10);
+          renderRefiForm(idx);
+          return;
+        }
+        const refiBtn = e.target.closest("[data-refi-form]");
+        if (refiBtn) {
+          const action = refiBtn.dataset.refiForm;
+          if (action === "back") {
+            renderRefi();
+          } else if (action === "submit") {
+            const req = panelEl.querySelectorAll(".required");
+            let ok = true;
+            req.forEach(el => {
+              if (!el.value.trim()) {
+                el.classList.add("field-error");
+                ok = false;
+              } else {
+                el.classList.remove("field-error");
+              }
+            });
+            const errEl = document.getElementById("refError");
+            if (!ok) {
+              errEl.style.display = "block";
+              errEl.textContent = "Incomplete fields. The form refuses to move forward.";
+              playBeep(220,0.12);
+              return;
+            }
+            errEl.style.display = "none";
+            spendHour(1);
+            const incomeRaw = document.getElementById("refIncome").value;
+            const income = parseFloat(incomeRaw.replace(/[^0-9.-]/g,"")) || 0;
+            const requiredIncome = income + 20000;
+            const planIdx = parseInt(refiBtn.dataset.refiIndex,10);
+            const plan = refiPlans[planIdx];
+            const opt = document.getElementById("refOpt").checked;
+            if (income >= 200000) {
+              state.dailyLoanRate = plan.rate;
+              updateStats();
+              logLine(`Somehow the numbers align. Your daily loan rate shifts to ${(plan.rate*100).toFixed(1)}%. APR hums beneath everything.`, "good");
+            } else {
+              const msg = `Minimum required income for this offer computes to $${requiredIncome.toLocaleString()}. Your reported income is lower. Application auto-denied.`;
+              errEl.style.display = "block";
+              errEl.textContent = msg;
+              logLine(msg, "bad");
+            }
+            if (opt) {
+              mailItems.push({
+                subject:"Refinance application update",
+                body:`Your refinance application status: 'under review'.\n\nRecipient: ${state.mailSettings.displayName} <${state.mailSettings.email}>.\nThis status may remain unchanged for a long time.`,
+                from:"refi@debtos",
+                read:false
+              });
+              if (state.mailSettings.playSoundOnMail) playBeep(800,0.1);
+              updateMailBadge();
+            }
+            changeMood({anx:+8, dep:+7, soc:+2});
+          }
+          return;
+        }
+      }
+
+      if (tab === "bills") {
+        const billBtn = e.target.closest("[data-bill]");
+        if (billBtn) {
+          const which = billBtn.dataset.bill;
+          spendHour(1);
+          if (which === "loan1") {
+            changeMoney({checking:-1100, debt:-1100});
+            logLine("You pay $1,100 toward Loan 1. The graph twitches slightly.", "system");
+          } else if (which === "loan2") {
+            changeMoney({checking:-300, debt:-300});
+            logLine("You pay $300 toward Loan 2. The number shaves off a few pixels.", "system");
+          } else if (which === "rent") {
+            changeMoney({checking:-state.housingRent});
+            logLine(`You pay one month of housing: $${state.housingRent}. The roof remains for now.`, "system");
+          }
+          return;
+        }
+      }
+
+      if (tab === "health") {
+        const card = e.target.closest(".health-card");
+        if (card) {
+          const idx = parseInt(card.dataset.index,10);
+          renderHealthForm(idx);
+          return;
+        }
+        const btn = e.target.closest("[data-health-form]");
+        if (btn) {
+          const action = btn.dataset.healthForm;
+          if (action === "back") {
+            renderHealth();
+          } else if (action === "submit") {
+            const req = panelEl.querySelectorAll(".required");
+            let ok = true;
+            req.forEach(el => {
+              if (!el.value.trim()) {
+                el.classList.add("field-error");
+                ok = false;
+              } else {
+                el.classList.remove("field-error");
+              }
+            });
+            const errEl = document.getElementById("healthError");
+            if (!ok) {
+              errEl.style.display = "block";
+              errEl.textContent = "The form flashes red around the empty boxes.";
+              playBeep(220,0.12);
+              return;
+            }
+            errEl.style.display = "none";
+            spendHour(1);
+            const opt = document.getElementById("healthOpt").checked;
+            logLine("You submit a health insurance application. It travels into a mysterious underwriting tunnel.", "system");
+            if (opt) {
+              mailItems.push({
+                subject:"Health insurance application received",
+                body:`Your application has entered a queue. An automated system will judge its viability before any human does.\nRecipient: ${state.mailSettings.displayName} <${state.mailSettings.email}>.`,
+                from:"health@debtos",
+                read:false
+              });
+              if (state.mailSettings.playSoundOnMail) playBeep(800,0.1);
+              updateMailBadge();
+            }
+            changeMood({anx:+6, dep:+5, soc:+2});
+          }
+          return;
+        }
+      }
+
+      if (tab === "realty") {
+        const card = e.target.closest(".home-card");
+        if (card) {
+          const idx = parseInt(card.dataset.index,10);
+          renderHomeDetail(idx);
+          return;
+        }
+        const btn = e.target.closest("[data-housing]");
+        if (btn) {
+          const action = btn.dataset.housing;
+          if (action === "detail-back") {
+            renderRealty();
+          } else if (action === "apply") {
+            const idx = parseInt(btn.dataset.index,10);
+            renderHousingForm(idx);
+          } else if (action === "form-back") {
+            const idx = parseInt(btn.dataset.index,10);
+            renderHomeDetail(idx);
+          } else if (action === "submit") {
+            const idx = parseInt(btn.dataset.index,10);
+            const h = homes[idx];
+            const req = panelEl.querySelectorAll(".required");
+            let ok = true;
+            req.forEach(el => {
+              if (!el.value.trim()) {
+                el.classList.add("field-error");
+                ok = false;
+              } else {
+                el.classList.remove("field-error");
+              }
+            });
+            const errEl = document.getElementById("homeError");
+            if (!ok) {
+              errEl.style.display = "block";
+              errEl.textContent = "Some boxes stay empty; the system refuses to file the form.";
+              playBeep(220,0.12);
+              return;
+            }
+            errEl.style.display = "none";
+            spendHour(1);
+            const opt = document.getElementById("homeOpt").checked;
+            logLine("You submit a rental application and wait for a reply that may never come.", "system");
+            if (opt) {
+              mailItems.push({
+                subject:"Housing application update",
+                body:`Your application for '${h.title}' has been received.\nStatus: 'under additional review'.\n\nRecipient: ${state.mailSettings.displayName} <${state.mailSettings.email}>.\nSomeone somewhere is allegedly checking your numbers.`,
+                from:"realty@debtos",
+                read:false
+              });
+              if (state.mailSettings.playSoundOnMail) playBeep(800,0.1);
+              updateMailBadge();
+            }
+            changeMood({anx:+7, dep:+5, soc:+2});
+            renderRealty();
+          }
+          return;
+        }
+      }
+
+      if (tab === "news") {
+        const card = e.target.closest(".news-card");
+        if (card) {
+          const idx = parseInt(card.dataset.index,10);
+          spendHour(1);
+          renderNewsDetail(idx);
+          logLine("You read a full article. It lingers longer than the tab stays open.", "bad");
+          changeMood({anx:+5, dep:+5, soc:+1});
+          return;
+        }
+        const btn = e.target.closest("[data-news]");
+        if (btn && btn.dataset.news === "back") {
+          renderNews();
+          return;
+        }
+      }
+
+      if (tab === "mail") {
+        const mailSettingsBtn = e.target.closest("[data-mail-settings]");
+        if (mailSettingsBtn && mailSettingsBtn.dataset.mailSettings === "save") {
+          const name = document.getElementById("mailDisplayName").value.trim() || "User";
+          const email = document.getElementById("mailAddress").value.trim() || "user@debtos";
+          const playSound = document.getElementById("mailPlaySound").checked;
+          const showBadge = document.getElementById("mailShowBadge").checked;
+          state.mailSettings.displayName = name;
+          state.mailSettings.email = email;
+          state.mailSettings.playSoundOnMail = playSound;
+          state.mailBadgeOn = showBadge;
+          updateMailBadge();
+          logLine("Mail settings updated for this session.", "system");
+          return;
+        }
+        const item = e.target.closest(".mail-list-item");
+        if (item) {
+          const idx = parseInt(item.dataset.mailIndex,10);
+          ui.selectedMailIndex = idx;
+          mailItems[idx].read = true;
+          updateMailBadge();
+          renderMail();
+          playBeep(650,0.05);
+        }
+      }
+
+      // Interface settings save
+      const ifaceBtn = e.target.closest("#ifaceSaveBtn");
+      if (ifaceBtn) {
+        const reduced = document.getElementById("ifaceReduced").checked;
+        const compact = document.getElementById("ifaceCompact").checked;
+        state.interface.reducedMotion = reduced;
+        state.interface.compactSidebar = compact;
+        updateStats();
+        logLine("Interface settings updated. The OS subtly adjusts itself around you.", "system");
+      }
+    });
+
+    // Journal overlay events
+    document.getElementById("journalNewBtn").addEventListener("click", () => {
+      ui.selectedJournalId = null;
+      journalTitleEl.value = "";
+      journalBodyEl.value = "";
+      journalMetaEl.textContent = "New entry";
+      renderJournalList();
+    });
+    document.getElementById("journalCloseBtn").addEventListener("click", () => {
+      closeJournal();
+    });
+    document.getElementById("journalSaveBtn").addEventListener("click", () => {
+      saveJournal();
+    });
+    document.getElementById("journalDeleteBtn").addEventListener("click", () => {
+      deleteJournal();
+    });
+    journalItemsEl.addEventListener("click", (e) => {
+      const item = e.target.closest(".journal-item");
+      if (!item) return;
+      const id = item.dataset.journalId;
+      const entry = journalEntries.find(j => j.id === id);
+      if (!entry) return;
+      ui.selectedJournalId = id;
+      loadJournalIntoEditor(entry);
+      renderJournalList();
+    });
+
+    // Profile overlay events
+    document.getElementById("profileCloseBtn").addEventListener("click", () => {
+      closeProfile();
+    });
+    document.getElementById("profileSaveBtn").addEventListener("click", () => {
+      saveProfile();
+      closeProfile();
+      logLine("Profile updated. Your avatar now stares back from the corner of the screen.", "system");
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && window.parent) {
+        window.parent.postMessage({ type: "debtosComplete", reason: "escape" }, "*");
+      }
+    });
+
+    // Init
+    setScreen("login");
+  </script>
+</body>
+</html>
