@@ -230,7 +230,7 @@ const DRONE_MISSION_CONFIG = {
     id: 'corporate-mansions',
     name: 'Drone Strike on Corporate Mansions',
     hackType: 'tetris',
-    hackWinsRequired: 3,
+    hackWinsRequired: 1,
     hackLinesPerMatch: 6,
     drone: {
       controlMode: 'bombardier',
